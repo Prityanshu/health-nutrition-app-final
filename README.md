@@ -197,7 +197,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 👨‍💻 **Author**
 
 **Prityanshu Yadav**
-- GitHub: [@Prityanshu]([https://github.com/yourusername](https://github.com/Prityanshu))
+- GitHub: [@Prityanshu]((https://github.com/Prityanshu))
 - LinkedIn: [Prityanshu]([https://linkedin.com/in/yourprofile](https://www.linkedin.com/in/prityanshu-yadav-301242304))
 
 ## 🙏 **Acknowledgments**
