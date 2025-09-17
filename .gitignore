@@ -85,3 +85,9 @@ pids
 # Temporary files
 *.tmp
 *.temp
+
+# Large dataset files
+*.tsv
+*.csv
+data/
+datasets/
