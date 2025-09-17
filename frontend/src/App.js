@@ -1,15 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  User, 
   Utensils, 
   Target, 
   TrendingUp, 
   Award, 
-  LogIn, 
-  UserPlus,
   Menu,
   X,
-  ArrowLeft
+  ArrowLeft,
+  Brain,
+  Calendar,
+  ChefHat,
+  Lightbulb,
+  BarChart3
 } from 'lucide-react';
 import './index.css';
 
@@ -51,6 +53,25 @@ function App() {
   // Navigation state
   const [activeView, setActiveView] = useState('dashboard');
 
+  // ML Recommendations state
+  const [mlRecommendations, setMlRecommendations] = useState({
+    foodRecommendations: [],
+    cuisineRecommendations: [],
+    varietySuggestions: [],
+    macroAdjustments: []
+  });
+
+  // Advanced Planning state
+  const [advancedPlan, setAdvancedPlan] = useState(null);
+  const [planningForm, setPlanningForm] = useState({
+    target_calories: '',
+    protein_percentage: 25,
+    carb_percentage: 45,
+    fat_percentage: 30,
+    meals_per_day: 3,
+    cuisine_type: 'mixed'
+  });
+
   // Meal logging state
   const [foodItems, setFoodItems] = useState([]);
   const [mealLogForm, setMealLogForm] = useState({
@@ -82,6 +103,29 @@ function App() {
   const [challenges, setChallenges] = useState([]);
   const [userAchievements, setUserAchievements] = useState([]);
   const [userStats, setUserStats] = useState(null);
+
+  const fetchUserData = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${API_BASE_URL}/auth/me`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (response.ok) {
+        const userData = await response.json();
+        setUser(userData);
+        setCurrentView('dashboard');
+        loadDashboardData();
+      } else {
+        localStorage.removeItem('token');
+      }
+    } catch (error) {
+      console.error('Error fetching user data:', error);
+      localStorage.removeItem('token');
+    }
+  };
 
   useEffect(() => {
     // Check if user is already logged in
@@ -120,28 +164,19 @@ function App() {
     }
   }, [activeView]);
 
-  const fetchUserData = async () => {
-    try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`${API_BASE_URL}/auth/me`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-
-      if (response.ok) {
-        const userData = await response.json();
-        setUser(userData);
-        setCurrentView('dashboard');
-        loadDashboardData();
-      } else {
-        localStorage.removeItem('token');
-      }
-    } catch (error) {
-      console.error('Error fetching user data:', error);
-      localStorage.removeItem('token');
+  useEffect(() => {
+    // Fetch ML recommendations when ml-recommendations view is active
+    if (activeView === 'ml-recommendations') {
+      fetchMLRecommendations();
     }
-  };
+  }, [activeView]);
+
+  useEffect(() => {
+    // Fetch advanced planning data when advanced-planning view is active
+    if (activeView === 'advanced-planning') {
+      fetchAdvancedPlanningData();
+    }
+  }, [activeView]);
 
   const loadDashboardData = async () => {
     try {
@@ -472,6 +507,70 @@ function App() {
       }
     } catch (error) {
       console.error('Error fetching challenges data:', error);
+    }
+  };
+
+  const fetchMLRecommendations = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const headers = {
+        'Authorization': `Bearer ${token}`
+      };
+
+      // Fetch personalized recommendations
+      const recommendationsResponse = await fetch(`${API_BASE_URL}/ml/personalized-recommendations`, { headers });
+      
+      if (recommendationsResponse.ok) {
+        const data = await recommendationsResponse.json();
+        setMlRecommendations(data.recommendations);
+      }
+    } catch (error) {
+      console.error('Error fetching ML recommendations:', error);
+    }
+  };
+
+  const fetchAdvancedPlanningData = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const headers = {
+        'Authorization': `Bearer ${token}`
+      };
+
+      // Fetch variety analysis
+      const varietyResponse = await fetch(`${API_BASE_URL}/advanced-planning/meal-variety-analysis`, { headers });
+      
+      if (varietyResponse.ok) {
+        const varietyData = await varietyResponse.json();
+        // Store variety data for display
+        console.log('Variety analysis:', varietyData);
+      }
+    } catch (error) {
+      console.error('Error fetching advanced planning data:', error);
+    }
+  };
+
+  const generateAdvancedPlan = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${API_BASE_URL}/advanced-planning/generate-week-plan`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(planningForm)
+      });
+
+      if (response.ok) {
+        const plan = await response.json();
+        setAdvancedPlan(plan);
+        alert('Advanced meal plan generated successfully!');
+      } else {
+        const errorData = await response.json();
+        setError(errorData.detail || 'Failed to generate meal plan');
+      }
+    } catch (error) {
+      setError('Network error. Please try again.');
     }
   };
 
@@ -1338,6 +1437,339 @@ function App() {
     </div>
   );
 
+  const renderMLRecommendations = () => (
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <header className="bg-white shadow">
+        <div className="container mx-auto px-4 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center">
+              <button
+                onClick={() => setActiveView('dashboard')}
+                className="mr-4 flex items-center text-gray-600 hover:text-gray-900"
+              >
+                <ArrowLeft size={20} className="mr-2" />
+                Back to Dashboard
+              </button>
+              <h1 className="text-2xl font-bold text-gray-900">AI Recommendations</h1>
+            </div>
+            <div className="flex items-center gap-4">
+              <span className="text-gray-700">Welcome, {user?.full_name || user?.username}</span>
+              <button
+                onClick={handleLogout}
+                className="btn btn-secondary"
+              >
+                Logout
+              </button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <div className="container mx-auto px-4 py-8">
+        <div className="max-w-6xl mx-auto">
+          
+          {/* Food Recommendations */}
+          <div className="mb-8">
+            <h2 className="text-2xl font-bold mb-6 flex items-center">
+              <Brain className="mr-2" />
+              Personalized Food Recommendations
+            </h2>
+            {mlRecommendations?.foodRecommendations?.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {mlRecommendations?.foodRecommendations?.map((food, index) => (
+                  <div key={index} className="card">
+                    <h3 className="font-bold text-lg mb-2">{food.name}</h3>
+                    <div className="text-sm text-gray-600 mb-2">
+                      {food.cuisine_type} • {food.calories} cal
+                    </div>
+                    <div className="text-sm text-gray-700 mb-3">
+                      {food.reason}
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm font-medium">
+                        Score: {(food.recommendation_score * 100).toFixed(0)}%
+                      </span>
+                      <button className="btn btn-primary btn-sm">
+                        Add to Plan
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="card text-center">
+                <p className="text-gray-500">Loading recommendations...</p>
+              </div>
+            )}
+          </div>
+
+          {/* Cuisine Recommendations */}
+          <div className="mb-8">
+            <h2 className="text-2xl font-bold mb-6 flex items-center">
+              <ChefHat className="mr-2" />
+              Cuisine Suggestions
+            </h2>
+            {mlRecommendations?.cuisineRecommendations?.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {mlRecommendations?.cuisineRecommendations?.map((cuisine, index) => (
+                  <div key={index} className="card">
+                    <h3 className="font-bold text-lg mb-2 capitalize">{cuisine.cuisine}</h3>
+                    <p className="text-gray-600 mb-2">{cuisine.reason}</p>
+                    <span className={`px-2 py-1 rounded text-xs ${
+                      cuisine.priority === 'high' ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'
+                    }`}>
+                      {cuisine.priority} priority
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="card text-center">
+                <p className="text-gray-500">No cuisine suggestions available</p>
+              </div>
+            )}
+          </div>
+
+          {/* Variety Suggestions */}
+          <div className="mb-8">
+            <h2 className="text-2xl font-bold mb-6 flex items-center">
+              <Lightbulb className="mr-2" />
+              Variety Improvement Tips
+            </h2>
+            {mlRecommendations?.varietySuggestions?.length > 0 ? (
+              <div className="card">
+                <ul className="space-y-2">
+                  {mlRecommendations?.varietySuggestions?.map((suggestion, index) => (
+                    <li key={index} className="flex items-start">
+                      <span className="text-blue-500 mr-2">•</span>
+                      <span>{suggestion}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <div className="card text-center">
+                <p className="text-gray-500">No variety suggestions available</p>
+              </div>
+            )}
+          </div>
+
+          {/* Refresh Button */}
+          <div className="text-center">
+            <button
+              onClick={fetchMLRecommendations}
+              className="btn btn-primary"
+            >
+              Refresh Recommendations
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderAdvancedPlanning = () => (
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <header className="bg-white shadow">
+        <div className="container mx-auto px-4 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center">
+              <button
+                onClick={() => setActiveView('dashboard')}
+                className="mr-4 flex items-center text-gray-600 hover:text-gray-900"
+              >
+                <ArrowLeft size={20} className="mr-2" />
+                Back to Dashboard
+              </button>
+              <h1 className="text-2xl font-bold text-gray-900">Advanced Meal Planning</h1>
+            </div>
+            <div className="flex items-center gap-4">
+              <span className="text-gray-700">Welcome, {user?.full_name || user?.username}</span>
+              <button
+                onClick={handleLogout}
+                className="btn btn-secondary"
+              >
+                Logout
+              </button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <div className="container mx-auto px-4 py-8">
+        <div className="max-w-6xl mx-auto">
+          
+          {/* Planning Form */}
+          <div className="mb-8">
+            <h2 className="text-2xl font-bold mb-6 flex items-center">
+              <Calendar className="mr-2" />
+              Generate Advanced Meal Plan
+            </h2>
+            <div className="card">
+              <form onSubmit={(e) => { e.preventDefault(); generateAdvancedPlan(); }} className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="form-label">Target Calories (per day)</label>
+                    <input
+                      type="number"
+                      className="form-input"
+                      value={planningForm.target_calories}
+                      onChange={(e) => setPlanningForm({...planningForm, target_calories: e.target.value})}
+                      placeholder="e.g., 2000"
+                    />
+                  </div>
+                  <div>
+                    <label className="form-label">Meals per Day</label>
+                    <select
+                      className="form-input"
+                      value={planningForm.meals_per_day}
+                      onChange={(e) => setPlanningForm({...planningForm, meals_per_day: parseInt(e.target.value)})}
+                    >
+                      <option value={3}>3 meals</option>
+                      <option value={4}>4 meals</option>
+                      <option value={5}>5 meals</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="form-label">Protein %</label>
+                    <input
+                      type="number"
+                      min="10"
+                      max="50"
+                      className="form-input"
+                      value={planningForm.protein_percentage}
+                      onChange={(e) => setPlanningForm({...planningForm, protein_percentage: parseInt(e.target.value)})}
+                    />
+                  </div>
+                  <div>
+                    <label className="form-label">Carbs %</label>
+                    <input
+                      type="number"
+                      min="20"
+                      max="70"
+                      className="form-input"
+                      value={planningForm.carb_percentage}
+                      onChange={(e) => setPlanningForm({...planningForm, carb_percentage: parseInt(e.target.value)})}
+                    />
+                  </div>
+                  <div>
+                    <label className="form-label">Fat %</label>
+                    <input
+                      type="number"
+                      min="10"
+                      max="40"
+                      className="form-input"
+                      value={planningForm.fat_percentage}
+                      onChange={(e) => setPlanningForm({...planningForm, fat_percentage: parseInt(e.target.value)})}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="form-label">Cuisine Type</label>
+                  <select
+                    className="form-input"
+                    value={planningForm.cuisine_type}
+                    onChange={(e) => setPlanningForm({...planningForm, cuisine_type: e.target.value})}
+                  >
+                    <option value="mixed">Mixed</option>
+                    <option value="indian">Indian</option>
+                    <option value="chinese">Chinese</option>
+                    <option value="mediterranean">Mediterranean</option>
+                    <option value="mexican">Mexican</option>
+                  </select>
+                </div>
+
+                {error && (
+                  <div className="text-red-600 text-sm text-center">{error}</div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={isLoading}
+                  className="btn btn-primary w-full"
+                >
+                  {isLoading ? 'Generating Plan...' : 'Generate Advanced Meal Plan'}
+                </button>
+              </form>
+            </div>
+          </div>
+
+          {/* Generated Plan */}
+          {advancedPlan && (
+            <div className="mb-8">
+              <h2 className="text-2xl font-bold mb-6 flex items-center">
+                <BarChart3 className="mr-2" />
+                Your Advanced Meal Plan
+              </h2>
+              
+              {/* Plan Summary */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                <div className="card text-center">
+                  <div className="text-2xl font-bold text-blue-600">
+                    {advancedPlan.total_weekly_calories.toFixed(0)}
+                  </div>
+                  <div className="text-sm text-gray-600">Weekly Calories</div>
+                </div>
+                <div className="text-2xl font-bold text-green-600">
+                  {advancedPlan.total_weekly_protein.toFixed(0)}g
+                </div>
+                <div className="text-sm text-gray-600">Weekly Protein</div>
+                <div className="text-2xl font-bold text-purple-600">
+                  {(advancedPlan.variety_score * 100).toFixed(0)}%
+                </div>
+                <div className="text-sm text-gray-600">Variety Score</div>
+                <div className="text-2xl font-bold text-orange-600">
+                  {(advancedPlan.macro_balance_score * 100).toFixed(0)}%
+                </div>
+                <div className="text-sm text-gray-600">Macro Balance</div>
+              </div>
+
+              {/* Week Plan */}
+              <div className="space-y-6">
+                {advancedPlan.week_plans.map((day, dayIndex) => (
+                  <div key={dayIndex} className="card">
+                    <h3 className="text-lg font-bold mb-4">Day {day.day}</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      {day.meals.map((meal, mealIndex) => (
+                        <div key={mealIndex} className="border border-gray-200 rounded-lg p-4">
+                          <h4 className="font-medium mb-2">
+                            {mealIndex === 0 ? 'Breakfast' : mealIndex === 1 ? 'Lunch' : 'Dinner'}
+                          </h4>
+                          <div className="space-y-2">
+                            {meal.items.map((item, itemIndex) => (
+                              <div key={itemIndex} className="text-sm">
+                                <div className="font-medium">{item.name}</div>
+                                <div className="text-gray-600">
+                                  {item.calories.toFixed(0)} cal • {item.quantity}x
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                          <div className="mt-2 text-xs text-gray-500">
+                            Total: {meal.total_calories.toFixed(0)} cal, {meal.total_protein.toFixed(1)}g protein
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-4 text-sm text-gray-600">
+                      Day Total: {day.total_calories.toFixed(0)} calories, {day.total_protein.toFixed(1)}g protein
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
   const renderDashboard = () => (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -1456,7 +1888,7 @@ function App() {
         {/* Quick Actions */}
         <div className="mt-8">
           <h2 className="text-xl font-bold mb-4">Quick Actions</h2>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
             <button 
               className="card hover:shadow-lg transition-shadow cursor-pointer"
               onClick={() => setActiveView('log-meal')}
@@ -1493,6 +1925,24 @@ function App() {
                 <div className="font-medium">Challenges</div>
               </div>
             </button>
+            <button 
+              className="card hover:shadow-lg transition-shadow cursor-pointer"
+              onClick={() => setActiveView('ml-recommendations')}
+            >
+              <div className="text-center">
+                <Brain className="mx-auto mb-2" size={32} />
+                <div className="font-medium">AI Recommendations</div>
+              </div>
+            </button>
+            <button 
+              className="card hover:shadow-lg transition-shadow cursor-pointer"
+              onClick={() => setActiveView('advanced-planning')}
+            >
+              <div className="text-center">
+                <Calendar className="mx-auto mb-2" size={32} />
+                <div className="font-medium">Advanced Planning</div>
+              </div>
+            </button>
           </div>
         </div>
       </div>
@@ -1513,6 +1963,10 @@ function App() {
       return renderViewProgress();
     } else if (activeView === 'challenges') {
       return renderChallenges();
+    } else if (activeView === 'ml-recommendations') {
+      return renderMLRecommendations();
+    } else if (activeView === 'advanced-planning') {
+      return renderAdvancedPlanning();
     } else {
       return renderDashboard();
     }

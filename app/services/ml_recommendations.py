@@ -1,0 +1,613 @@
+# app/services/ml_recommendations.py
+"""
+Machine Learning powered recommendations and user preference learning
+"""
+import numpy as np
+import pandas as pd
+from typing import List, Dict, Tuple, Optional
+from sqlalchemy.orm import Session
+from sqlalchemy import func, and_
+from datetime import datetime, timedelta
+from collections import defaultdict, Counter
+import json
+
+from app.database import User, FoodItem, MealLog, Goal
+from app.schemas import FoodItemResponse
+
+class UserPreferenceLearner:
+    """Learn and adapt to user preferences over time"""
+    
+    def __init__(self, db: Session):
+        self.db = db
+        
+    def analyze_user_preferences(self, user_id: int) -> Dict:
+        """Analyze user's eating patterns and preferences"""
+        
+        # Get user's meal history (last 60 days for meaningful analysis)
+        cutoff_date = datetime.utcnow() - timedelta(days=60)
+        
+        meals = self.db.query(MealLog).join(FoodItem).filter(
+            and_(
+                MealLog.user_id == user_id,
+                MealLog.logged_at >= cutoff_date
+            )
+        ).all()
+        
+        if not meals:
+            return self.get_default_preferences()
+        
+        # Analyze patterns
+        preferences = {
+            'cuisine_preferences': self.analyze_cuisine_preferences(meals),
+            'macro_preferences': self.analyze_macro_patterns(meals),
+            'timing_preferences': self.analyze_meal_timing(meals),
+            'calorie_patterns': self.analyze_calorie_patterns(meals),
+            'food_categories': self.analyze_food_categories(meals),
+            'adherence_patterns': self.analyze_adherence_patterns(meals),
+            'preference_strength': len(meals) / 60.0  # Strength based on data volume
+        }
+        
+        return preferences
+    
+    def analyze_cuisine_preferences(self, meals: List[MealLog]) -> Dict:
+        """Analyze preferred cuisines"""
+        cuisine_counts = Counter()
+        cuisine_ratings = defaultdict(list)
+        
+        for meal in meals:
+            if meal.food_item and meal.food_item.cuisine_type:
+                cuisine_counts[meal.food_item.cuisine_type] += 1
+                # Rate based on whether it was planned vs spontaneous
+                rating = 1.2 if meal.planned else 1.0
+                cuisine_ratings[meal.food_item.cuisine_type].append(rating)
+        
+        # Calculate preference scores
+        total_meals = len(meals)
+        preferences = {}
+        
+        for cuisine, count in cuisine_counts.items():
+            frequency_score = count / total_meals
+            avg_rating = np.mean(cuisine_ratings[cuisine])
+            preference_score = frequency_score * avg_rating
+            
+            preferences[cuisine] = {
+                'frequency': frequency_score,
+                'rating': avg_rating,
+                'preference_score': preference_score,
+                'meal_count': count
+            }
+        
+        return dict(sorted(preferences.items(), key=lambda x: x[1]['preference_score'], reverse=True))
+    
+    def analyze_macro_patterns(self, meals: List[MealLog]) -> Dict:
+        """Analyze preferred macro-nutrient ratios"""
+        daily_macros = defaultdict(lambda: {'calories': 0, 'protein': 0, 'carbs': 0, 'fat': 0})
+        
+        for meal in meals:
+            if meal.food_item:
+                date = meal.logged_at.date()
+                daily_macros[date]['calories'] += meal.food_item.calories * meal.quantity
+                daily_macros[date]['protein'] += meal.food_item.protein_g * meal.quantity
+                daily_macros[date]['carbs'] += meal.food_item.carbs_g * meal.quantity
+                daily_macros[date]['fat'] += meal.food_item.fat_g * meal.quantity
+        
+        # Calculate average macro ratios
+        macro_ratios = []
+        for day_macros in daily_macros.values():
+            total_cal = day_macros['calories']
+            if total_cal > 0:
+                protein_ratio = (day_macros['protein'] * 4) / total_cal  # 4 cal/g
+                carb_ratio = (day_macros['carbs'] * 4) / total_cal
+                fat_ratio = (day_macros['fat'] * 9) / total_cal  # 9 cal/g
+                
+                macro_ratios.append({
+                    'protein': protein_ratio,
+                    'carbs': carb_ratio,
+                    'fat': fat_ratio
+                })
+        
+        if macro_ratios:
+            avg_protein = np.mean([r['protein'] for r in macro_ratios])
+            avg_carbs = np.mean([r['carbs'] for r in macro_ratios])
+            avg_fat = np.mean([r['fat'] for r in macro_ratios])
+            
+            return {
+                'preferred_protein_ratio': avg_protein * 100,
+                'preferred_carb_ratio': avg_carbs * 100,
+                'preferred_fat_ratio': avg_fat * 100,
+                'consistency': 1 - np.std([r['protein'] for r in macro_ratios]),  # Lower std = more consistent
+                'sample_size': len(macro_ratios)
+            }
+        
+        return self.get_default_macro_preferences()
+    
+    def analyze_meal_timing(self, meals: List[MealLog]) -> Dict:
+        """Analyze preferred meal timing patterns"""
+        hours = [meal.logged_at.hour for meal in meals]
+        
+        # Categorize by meal times
+        breakfast_hours = [h for h in hours if 6 <= h <= 10]
+        lunch_hours = [h for h in hours if 11 <= h <= 14]
+        dinner_hours = [h for h in hours if 17 <= h <= 21]
+        snack_hours = [h for h in hours if h not in range(6, 11) and h not in range(11, 15) and h not in range(17, 22)]
+        
+        return {
+            'breakfast_preference': {
+                'frequency': len(breakfast_hours) / len(hours),
+                'avg_time': np.mean(breakfast_hours) if breakfast_hours else 8,
+                'consistency': 1 - (np.std(breakfast_hours) / 24) if breakfast_hours else 0
+            },
+            'lunch_preference': {
+                'frequency': len(lunch_hours) / len(hours),
+                'avg_time': np.mean(lunch_hours) if lunch_hours else 13,
+                'consistency': 1 - (np.std(lunch_hours) / 24) if lunch_hours else 0
+            },
+            'dinner_preference': {
+                'frequency': len(dinner_hours) / len(hours),
+                'avg_time': np.mean(dinner_hours) if dinner_hours else 19,
+                'consistency': 1 - (np.std(dinner_hours) / 24) if dinner_hours else 0
+            },
+            'snacking_tendency': len(snack_hours) / len(hours),
+            'meal_regularity_score': self.calculate_meal_regularity(meals)
+        }
+    
+    def calculate_meal_regularity(self, meals: List[MealLog]) -> float:
+        """Calculate how regular the user's meal schedule is"""
+        daily_meal_counts = Counter()
+        
+        for meal in meals:
+            daily_meal_counts[meal.logged_at.date()] += 1
+        
+        if not daily_meal_counts:
+            return 0.0
+        
+        avg_meals_per_day = np.mean(list(daily_meal_counts.values()))
+        std_meals_per_day = np.std(list(daily_meal_counts.values()))
+        
+        # Higher regularity = lower standard deviation
+        regularity = max(0, 1 - (std_meals_per_day / avg_meals_per_day))
+        return regularity
+    
+    def analyze_calorie_patterns(self, meals: List[MealLog]) -> Dict:
+        """Analyze calorie consumption patterns"""
+        daily_calories = defaultdict(float)
+        
+        for meal in meals:
+            if meal.food_item:
+                date = meal.logged_at.date()
+                daily_calories[date] += meal.food_item.calories * meal.quantity
+        
+        calories_list = list(daily_calories.values())
+        
+        if calories_list:
+            return {
+                'avg_daily_calories': np.mean(calories_list),
+                'calorie_consistency': 1 - (np.std(calories_list) / np.mean(calories_list)),
+                'min_calories': min(calories_list),
+                'max_calories': max(calories_list),
+                'calorie_trend': self.calculate_trend(calories_list)
+            }
+        
+        return {'avg_daily_calories': 2000, 'calorie_consistency': 0.5}
+    
+    def calculate_trend(self, values: List[float]) -> str:
+        """Calculate if there's an upward, downward, or stable trend"""
+        if len(values) < 2:
+            return 'stable'
+        
+        x = np.arange(len(values))
+        slope = np.polyfit(x, values, 1)[0]
+        
+        if slope > 50:  # More than 50 calories increase per day on average
+            return 'increasing'
+        elif slope < -50:
+            return 'decreasing'
+        else:
+            return 'stable'
+    
+    def analyze_food_categories(self, meals: List[MealLog]) -> Dict:
+        """Analyze preferences for different food categories"""
+        category_preferences = defaultdict(int)
+        
+        for meal in meals:
+            if meal.food_item and meal.food_item.tags:
+                for tag in meal.food_item.tags:
+                    category_preferences[tag] += 1
+        
+        total_tags = sum(category_preferences.values())
+        
+        if total_tags > 0:
+            return {
+                category: count / total_tags 
+                for category, count in category_preferences.items()
+            }
+        
+        return {}
+    
+    def analyze_adherence_patterns(self, meals: List[MealLog]) -> Dict:
+        """Analyze adherence to planned meals"""
+        total_meals = len(meals)
+        planned_meals = sum(1 for meal in meals if meal.planned)
+        
+        if total_meals > 0:
+            adherence_rate = planned_meals / total_meals
+            
+            # Analyze adherence by day of week
+            weekday_adherence = defaultdict(lambda: {'total': 0, 'planned': 0})
+            
+            for meal in meals:
+                day_of_week = meal.logged_at.strftime('%A')
+                weekday_adherence[day_of_week]['total'] += 1
+                if meal.planned:
+                    weekday_adherence[day_of_week]['planned'] += 1
+            
+            day_adherence = {}
+            for day, stats in weekday_adherence.items():
+                day_adherence[day] = stats['planned'] / stats['total'] if stats['total'] > 0 else 0
+            
+            return {
+                'overall_adherence': adherence_rate,
+                'daily_adherence': day_adherence,
+                'adherence_trend': 'improving' if adherence_rate > 0.7 else 'needs_improvement'
+            }
+        
+        return {'overall_adherence': 0.0}
+    
+    def get_default_preferences(self) -> Dict:
+        """Return default preferences for new users"""
+        return {
+            'cuisine_preferences': {
+                'mixed': {'preference_score': 0.8, 'frequency': 0.4},
+                'indian': {'preference_score': 0.6, 'frequency': 0.3},
+                'continental': {'preference_score': 0.5, 'frequency': 0.3}
+            },
+            'macro_preferences': self.get_default_macro_preferences(),
+            'timing_preferences': {
+                'breakfast_preference': {'frequency': 0.8, 'avg_time': 8, 'consistency': 0.6},
+                'lunch_preference': {'frequency': 0.9, 'avg_time': 13, 'consistency': 0.7},
+                'dinner_preference': {'frequency': 0.9, 'avg_time': 19, 'consistency': 0.6},
+                'snacking_tendency': 0.3
+            },
+            'calorie_patterns': {'avg_daily_calories': 2000, 'calorie_consistency': 0.5},
+            'preference_strength': 0.1  # Low strength for new users
+        }
+    
+    def get_default_macro_preferences(self) -> Dict:
+        """Default macro preferences"""
+        return {
+            'preferred_protein_ratio': 25.0,
+            'preferred_carb_ratio': 45.0,
+            'preferred_fat_ratio': 30.0,
+            'consistency': 0.5
+        }
+
+class IntelligentRecommendationEngine:
+    """Generate intelligent food and meal recommendations based on learned preferences"""
+    
+    def __init__(self, db: Session):
+        self.db = db
+        self.preference_learner = UserPreferenceLearner(db)
+    
+    def get_personalized_recommendations(self, user: User, context: Dict = None) -> Dict:
+        """Get personalized food recommendations"""
+        
+        # Learn user preferences
+        preferences = self.preference_learner.analyze_user_preferences(user.id)
+        
+        # Get contextual information
+        context = context or {}
+        current_time = context.get('current_time', datetime.now())
+        meal_type = context.get('meal_type', self.determine_meal_type(current_time))
+        
+        # Generate recommendations
+        recommendations = {
+            'food_recommendations': self.recommend_foods(user, preferences, meal_type),
+            'cuisine_recommendations': self.recommend_cuisines(preferences),
+            'meal_timing_suggestions': self.suggest_meal_timing(preferences),
+            'macro_adjustments': self.suggest_macro_adjustments(user, preferences),
+            'variety_suggestions': self.suggest_variety_improvements(user.id, preferences)
+        }
+        
+        return recommendations
+    
+    def recommend_foods(self, user: User, preferences: Dict, meal_type: str) -> List[Dict]:
+        """Recommend specific foods based on preferences and context"""
+        
+        # Get preferred cuisines
+        cuisine_prefs = preferences.get('cuisine_preferences', {})
+        top_cuisines = list(cuisine_prefs.keys())[:3]  # Top 3 preferred cuisines
+        
+        # Query foods based on preferences
+        query = self.db.query(FoodItem)
+        
+        # Filter by health conditions
+        import json
+        health_conditions = json.loads(user.health_conditions) if user.health_conditions else {}
+        # Ensure health_conditions is a dict, not a list
+        if isinstance(health_conditions, list):
+            health_conditions = {}
+        if health_conditions.get('diabetes'):
+            query = query.filter(FoodItem.diabetic_friendly == True)
+        if health_conditions.get('hypertension'):
+            query = query.filter(FoodItem.hypertension_friendly == True)
+        
+        # Filter by preferred cuisines
+        if top_cuisines:
+            query = query.filter(FoodItem.cuisine_type.in_(top_cuisines))
+        
+        # Get recent foods to avoid repetition
+        recent_foods = self.get_recent_foods(user.id, days=7)
+        if recent_foods:
+            query = query.filter(~FoodItem.id.in_(recent_foods))
+        
+        foods = query.limit(20).all()
+        
+        # Score foods based on preferences
+        scored_foods = []
+        
+        for food in foods:
+            score = self.calculate_food_score(food, preferences, meal_type)
+            
+            scored_foods.append({
+                'food_id': food.id,
+                'name': food.name,
+                'cuisine_type': food.cuisine_type,
+                'calories': food.calories,
+                'protein_g': food.protein_g,
+                'recommendation_score': score,
+                'reason': self.generate_recommendation_reason(food, preferences, meal_type)
+            })
+        
+        # Sort by score and return top recommendations
+        scored_foods.sort(key=lambda x: x['recommendation_score'], reverse=True)
+        return scored_foods[:10]
+    
+    def calculate_food_score(self, food: FoodItem, preferences: Dict, meal_type: str) -> float:
+        """Calculate a recommendation score for a food item"""
+        score = 0.5  # Base score
+        
+        # Cuisine preference bonus
+        cuisine_prefs = preferences.get('cuisine_preferences', {})
+        if food.cuisine_type in cuisine_prefs:
+            cuisine_score = cuisine_prefs[food.cuisine_type].get('preference_score', 0.5)
+            score += cuisine_score * 0.3
+        
+        # Macro alignment bonus
+        macro_prefs = preferences.get('macro_preferences', {})
+        if food.calories > 0:
+            protein_ratio = (food.protein_g * 4) / food.calories
+            target_protein = macro_prefs.get('preferred_protein_ratio', 25) / 100
+            
+            # Bonus for protein alignment
+            protein_alignment = 1 - abs(protein_ratio - target_protein)
+            score += protein_alignment * 0.2
+        
+        # Meal type appropriateness
+        meal_appropriateness = self.calculate_meal_appropriateness(food, meal_type)
+        score += meal_appropriateness * 0.2
+        
+        # Health condition alignment
+        if food.diabetic_friendly:
+            score += 0.1
+        if food.hypertension_friendly:
+            score += 0.1
+        
+        # Variety bonus (prefer foods with multiple tags)
+        if food.tags and len(food.tags) > 2:
+            score += 0.1
+        
+        return min(1.0, score)  # Cap at 1.0
+    
+    def calculate_meal_appropriateness(self, food: FoodItem, meal_type: str) -> float:
+        """Calculate how appropriate a food is for a specific meal type"""
+        
+        food_name_lower = food.name.lower()
+        
+        appropriateness_map = {
+            'breakfast': {
+                'high': ['oats', 'eggs', 'yogurt', 'fruit', 'cereal', 'toast', 'pancake'],
+                'medium': ['nuts', 'smoothie', 'juice'],
+                'low': ['heavy curry', 'fried rice', 'pizza']
+            },
+            'lunch': {
+                'high': ['salad', 'sandwich', 'soup', 'rice', 'quinoa', 'curry'],
+                'medium': ['pasta', 'noodles', 'stir fry'],
+                'low': ['dessert', 'cake', 'ice cream']
+            },
+            'dinner': {
+                'high': ['curry', 'stir fry', 'grilled', 'roasted', 'soup'],
+                'medium': ['pasta', 'rice', 'salad'],
+                'low': ['cereal', 'toast', 'fruit']
+            },
+            'snack': {
+                'high': ['nuts', 'fruit', 'yogurt', 'crackers'],
+                'medium': ['cheese', 'smoothie'],
+                'low': ['heavy meal', 'curry', 'fried rice']
+            }
+        }
+        
+        meal_categories = appropriateness_map.get(meal_type, {})
+        
+        for category, keywords in meal_categories.items():
+            for keyword in keywords:
+                if keyword in food_name_lower:
+                    if category == 'high':
+                        return 1.0
+                    elif category == 'medium':
+                        return 0.6
+                    elif category == 'low':
+                        return 0.2
+        
+        return 0.5  # Default appropriateness
+    
+    def generate_recommendation_reason(self, food: FoodItem, preferences: Dict, meal_type: str) -> str:
+        """Generate a human-readable reason for the recommendation"""
+        
+        reasons = []
+        
+        # Cuisine preference
+        cuisine_prefs = preferences.get('cuisine_preferences', {})
+        if food.cuisine_type in cuisine_prefs:
+            pref_score = cuisine_prefs[food.cuisine_type].get('preference_score', 0)
+            if pref_score > 0.7:
+                reasons.append(f"matches your love for {food.cuisine_type} cuisine")
+        
+        # Macro alignment
+        macro_prefs = preferences.get('macro_preferences', {})
+        if food.protein_g > 15:
+            target_protein = macro_prefs.get('preferred_protein_ratio', 25)
+            if target_protein > 20:
+                reasons.append("high in protein (matches your preference)")
+        
+        # Meal appropriateness
+        appropriateness = self.calculate_meal_appropriateness(food, meal_type)
+        if appropriateness > 0.8:
+            reasons.append(f"perfect for {meal_type}")
+        
+        # Health benefits
+        if food.diabetic_friendly and food.hypertension_friendly:
+            reasons.append("heart-healthy option")
+        
+        # Default reason
+        if not reasons:
+            reasons.append("nutritionally balanced choice")
+        
+        return ", ".join(reasons)
+    
+    def get_recent_foods(self, user_id: int, days: int = 7) -> List[int]:
+        """Get recently eaten food IDs to promote variety"""
+        
+        cutoff_date = datetime.utcnow() - timedelta(days=days)
+        
+        recent_meal_logs = self.db.query(MealLog.food_item_id).filter(
+            and_(
+                MealLog.user_id == user_id,
+                MealLog.logged_at >= cutoff_date
+            )
+        ).distinct().all()
+        
+        return [food_id[0] for food_id in recent_meal_logs]
+    
+    def recommend_cuisines(self, preferences: Dict) -> List[Dict]:
+        """Recommend cuisines to try based on preferences and variety needs"""
+        
+        cuisine_prefs = preferences.get('cuisine_preferences', {})
+        
+        # Get all available cuisines
+        available_cuisines = self.db.query(FoodItem.cuisine_type).distinct().all()
+        available_cuisines = [cuisine[0] for cuisine in available_cuisines if cuisine[0]]
+        
+        recommendations = []
+        
+        for cuisine in available_cuisines:
+            if cuisine not in cuisine_prefs:
+                # New cuisine to try
+                recommendations.append({
+                    'cuisine': cuisine,
+                    'reason': 'New cuisine to explore for variety',
+                    'priority': 'high'
+                })
+            elif cuisine_prefs[cuisine].get('preference_score', 0) < 0.5:
+                # Low-rated cuisine to retry
+                recommendations.append({
+                    'cuisine': cuisine,
+                    'reason': 'Give it another try with different dishes',
+                    'priority': 'medium'
+                })
+        
+        return recommendations[:5]  # Top 5 recommendations
+    
+    def suggest_meal_timing(self, preferences: Dict) -> Dict:
+        """Suggest optimal meal timing based on user patterns"""
+        
+        timing_prefs = preferences.get('timing_preferences', {})
+        
+        suggestions = {}
+        
+        # Breakfast suggestions
+        breakfast = timing_prefs.get('breakfast_preference', {})
+        if breakfast.get('frequency', 0) < 0.7:
+            suggestions['breakfast'] = {
+                'suggestion': 'Try to eat breakfast more regularly',
+                'optimal_time': '8:00 AM',
+                'reason': 'Improves metabolism and energy levels'
+            }
+        
+        # Regularity suggestions
+        meal_regularity = timing_prefs.get('meal_regularity_score', 0.5)
+        if meal_regularity < 0.6:
+            suggestions['regularity'] = {
+                'suggestion': 'Try to eat at more consistent times',
+                'reason': 'Helps regulate hunger and improves digestion'
+            }
+        
+        return suggestions
+    
+    def suggest_macro_adjustments(self, user: User, preferences: Dict) -> List[Dict]:
+        """Suggest macro-nutrient adjustments based on goals and patterns"""
+        
+        macro_prefs = preferences.get('macro_preferences', {})
+        suggestions = []
+        
+        current_protein = macro_prefs.get('preferred_protein_ratio', 15)
+        current_carbs = macro_prefs.get('preferred_carb_ratio', 50)
+        current_fat = macro_prefs.get('preferred_fat_ratio', 35)
+        
+        # Get user's goals
+        active_goals = self.db.query(Goal).filter(
+            and_(Goal.user_id == user.id, Goal.is_active == True)
+        ).all()
+        
+        for goal in active_goals:
+            if goal.goal_type.value == 'muscle_gain' and current_protein < 25:
+                suggestions.append({
+                    'macro': 'protein',
+                    'current': current_protein,
+                    'suggested': 30,
+                    'reason': 'Increase protein for muscle gain goal'
+                })
+            elif goal.goal_type.value == 'weight_loss' and current_carbs > 40:
+                suggestions.append({
+                    'macro': 'carbohydrates',
+                    'current': current_carbs,
+                    'suggested': 35,
+                    'reason': 'Moderate carb reduction may help with weight loss'
+                })
+        
+        return suggestions
+    
+    def suggest_variety_improvements(self, user_id: int, preferences: Dict) -> List[str]:
+        """Suggest ways to improve meal variety"""
+        
+        suggestions = []
+        
+        cuisine_prefs = preferences.get('cuisine_preferences', {})
+        
+        # Check cuisine variety
+        if len(cuisine_prefs) < 3:
+            suggestions.append("Try incorporating more diverse cuisines into your meal plans")
+        
+        # Check food category variety
+        food_categories = preferences.get('food_categories', {})
+        if len(food_categories) < 5:
+            suggestions.append("Experiment with different food categories (whole grains, lean proteins, healthy fats)")
+        
+        # Check recent variety
+        recent_foods = self.get_recent_foods(user_id, days=14)
+        if len(recent_foods) < 10:
+            suggestions.append("Try to include more different foods in your weekly rotation")
+        
+        return suggestions
+    
+    def determine_meal_type(self, current_time: datetime) -> str:
+        """Determine meal type based on current time"""
+        hour = current_time.hour
+        
+        if 6 <= hour <= 10:
+            return 'breakfast'
+        elif 11 <= hour <= 14:
+            return 'lunch'
+        elif 17 <= hour <= 21:
+            return 'dinner'
+        else:
+            return 'snack'

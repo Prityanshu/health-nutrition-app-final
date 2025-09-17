@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import engine, Base
-from app.routers import auth, users, planner, meals, tracking, goals, recipes, gamification
+from app.routers import auth, users, planner, meals, tracking, goals, recipes, gamification, ml_recommendations, advanced_planning
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -30,6 +30,8 @@ app.include_router(tracking.router, prefix="/api/tracking", tags=["progress-trac
 app.include_router(goals.router, prefix="/api/goals", tags=["goals"])
 app.include_router(recipes.router, prefix="/api/recipes", tags=["recipes"])
 app.include_router(gamification.router, prefix="/api/gamification", tags=["gamification"])
+app.include_router(ml_recommendations.router, prefix="/api/ml", tags=["ml-recommendations"])
+app.include_router(advanced_planning.router, prefix="/api/advanced-planning", tags=["advanced-meal-planning"])
 
 @app.get("/")
 async def root():
@@ -41,4 +43,4 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8001)

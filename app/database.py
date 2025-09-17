@@ -44,6 +44,7 @@ class User(Base):
     activity_level = Column(String)  # sedentary, lightly_active, moderately_active, very_active
     health_conditions = Column(Text)  # JSON string of health conditions
     dietary_preferences = Column(Text)  # JSON string of preferences
+    cuisine_pref = Column(String, default="mixed")  # Preferred cuisine type
     created_at = Column(DateTime, default=datetime.utcnow)
     is_active = Column(Boolean, default=True)
     
@@ -75,6 +76,7 @@ class FoodItem(Base):
     ingredients = Column(Text)
     tags = Column(Text)  # JSON string of tags
     created_at = Column(DateTime, default=datetime.utcnow)
+    planned = Column(Boolean, default=False)  # Whether this was a planned meal
 
 class MealPlan(Base):
     __tablename__ = "meal_plans"
@@ -108,6 +110,7 @@ class MealLog(Base):
     carbs = Column(Float, default=0)
     fat = Column(Float, default=0)
     logged_at = Column(DateTime, default=datetime.utcnow)
+    planned = Column(Boolean, default=False)  # Whether this was a planned meal
     
     # Relationships
     user = relationship("User", back_populates="meal_logs")
@@ -157,6 +160,52 @@ class Achievement(Base):
     # Relationships
     user = relationship("User", back_populates="achievements")
     challenge = relationship("Challenge")
+
+class FoodRating(Base):
+    __tablename__ = "food_ratings"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    food_id = Column(Integer, ForeignKey("food_items.id"))
+    rating = Column(Float, nullable=False)  # 1-5 scale
+    review = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    user = relationship("User")
+    food_item = relationship("FoodItem")
+
+class UserPreference(Base):
+    __tablename__ = "user_preferences"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    preference_type = Column(String, nullable=False)  # cuisine, macro, timing, etc.
+    preference_data = Column(Text)  # JSON string of preference data
+    last_updated = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    user = relationship("User")
+
+class Recipe(Base):
+    __tablename__ = "recipes"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    title = Column(String, nullable=False)
+    ingredients = Column(Text)  # JSON string of ingredients
+    instructions = Column(Text)  # JSON string of instructions
+    nutrition = Column(Text)  # JSON string of nutrition data
+    prep_time = Column(Integer, default=30)  # minutes
+    cook_time = Column(Integer, default=20)  # minutes
+    difficulty = Column(String, default="medium")
+    cuisine_type = Column(String, default="mixed")
+    health_benefits = Column(Text)  # JSON string of health benefits
+    is_public = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    user = relationship("User")
 
 # Dependency to get database session
 def get_db():
