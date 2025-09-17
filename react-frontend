@@ -1,0 +1,1008 @@
+import React, { useState, useEffect, createContext, useContext } from 'react';
+import { 
+  User, 
+  Lock, 
+  Mail, 
+  Plus, 
+  Calendar, 
+  TrendingUp, 
+  Award, 
+  ChefHat,
+  Target,
+  Activity,
+  LogOut,
+  Home,
+  Settings,
+  BarChart3
+} from 'lucide-react';
+
+// API Configuration
+const API_BASE_URL = 'http://localhost:8000/api';
+
+// Auth Context
+const AuthContext = createContext();
+
+const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within AuthProvider');
+  }
+  return context;
+};
+
+// API Service
+class ApiService {
+  constructor() {
+    this.baseURL = API_BASE_URL;
+  }
+
+  getAuthHeaders() {
+    const token = localStorage.getItem('access_token');
+    return token ? { 'Authorization': `Bearer ${token}` } : {};
+  }
+
+  async request(endpoint, options = {}) {
+    const url = `${this.baseURL}${endpoint}`;
+    const config = {
+      headers: {
+        'Content-Type': 'application/json',
+        ...this.getAuthHeaders(),
+        ...options.headers
+      },
+      ...options
+    };
+
+    try {
+      const response = await fetch(url, config);
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.detail || 'API request failed');
+      }
+      
+      return data;
+    } catch (error) {
+      console.error('API Request Error:', error);
+      throw error;
+    }
+  }
+
+  // Auth endpoints
+  async register(userData) {
+    return this.request('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(userData)
+    });
+  }
+
+  async login(credentials) {
+    return this.request('/auth/token', {
+      method: 'POST',
+      body: JSON.stringify(credentials)
+    });
+  }
+
+  async getCurrentUser() {
+    return this.request('/auth/me');
+  }
+
+  // Meal planning
+  async generateDayPlan(planRequest) {
+    return this.request('/planner/day', {
+      method: 'POST',
+      body: JSON.stringify(planRequest)
+    });
+  }
+
+  async generateWeekPlan(planRequest) {
+    return this.request('/planner/week', {
+      method: 'POST',
+      body: JSON.stringify(planRequest)
+    });
+  }
+
+  // Meal logging
+  async logMeal(mealData) {
+    return this.request('/meals/log', {
+      method: 'POST',
+      body: JSON.stringify(mealData)
+    });
+  }
+
+  async getMealLogs(startDate, endDate) {
+    const params = new URLSearchParams();
+    if (startDate) params.append('start_date', startDate);
+    if (endDate) params.append('end_date', endDate);
+    return this.request(`/meals/logs?${params}`);
+  }
+
+  // Tracking
+  async getTrackingSummary(startDate, endDate) {
+    const params = new URLSearchParams();
+    if (startDate) params.append('start_date', startDate);
+    if (endDate) params.append('end_date', endDate);
+    return this.request(`/tracking/summary?${params}`);
+  }
+
+  async getProgressData() {
+    return this.request('/tracking/progress');
+  }
+
+  // Gamification
+  async getUserPoints() {
+    return this.request('/gamification/points');
+  }
+
+  async checkAchievements() {
+    return this.request('/gamification/check-achievements', { method: 'POST' });
+  }
+}
+
+const api = new ApiService();
+
+// Auth Provider Component
+const AuthProvider = ({ children }) => {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const token = localStorage.getItem('access_token');
+    if (token) {
+      loadUser();
+    } else {
+      setLoading(false);
+    }
+  }, []);
+
+  const loadUser = async () => {
+    try {
+      const userData = await api.getCurrentUser();
+      setUser(userData);
+    } catch (error) {
+      localStorage.removeItem('access_token');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const login = async (credentials) => {
+    const response = await api.login(credentials);
+    localStorage.setItem('access_token', response.access_token);
+    await loadUser();
+  };
+
+  const logout = () => {
+    localStorage.removeItem('access_token');
+    setUser(null);
+  };
+
+  const register = async (userData) => {
+    await api.register(userData);
+    await login({ email: userData.email, password: userData.password });
+  };
+
+  return (
+    <AuthContext.Provider value={{ user, login, logout, register, loading }}>
+      {children}
+    </AuthContext.Provider>
+  );
+};
+
+// Login Component
+const LoginForm = () => {
+  const [isLogin, setIsLogin] = useState(true);
+  const [formData, setFormData] = useState({
+    email: '',
+    password: '',
+    name: '',
+    age: '',
+    height_cm: '',
+    weight_kg: '',
+    activity_level: 'moderate'
+  });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const { login, register } = useAuth();
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+
+    try {
+      if (isLogin) {
+        await login({ email: formData.email, password: formData.password });
+      } else {
+        await register(formData);
+      }
+    } catch (error) {
+      setError(error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleChange = (e) => {
+    setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-8">
+        <div className="text-center mb-8">
+          <ChefHat className="mx-auto h-12 w-12 text-indigo-600 mb-4" />
+          <h2 className="text-3xl font-bold text-gray-900">
+            {isLogin ? 'Welcome Back' : 'Get Started'}
+          </h2>
+          <p className="text-gray-600 mt-2">
+            {isLogin ? 'Sign in to your account' : 'Create your nutrition profile'}
+          </p>
+        </div>
+
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4">
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <div className="relative">
+              <Mail className="absolute left-3 top-3 h-5 w-5 text-gray-400" />
+              <input
+                type="email"
+                name="email"
+                placeholder="Email address"
+                value={formData.email}
+                onChange={handleChange}
+                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                required
+              />
+            </div>
+          </div>
+
+          <div>
+            <div className="relative">
+              <Lock className="absolute left-3 top-3 h-5 w-5 text-gray-400" />
+              <input
+                type="password"
+                name="password"
+                placeholder="Password"
+                value={formData.password}
+                onChange={handleChange}
+                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                required
+              />
+            </div>
+          </div>
+
+          {!isLogin && (
+            <>
+              <div>
+                <div className="relative">
+                  <User className="absolute left-3 top-3 h-5 w-5 text-gray-400" />
+                  <input
+                    type="text"
+                    name="name"
+                    placeholder="Full Name"
+                    value={formData.name}
+                    onChange={handleChange}
+                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <input
+                  type="number"
+                  name="age"
+                  placeholder="Age"
+                  value={formData.age}
+                  onChange={handleChange}
+                  className="px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                />
+                <input
+                  type="number"
+                  name="height_cm"
+                  placeholder="Height (cm)"
+                  value={formData.height_cm}
+                  onChange={handleChange}
+                  className="px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <input
+                  type="number"
+                  name="weight_kg"
+                  placeholder="Weight (kg)"
+                  value={formData.weight_kg}
+                  onChange={handleChange}
+                  className="px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                />
+                <select
+                  name="activity_level"
+                  value={formData.activity_level}
+                  onChange={handleChange}
+                  className="px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                >
+                  <option value="sedentary">Sedentary</option>
+                  <option value="light">Light Active</option>
+                  <option value="moderate">Moderate</option>
+                  <option value="active">Active</option>
+                  <option value="very_active">Very Active</option>
+                </select>
+              </div>
+            </>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full bg-indigo-600 text-white py-3 rounded-lg font-semibold hover:bg-indigo-700 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition duration-200"
+          >
+            {loading ? 'Please wait...' : (isLogin ? 'Sign In' : 'Create Account')}
+          </button>
+        </form>
+
+        <div className="mt-6 text-center">
+          <button
+            onClick={() => {
+              setIsLogin(!isLogin);
+              setError('');
+            }}
+            className="text-indigo-600 hover:text-indigo-800 font-medium"
+          >
+            {isLogin ? "Don't have an account? Sign up" : 'Already have an account? Sign in'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Dashboard Component
+const Dashboard = () => {
+  const [progressData, setProgressData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    loadProgressData();
+  }, []);
+
+  const loadProgressData = async () => {
+    try {
+      const data = await api.getProgressData();
+      setProgressData(data);
+    } catch (error) {
+      console.error('Error loading progress data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+      </div>
+    );
+  }
+
+  const summary = progressData?.nutrition_summary || {};
+  const adherence = progressData?.adherence || {};
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
+        <p className="text-gray-600">Track your nutrition and progress</p>
+      </div>
+
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-600">Current Streak</p>
+              <p className="text-2xl font-bold text-orange-600">{progressData?.current_streak || 0} days</p>
+            </div>
+            <Activity className="h-8 w-8 text-orange-600" />
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-600">Total Points</p>
+              <p className="text-2xl font-bold text-indigo-600">{adherence.overall_score?.toFixed(0) || 0}</p>
+            </div>
+            <Award className="h-8 w-8 text-indigo-600" />
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-600">Avg Daily Calories</p>
+              <p className="text-2xl font-bold text-green-600">{summary.avg_daily_calories?.toFixed(0) || 0}</p>
+            </div>
+            <TrendingUp className="h-8 w-8 text-green-600" />
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-600">Meals Logged</p>
+              <p className="text-2xl font-bold text-purple-600">{progressData?.total_meals_logged || 0}</p>
+            </div>
+            <ChefHat className="h-8 w-8 text-purple-600" />
+          </div>
+        </div>
+      </div>
+
+      {/* Progress Charts */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Nutrition Overview</h3>
+          <div className="space-y-4">
+            <div>
+              <div className="flex justify-between text-sm">
+                <span>Calories</span>
+                <span>{summary.avg_daily_calories?.toFixed(0)} / {progressData?.target_calories?.toFixed(0)}</span>
+              </div>
+              <div className="w-full bg-gray-200 rounded-full h-2 mt-1">
+                <div 
+                  className="bg-blue-600 h-2 rounded-full" 
+                  style={{ width: `${Math.min(100, (summary.avg_daily_calories / progressData?.target_calories) * 100)}%` }}
+                ></div>
+              </div>
+            </div>
+            <div>
+              <div className="flex justify-between text-sm">
+                <span>Protein</span>
+                <span>{summary.avg_daily_protein?.toFixed(1)}g</span>
+              </div>
+              <div className="w-full bg-gray-200 rounded-full h-2 mt-1">
+                <div className="bg-green-600 h-2 rounded-full" style={{ width: '75%' }}></div>
+              </div>
+            </div>
+            <div>
+              <div className="flex justify-between text-sm">
+                <span>Carbs</span>
+                <span>{summary.avg_daily_carbs?.toFixed(1)}g</span>
+              </div>
+              <div className="w-full bg-gray-200 rounded-full h-2 mt-1">
+                <div className="bg-yellow-600 h-2 rounded-full" style={{ width: '60%' }}></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Adherence Score</h3>
+          <div className="text-center">
+            <div className="text-4xl font-bold text-indigo-600 mb-2">
+              {adherence.overall_score?.toFixed(1) || 0}%
+            </div>
+            <p className="text-gray-600 mb-4">Overall Score</p>
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span>Plan Adherence</span>
+                <span>{adherence.plan_adherence?.toFixed(1) || 0}%</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span>Calorie Adherence</span>
+                <span>{adherence.calorie_adherence?.toFixed(1) || 0}%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Meal Planner Component
+const MealPlanner = () => {
+  const [planRequest, setPlanRequest] = useState({
+    meals_per_day: 3,
+    days: 1,
+    cuisine_type: '',
+    target_calories: ''
+  });
+  const [mealPlan, setMealPlan] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleGeneratePlan = async () => {
+    setLoading(true);
+    try {
+      const request = { ...planRequest };
+      if (request.target_calories) {
+        request.target_calories = parseFloat(request.target_calories);
+      }
+      
+      if (request.days === 1) {
+        const plan = await api.generateDayPlan(request);
+        setMealPlan([plan]);
+      } else {
+        const plans = await api.generateWeekPlan(request);
+        setMealPlan(plans);
+      }
+    } catch (error) {
+      console.error('Error generating meal plan:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const logMealFromPlan = async (foodId, quantity) => {
+    try {
+      await api.logMeal({
+        food_id: foodId,
+        quantity: quantity,
+        planned: true
+      });
+      alert('Meal logged successfully!');
+    } catch (error) {
+      console.error('Error logging meal:', error);
+      alert('Failed to log meal');
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-3xl font-bold text-gray-900">Meal Planner</h1>
+        <p className="text-gray-600">Generate personalized meal plans</p>
+      </div>
+
+      {/* Meal Plan Configuration */}
+      <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">Plan Configuration</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Meals per day</label>
+            <select
+              value={planRequest.meals_per_day}
+              onChange={(e) => setPlanRequest({...planRequest, meals_per_day: parseInt(e.target.value)})}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+            >
+              <option value={2}>2 meals</option>
+              <option value={3}>3 meals</option>
+              <option value={4}>4 meals</option>
+              <option value={5}>5 meals</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Duration</label>
+            <select
+              value={planRequest.days}
+              onChange={(e) => setPlanRequest({...planRequest, days: parseInt(e.target.value)})}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+            >
+              <option value={1}>1 day</option>
+              <option value={7}>1 week</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Cuisine Type</label>
+            <select
+              value={planRequest.cuisine_type}
+              onChange={(e) => setPlanRequest({...planRequest, cuisine_type: e.target.value})}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+            >
+              <option value="">Mixed</option>
+              <option value="indian">Indian</option>
+              <option value="continental">Continental</option>
+              <option value="chinese">Chinese</option>
+              <option value="mediterranean">Mediterranean</option>
+              <option value="mexican">Mexican</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Target Calories</label>
+            <input
+              type="number"
+              placeholder="Auto-calculate"
+              value={planRequest.target_calories}
+              onChange={(e) => setPlanRequest({...planRequest, target_calories: e.target.value})}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+            />
+          </div>
+        </div>
+
+        <button
+          onClick={handleGeneratePlan}
+          disabled={loading}
+          className="mt-4 px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {loading ? 'Generating...' : 'Generate Meal Plan'}
+        </button>
+      </div>
+
+      {/* Meal Plan Display */}
+      {mealPlan && (
+        <div className="space-y-6">
+          {mealPlan.map((dayPlan, dayIndex) => (
+            <div key={dayIndex} className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-xl font-semibold text-gray-900">
+                  {mealPlan.length > 1 ? `Day ${dayPlan.day}` : 'Your Meal Plan'}
+                </h3>
+                <div className="text-sm text-gray-600">
+                  Total: {dayPlan.total_calories?.toFixed(0)} cal | 
+                  Protein: {dayPlan.total_protein?.toFixed(1)}g | 
+                  Cost: ${dayPlan.total_cost?.toFixed(2)}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {dayPlan.meals.map((meal, mealIndex) => (
+                  <div key={mealIndex} className="border border-gray-200 rounded-lg p-4">
+                    <h4 className="font-semibold text-gray-900 mb-3">Meal {meal.meal_index}</h4>
+                    <div className="space-y-2">
+                      {meal.items.map((item, itemIndex) => (
+                        <div key={itemIndex} className="flex justify-between items-start">
+                          <div className="flex-1">
+                            <p className="text-sm font-medium text-gray-900">{item.name}</p>
+                            <p className="text-xs text-gray-600">
+                              {item.quantity.toFixed(1)} serving | {item.calories.toFixed(0)} cal
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => logMealFromPlan(item.food_id, item.quantity)}
+                            className="ml-2 px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
+                          >
+                            Log
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-3 pt-3 border-t border-gray-100 text-xs text-gray-600">
+                      {meal.total_calories?.toFixed(0)} cal | {meal.total_protein?.toFixed(1)}g protein
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Meal Logging Component
+const MealLogging = () => {
+  const [mealLogs, setMealLogs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showLogForm, setShowLogForm] = useState(false);
+  const [logForm, setLogForm] = useState({
+    food_id: '',
+    quantity: 1.0,
+    planned: false
+  });
+
+  useEffect(() => {
+    loadMealLogs();
+  }, []);
+
+  const loadMealLogs = async () => {
+    try {
+      const logs = await api.getMealLogs();
+      setMealLogs(logs);
+    } catch (error) {
+      console.error('Error loading meal logs:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleLogMeal = async (e) => {
+    e.preventDefault();
+    try {
+      await api.logMeal(logForm);
+      setShowLogForm(false);
+      setLogForm({ food_id: '', quantity: 1.0, planned: false });
+      loadMealLogs();
+      // Check for new achievements
+      await api.checkAchievements();
+    } catch (error) {
+      console.error('Error logging meal:', error);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">Meal Logging</h1>
+          <p className="text-gray-600">Track your daily meals</p>
+        </div>
+        <button
+          onClick={() => setShowLogForm(true)}
+          className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-2"
+        >
+          <Plus className="h-4 w-4" />
+          Log Meal
+        </button>
+      </div>
+
+      {/* Log Meal Form Modal */}
+      {showLogForm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl p-6 w-full max-w-md">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Log a Meal</h3>
+            <form onSubmit={handleLogMeal} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Food Item ID</label>
+                <input
+                  type="number"
+                  value={logForm.food_id}
+                  onChange={(e) => setLogForm({...logForm, food_id: e.target.value})}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  required
+                />
+                <p className="text-xs text-gray-500 mt-1">Get food IDs from meal planner or food database</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Quantity</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0.1"
+                  value={logForm.quantity}
+                  onChange={(e) => setLogForm({...logForm, quantity: parseFloat(e.target.value)})}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  required
+                />
+              </div>
+
+              <div className="flex items-center">
+                <input
+                  type="checkbox"
+                  checked={logForm.planned}
+                  onChange={(e) => setLogForm({...logForm, planned: e.target.checked})}
+                  className="mr-2"
+                />
+                <label className="text-sm text-gray-700">This was a planned meal</label>
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  type="submit"
+                  className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+                >
+                  Log Meal
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowLogForm(false)}
+                  className="flex-1 px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Recent Meal Logs */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100">
+        <div className="p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Recent Meals</h3>
+          {mealLogs.length === 0 ? (
+            <p className="text-gray-500 text-center py-8">No meals logged yet. Start by logging your first meal!</p>
+          ) : (
+            <div className="space-y-4">
+              {mealLogs.slice(0, 10).map((log) => (
+                <div key={log.id} className="flex items-center justify-between p-4 border border-gray-100 rounded-lg">
+                  <div>
+                    <h4 className="font-medium text-gray-900">{log.food_item?.name}</h4>
+                    <p className="text-sm text-gray-600">
+                      {log.quantity} serving | {(log.food_item?.calories * log.quantity)?.toFixed(0)} calories
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      {new Date(log.timestamp).toLocaleDateString()} at {new Date(log.timestamp).toLocaleTimeString()}
+                    </p>
+                  </div>
+                  <div className="flex items-center">
+                    {log.planned && (
+                      <span className="px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full mr-2">
+                        Planned
+                      </span>
+                    )}
+                    <span className="text-sm font-medium text-gray-900">
+                      {(log.food_item?.protein_g * log.quantity)?.toFixed(1)}g protein
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Settings Component
+const Settings = () => {
+  const { user, logout } = useAuth();
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-3xl font-bold text-gray-900">Settings</h1>
+        <p className="text-gray-600">Manage your profile and preferences</p>
+      </div>
+
+      <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">Profile Information</h3>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+            <div className="text-gray-900">{user?.name}</div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+            <div className="text-gray-900">{user?.email}</div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Age</label>
+              <div className="text-gray-900">{user?.age} years</div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Activity Level</label>
+              <div className="text-gray-900 capitalize">{user?.activity_level?.replace('_', ' ')}</div>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Height</label>
+              <div className="text-gray-900">{user?.height_cm} cm</div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Weight</label>
+              <div className="text-gray-900">{user?.weight_kg} kg</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">Account Actions</h3>
+        <button
+          onClick={logout}
+          className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center gap-2"
+        >
+          <LogOut className="h-4 w-4" />
+          Sign Out
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// Main App Component
+const App = () => {
+  const { user, loading } = useAuth();
+  const [activeTab, setActiveTab] = useState('dashboard');
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <LoginForm />;
+  }
+
+  const navigation = [
+    { id: 'dashboard', name: 'Dashboard', icon: Home },
+    { id: 'planner', name: 'Meal Planner', icon: Calendar },
+    { id: 'logging', name: 'Log Meals', icon: Plus },
+    { id: 'progress', name: 'Progress', icon: BarChart3 },
+    { id: 'settings', name: 'Settings', icon: Settings }
+  ];
+
+  const renderContent = () => {
+    switch (activeTab) {
+      case 'dashboard':
+        return <Dashboard />;
+      case 'planner':
+        return <MealPlanner />;
+      case 'logging':
+        return <MealLogging />;
+      case 'progress':
+        return <Dashboard />;
+      case 'settings':
+        return <Settings />;
+      default:
+        return <Dashboard />;
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      {/* Navigation */}
+      <nav className="bg-white shadow-sm border-b border-gray-200">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between h-16">
+            <div className="flex items-center">
+              <ChefHat className="h-8 w-8 text-indigo-600 mr-3" />
+              <h1 className="text-xl font-bold text-gray-900">NutriPlan</h1>
+            </div>
+            <div className="flex items-center space-x-4">
+              <span className="text-sm text-gray-700">Welcome, {user.name}!</span>
+            </div>
+          </div>
+        </div>
+      </nav>
+
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="flex flex-col lg:flex-row gap-8">
+          {/* Sidebar */}
+          <div className="lg:w-64 flex-shrink-0">
+            <nav className="space-y-2">
+              {navigation.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => setActiveTab(item.id)}
+                    className={`w-full flex items-center px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      activeTab === item.id
+                        ? 'bg-indigo-100 text-indigo-700'
+                        : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                    }`}
+                  >
+                    <Icon className="mr-3 h-5 w-5" />
+                    {item.name}
+                  </button>
+                );
+              })}
+            </nav>
+          </div>
+
+          {/* Main Content */}
+          <div className="flex-1">
+            {renderContent()}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Root App with Auth Provider
+const RootApp = () => {
+  return (
+    <AuthProvider>
+      <App />
+    </AuthProvider>
+  );
+};
+
+export default RootApp;

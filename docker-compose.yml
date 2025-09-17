@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  # Backend API
+  backend:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://nutrition_user:nutrition_pass@db:5432/nutrition_db
+      - SECRET_KEY=your-super-secret-key-change-in-production
+    depends_on:
+      - db
+      - redis
+    volumes:
+      - ./app:/app/app
+      - ./scripts:/app/scripts
+      - ./config:/app/config
+      # Mount your dataset directory
+      - C:/Users/prity/major-project-redo:/app/data
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+  # PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=nutrition_db
+      - POSTGRES_USER=nutrition_user
+      - POSTGRES_PASSWORD=nutrition_pass
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  # Redis for caching and background tasks
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  # Celery Worker (for background tasks)
+  worker:
+    build: .
+    environment:
+      - DATABASE_URL=postgresql://nutrition_user:nutrition_pass@db:5432/nutrition_db
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - db
+      - redis
+    volumes:
+      - ./app:/app/app
+    command: ["celery", "-A", "app.workers.tasks", "worker", "--loglevel=info"]
+
+  # Frontend (React - for development)
+  frontend:
+    image: node:18-alpine
+    working_dir: /app
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+    command: sh -c "npm install && npm start"
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000/api
+
+volumes:
+  postgres_data:

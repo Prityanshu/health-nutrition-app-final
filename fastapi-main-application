@@ -1,0 +1,60 @@
+# app/main.py
+from fastapi import FastAPI, Depends, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer
+import uvicorn
+from contextlib import asynccontextmanager
+
+from app.database import engine, Base
+from app.routers import auth, users, planner, meals, tracking, goals, recipes, gamification
+from app.config import settings
+
+# Create tables on startup
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    Base.metadata.create_all(bind=engine)
+    yield
+    # Shutdown (if needed)
+
+app = FastAPI(
+    title="Nutrition & Meal Planning API",
+    description="AI-powered personalized nutrition and meal planning platform",
+    version="1.0.0",
+    lifespan=lifespan
+)
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://localhost:5173"],  # React dev servers
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Include routers
+app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
+app.include_router(users.router, prefix="/api/users", tags=["Users"])
+app.include_router(planner.router, prefix="/api/planner", tags=["Meal Planning"])
+app.include_router(meals.router, prefix="/api/meals", tags=["Meal Logging"])
+app.include_router(tracking.router, prefix="/api/tracking", tags=["Progress Tracking"])
+app.include_router(goals.router, prefix="/api/goals", tags=["Goals"])
+app.include_router(recipes.router, prefix="/api/recipes", tags=["Recipes"])
+app.include_router(gamification.router, prefix="/api/gamification", tags=["Gamification"])
+
+@app.get("/")
+async def root():
+    return {"message": "Nutrition & Meal Planning API", "status": "running"}
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
+
+if __name__ == "__main__":
+    uvicorn.run(
+        "main:app", 
+        host="0.0.0.0", 
+        port=8000, 
+        reload=True
+    )

@@ -1,0 +1,12 @@
+{
+  "email": "test@example.com",
+  "username": "testuser",
+  "password": "testpassword",
+  "full_name": "Test User",
+  "age": 25,
+  "weight": 70.0,
+  "height": 175.0,
+  "activity_level": "moderately_active",
+  "health_conditions": "[]",
+  "dietary_preferences": "[]"
+}

@@ -1,0 +1,162 @@
+# app/database.py
+from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, Text, JSON, ForeignKey, Enum
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, relationship
+from sqlalchemy.sql import func
+import enum
+from datetime import datetime
+
+# Database URL - use SQLite for development, PostgreSQL for production
+DATABASE_URL = "sqlite:///./nutrition_app.db"
+# For PostgreSQL: DATABASE_URL = "postgresql://user:password@localhost/nutrition_db"
+
+engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+# Enums
+class ActivityLevel(enum.Enum):
+    SEDENTARY = "sedentary"
+    LIGHT = "light"
+    MODERATE = "moderate"
+    ACTIVE = "active"
+    VERY_ACTIVE = "very_active"
+
+class GoalType(enum.Enum):
+    WEIGHT_LOSS = "weight_loss"
+    MUSCLE_GAIN = "muscle_gain"
+    MAINTAIN = "maintain"
+
+class Gender(enum.Enum):
+    MALE = "male"
+    FEMALE = "female"
+    OTHER = "other"
+
+class PrepComplexity(enum.Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+# Database Models
+class User(Base):
+    __tablename__ = "users"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, unique=True, index=True, nullable=False)
+    password_hash = Column(String, nullable=False)
+    name = Column(String, nullable=False)
+    age = Column(Integer)
+    gender = Column(Enum(Gender))
+    height_cm = Column(Float)
+    weight_kg = Column(Float)
+    activity_level = Column(Enum(ActivityLevel), default=ActivityLevel.MODERATE)
+    cuisine_pref = Column(String, default="mixed")
+    health_conditions = Column(JSON, default={})
+    budget_per_day = Column(Float, default=50.0)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+    
+    # Relationships
+    meal_logs = relationship("MealLog", back_populates="user")
+    goals = relationship("Goal", back_populates="user")
+    achievements = relationship("Achievement", back_populates="user")
+
+class FoodItem(Base):
+    __tablename__ = "food_items"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False, index=True)
+    cuisine_type = Column(String, index=True)
+    calories = Column(Float, nullable=False)
+    protein_g = Column(Float, nullable=False)
+    carbs_g = Column(Float, nullable=False)
+    fat_g = Column(Float, nullable=False)
+    fiber_g = Column(Float, default=0)
+    cost = Column(Float, default=5.0)
+    gi = Column(Float, default=50)  # Glycemic index
+    low_sodium = Column(Boolean, default=False)
+    diabetic_friendly = Column(Boolean, default=True)
+    hypertension_friendly = Column(Boolean, default=True)
+    prep_complexity = Column(Enum(PrepComplexity), default=PrepComplexity.MEDIUM)
+    ingredients = Column(Text)
+    tags = Column(JSON, default=[])
+    created_at = Column(DateTime, default=func.now())
+    
+    # Relationships
+    meal_logs = relationship("MealLog", back_populates="food_item")
+
+class MealLog(Base):
+    __tablename__ = "meal_logs"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    food_id = Column(Integer, ForeignKey("food_items.id"), nullable=False)
+    quantity = Column(Float, nullable=False, default=1.0)
+    timestamp = Column(DateTime, default=func.now())
+    planned = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=func.now())
+    
+    # Relationships
+    user = relationship("User", back_populates="meal_logs")
+    food_item = relationship("FoodItem", back_populates="meal_logs")
+
+class Goal(Base):
+    __tablename__ = "goals"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    goal_type = Column(Enum(GoalType), nullable=False)
+    target_weight = Column(Float)
+    start_date = Column(DateTime, default=func.now())
+    end_date = Column(DateTime)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=func.now())
+    
+    # Relationships
+    user = relationship("User", back_populates="goals")
+
+class Challenge(Base):
+    __tablename__ = "challenges"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    description = Column(Text)
+    rules = Column(JSON)
+    reward_points = Column(Integer, default=100)
+    active_from = Column(DateTime, default=func.now())
+    active_to = Column(DateTime)
+    created_at = Column(DateTime, default=func.now())
+
+class Achievement(Base):
+    __tablename__ = "achievements"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    challenge_id = Column(Integer, ForeignKey("challenges.id"))
+    points_earned = Column(Integer, default=0)
+    description = Column(String)
+    date_completed = Column(DateTime, default=func.now())
+    
+    # Relationships
+    user = relationship("User", back_populates="achievements")
+
+# Dependency to get database session
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+# app/config.py
+from pydantic import BaseSettings
+
+class Settings(BaseSettings):
+    SECRET_KEY: str = "your-secret-key-here-change-in-production"
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    
+    class Config:
+        env_file = ".env"
+
+settings = Settings()

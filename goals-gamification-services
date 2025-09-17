@@ -1,0 +1,350 @@
+# app/routers/goals.py
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from typing import List
+
+from app.database import get_db, User, Goal
+from app.auth import get_current_user
+from app.schemas import GoalCreate, GoalResponse
+
+router = APIRouter()
+
+@router.post("/", response_model=GoalResponse, status_code=201)
+def create_goal(
+    goal_data: GoalCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    # Deactivate existing goals of same type
+    existing_goals = db.query(Goal).filter(
+        Goal.user_id == current_user.id,
+        Goal.goal_type == goal_data.goal_type,
+        Goal.is_active == True
+    ).all()
+    
+    for goal in existing_goals:
+        goal.is_active = False
+    
+    # Create new goal
+    new_goal = Goal(
+        user_id=current_user.id,
+        goal_type=goal_data.goal_type,
+        target_weight=goal_data.target_weight,
+        end_date=goal_data.end_date,
+        is_active=True
+    )
+    
+    db.add(new_goal)
+    db.commit()
+    db.refresh(new_goal)
+    
+    return new_goal
+
+@router.get("/", response_model=List[GoalResponse])
+def get_user_goals(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    goals = db.query(Goal).filter(Goal.user_id == current_user.id).all()
+    return goals
+
+@router.get("/active", response_model=List[GoalResponse])
+def get_active_goals(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    goals = db.query(Goal).filter(
+        Goal.user_id == current_user.id,
+        Goal.is_active == True
+    ).all()
+    return goals
+
+@router.patch("/{goal_id}", response_model=GoalResponse)
+def update_goal(
+    goal_id: int,
+    goal_data: GoalCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    goal = db.query(Goal).filter(
+        Goal.id == goal_id,
+        Goal.user_id == current_user.id
+    ).first()
+    
+    if not goal:
+        raise HTTPException(status_code=404, detail="Goal not found")
+    
+    goal.goal_type = goal_data.goal_type
+    goal.target_weight = goal_data.target_weight
+    goal.end_date = goal_data.end_date
+    
+    db.commit()
+    db.refresh(goal)
+    
+    return goal
+
+@router.delete("/{goal_id}")
+def delete_goal(
+    goal_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    goal = db.query(Goal).filter(
+        Goal.id == goal_id,
+        Goal.user_id == current_user.id
+    ).first()
+    
+    if not goal:
+        raise HTTPException(status_code=404, detail="Goal not found")
+    
+    db.delete(goal)
+    db.commit()
+    
+    return {"message": "Goal deleted successfully"}
+
+# app/routers/gamification.py
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+from sqlalchemy import func, and_
+from typing import Dict, Any, List
+from datetime import datetime, timedelta
+
+from app.database import get_db, User, MealLog, Achievement, Challenge
+from app.auth import get_current_user
+
+router = APIRouter()
+
+class GamificationService:
+    def __init__(self, db: Session):
+        self.db = db
+    
+    def calculate_user_points(self, user_id: int) -> Dict[str, Any]:
+        """Calculate user's points and achievements"""
+        # Base points from achievements
+        total_points = self.db.query(func.sum(Achievement.points_earned)).filter(
+            Achievement.user_id == user_id
+        ).scalar() or 0
+        
+        # Additional points from consistent logging
+        recent_logs = self.db.query(MealLog).filter(
+            and_(
+                MealLog.user_id == user_id,
+                MealLog.timestamp >= datetime.utcnow() - timedelta(days=30)
+            )
+        ).count()
+        
+        consistency_points = min(recent_logs * 5, 500)  # Max 500 points from consistency
+        total_points += consistency_points
+        
+        # Calculate streak
+        streak = self.calculate_streak(user_id)
+        streak_points = streak * 10  # 10 points per day in streak
+        total_points += streak_points
+        
+        # Get achievements
+        achievements = self.db.query(Achievement).filter(
+            Achievement.user_id == user_id
+        ).order_by(Achievement.date_completed.desc()).all()
+        
+        return {
+            'total_points': total_points,
+            'consistency_points': consistency_points,
+            'streak_points': streak_points,
+            'current_streak': streak,
+            'total_achievements': len(achievements),
+            'recent_achievements': [
+                {
+                    'id': a.id,
+                    'description': a.description,
+                    'points': a.points_earned,
+                    'date': a.date_completed
+                }
+                for a in achievements[:5]
+            ]
+        }
+    
+    def calculate_streak(self, user_id: int) -> int:
+        """Calculate current logging streak"""
+        logs = self.db.query(MealLog).filter(
+            MealLog.user_id == user_id
+        ).order_by(MealLog.timestamp.desc()).all()
+        
+        if not logs:
+            return 0
+        
+        # Group logs by date
+        logged_dates = set()
+        for log in logs:
+            logged_dates.add(log.timestamp.date())
+        
+        # Check consecutive days
+        today = datetime.utcnow().date()
+        streak = 0
+        check_date = today
+        
+        while check_date in logged_dates and streak < 365:  # Max streak of 365 days
+            streak += 1
+            check_date -= timedelta(days=1)
+        
+        return streak
+    
+    def check_and_award_achievements(self, user_id: int) -> List[Dict[str, Any]]:
+        """Check for new achievements and award them"""
+        new_achievements = []
+        
+        # First meal logged
+        if not self.db.query(Achievement).filter(
+            and_(Achievement.user_id == user_id, Achievement.description == "First meal logged!")
+        ).first():
+            first_log = self.db.query(MealLog).filter(MealLog.user_id == user_id).first()
+            if first_log:
+                achievement = Achievement(
+                    user_id=user_id,
+                    points_earned=50,
+                    description="First meal logged!"
+                )
+                self.db.add(achievement)
+                new_achievements.append({
+                    'description': "First meal logged!",
+                    'points': 50
+                })
+        
+        # Week streak achievement
+        streak = self.calculate_streak(user_id)
+        if streak >= 7 and not self.db.query(Achievement).filter(
+            and_(Achievement.user_id == user_id, Achievement.description == "7-day logging streak!")
+        ).first():
+            achievement = Achievement(
+                user_id=user_id,
+                points_earned=100,
+                description="7-day logging streak!"
+            )
+            self.db.add(achievement)
+            new_achievements.append({
+                'description': "7-day logging streak!",
+                'points': 100
+            })
+        
+        # Month streak achievement
+        if streak >= 30 and not self.db.query(Achievement).filter(
+            and_(Achievement.user_id == user_id, Achievement.description == "30-day logging streak!")
+        ).first():
+            achievement = Achievement(
+                user_id=user_id,
+                points_earned=500,
+                description="30-day logging streak!"
+            )
+            self.db.add(achievement)
+            new_achievements.append({
+                'description': "30-day logging streak!",
+                'points': 500
+            })
+        
+        # Meal count milestones
+        total_meals = self.db.query(MealLog).filter(MealLog.user_id == user_id).count()
+        
+        milestones = [
+            (10, "10 meals logged!", 25),
+            (50, "50 meals logged!", 100),
+            (100, "100 meals logged!", 250),
+            (500, "500 meals logged!", 1000)
+        ]
+        
+        for count, description, points in milestones:
+            if total_meals >= count and not self.db.query(Achievement).filter(
+                and_(Achievement.user_id == user_id, Achievement.description == description)
+            ).first():
+                achievement = Achievement(
+                    user_id=user_id,
+                    points_earned=points,
+                    description=description
+                )
+                self.db.add(achievement)
+                new_achievements.append({
+                    'description': description,
+                    'points': points
+                })
+        
+        if new_achievements:
+            self.db.commit()
+        
+        return new_achievements
+
+@router.get("/points")
+def get_user_points(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    gamification_service = GamificationService(db)
+    return gamification_service.calculate_user_points(current_user.id)
+
+@router.post("/check-achievements")
+def check_achievements(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Check for new achievements and award them"""
+    gamification_service = GamificationService(db)
+    new_achievements = gamification_service.check_and_award_achievements(current_user.id)
+    
+    return {
+        'new_achievements': new_achievements,
+        'count': len(new_achievements)
+    }
+
+@router.get("/leaderboard")
+def get_leaderboard(
+    limit: int = 10,
+    db: Session = Depends(get_db)
+):
+    """Get top users by points (simplified leaderboard)"""
+    # This is a simplified version - in production you'd want more sophisticated ranking
+    users_with_points = []
+    
+    users = db.query(User).limit(50).all()  # Limit to avoid performance issues
+    
+    gamification_service = GamificationService(db)
+    
+    for user in users:
+        points_data = gamification_service.calculate_user_points(user.id)
+        users_with_points.append({
+            'user_id': user.id,
+            'name': user.name,
+            'total_points': points_data['total_points'],
+            'current_streak': points_data['current_streak']
+        })
+    
+    # Sort by total points
+    users_with_points.sort(key=lambda x: x['total_points'], reverse=True)
+    
+    return {
+        'leaderboard': users_with_points[:limit],
+        'total_users': len(users_with_points)
+    }
+
+@router.get("/challenges")
+def get_available_challenges(
+    db: Session = Depends(get_db)
+):
+    """Get available challenges"""
+    current_time = datetime.utcnow()
+    
+    challenges = db.query(Challenge).filter(
+        and_(
+            Challenge.active_from <= current_time,
+            Challenge.active_to >= current_time
+        )
+    ).all()
+    
+    return {
+        'challenges': [
+            {
+                'id': c.id,
+                'name': c.name,
+                'description': c.description,
+                'reward_points': c.reward_points,
+                'active_until': c.active_to
+            }
+            for c in challenges
+        ]
+    }

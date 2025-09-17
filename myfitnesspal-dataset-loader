@@ -1,0 +1,522 @@
+# scripts/load_mfp_dataset.py
+"""
+MyFitnessPal Dataset Loader
+Load and process the MyFitnessPal food diary dataset
+"""
+import sys
+import os
+import pandas as pd
+import re
+from sqlalchemy.orm import Session
+from sqlalchemy import text
+
+# Add the parent directory to the path to import app modules
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from app.database import SessionLocal, FoodItem, Challenge, PrepComplexity, engine, Base
+from datetime import datetime, timedelta
+
+class MFPDatasetLoader:
+    def __init__(self, dataset_path: str):
+        self.dataset_path = dataset_path
+        self.db = SessionLocal()
+        
+    def load_and_process_data(self, max_records: int = 10000):
+        """Load and process the MFP dataset"""
+        print(f"Loading dataset from: {self.dataset_path}")
+        
+        try:
+            # Read the TSV file
+            df = pd.read_csv(self.dataset_path, sep='\t', low_memory=False)
+            print(f"Dataset loaded successfully. Shape: {df.shape}")
+            print(f"Columns: {list(df.columns)}")
+            
+            # Display first few rows to understand the structure
+            print("\nFirst 5 rows:")
+            print(df.head())
+            
+            # Process and clean the data
+            cleaned_data = self.clean_and_process_data(df, max_records)
+            
+            # Load into database
+            self.load_food_items(cleaned_data)
+            
+        except Exception as e:
+            print(f"Error loading dataset: {e}")
+            return False
+        finally:
+            self.db.close()
+        
+        return True
+    
+    def clean_and_process_data(self, df, max_records):
+        """Clean and process the raw MFP data"""
+        print("Processing and cleaning data...")
+        
+        # The MFP dataset typically has columns like:
+        # Date, Food, Calories, Fat(g), Saturated Fat(g), Sodium(mg), Carbs(g), Fiber(g), Sugar(g), Protein(g)
+        
+        # Standardize column names (handle different possible column names)
+        column_mapping = {
+            'Food': 'name',
+            'food': 'name', 
+            'item': 'name',
+            'food_item': 'name',
+            'Calories': 'calories',
+            'calories': 'calories',
+            'cal': 'calories',
+            'Protein(g)': 'protein_g',
+            'protein': 'protein_g',
+            'Protein': 'protein_g',
+            'Carbs(g)': 'carbs_g',
+            'carbs': 'carbs_g',
+            'Carbs': 'carbs_g',
+            'carbohydrates': 'carbs_g',
+            'Fat(g)': 'fat_g',
+            'fat': 'fat_g',
+            'Fat': 'fat_g',
+            'Fiber(g)': 'fiber_g',
+            'fiber': 'fiber_g',
+            'Fiber': 'fiber_g',
+            'Sodium(mg)': 'sodium_mg',
+            'sodium': 'sodium_mg',
+            'Sodium': 'sodium_mg',
+            'Sugar(g)': 'sugar_g',
+            'sugar': 'sugar_g',
+            'Sugar': 'sugar_g'
+        }
+        
+        # Rename columns
+        df = df.rename(columns=column_mapping)
+        
+        # Remove rows with missing essential data
+        essential_cols = ['name', 'calories']
+        df = df.dropna(subset=[col for col in essential_cols if col in df.columns])
+        
+        # Clean food names
+        if 'name' in df.columns:
+            df['name'] = df['name'].astype(str)
+            df['name'] = df['name'].str.strip()
+            df['name'] = df['name'].str.title()  # Capitalize properly
+            
+            # Remove very long names (likely corrupted data)
+            df = df[df['name'].str.len() <= 100]
+            
+            # Remove entries that are just numbers or very short
+            df = df[df['name'].str.len() >= 3]
+            df = df[~df['name'].str.match(r'^\d+$')]
+        
+        # Clean numeric columns
+        numeric_cols = ['calories', 'protein_g', 'carbs_g', 'fat_g', 'fiber_g', 'sodium_mg', 'sugar_g']
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+                df[col] = df[col].fillna(0)  # Fill NaN with 0
+                df[col] = df[col].abs()  # Remove negative values
+        
+        # Remove duplicate food items (keep first occurrence)
+        if 'name' in df.columns:
+            df = df.drop_duplicates(subset=['name'], keep='first')
+        
+        # Filter out extreme outliers (likely data entry errors)
+        if 'calories' in df.columns:
+            df = df[(df['calories'] >= 1) & (df['calories'] <= 2000)]  # Reasonable calorie range per serving
+        
+        # Limit the number of records
+        df = df.head(max_records)
+        
+        print(f"After cleaning: {len(df)} records")
+        
+        return df
+    
+    def categorize_cuisine(self, food_name):
+        """Categorize food items by cuisine type based on name"""
+        food_name_lower = food_name.lower()
+        
+        # Indian food keywords
+        indian_keywords = [
+            'curry', 'dal', 'roti', 'naan', 'biryani', 'tandoor', 'masala', 
+            'paneer', 'chicken tikka', 'samosa', 'dosa', 'idli', 'chutney',
+            'basmati', 'ghee', 'lassi', 'chai', 'chapati', 'pulao', 'raita'
+        ]
+        
+        # Chinese food keywords
+        chinese_keywords = [
+            'stir fry', 'fried rice', 'lo mein', 'chow mein', 'dim sum', 'wonton',
+            'sweet and sour', 'kung pao', 'szechuan', 'teriyaki', 'soy sauce',
+            'tofu', 'bok choy', 'spring roll', 'dumpling'
+        ]
+        
+        # Mexican food keywords
+        mexican_keywords = [
+            'taco', 'burrito', 'quesadilla', 'enchilada', 'salsa', 'guacamole',
+            'tortilla', 'fajita', 'nachos', 'chimichanga', 'cilantro', 'jalapeño'
+        ]
+        
+        # Italian food keywords
+        italian_keywords = [
+            'pasta', 'pizza', 'spaghetti', 'lasagna', 'risotto', 'pesto',
+            'marinara', 'mozzarella', 'parmesan', 'basil', 'oregano', 'prosciutto'
+        ]
+        
+        # Mediterranean food keywords
+        mediterranean_keywords = [
+            'hummus', 'falafel', 'olive', 'feta', 'pita', 'tzatziki',
+            'kebab', 'couscous', 'tahini', 'yogurt', 'lemon', 'herbs'
+        ]
+        
+        # Check for cuisine matches
+        for keyword in indian_keywords:
+            if keyword in food_name_lower:
+                return 'indian'
+        
+        for keyword in chinese_keywords:
+            if keyword in food_name_lower:
+                return 'chinese'
+        
+        for keyword in mexican_keywords:
+            if keyword in food_name_lower:
+                return 'mexican'
+        
+        for keyword in italian_keywords:
+            if keyword in food_name_lower:
+                return 'italian'
+        
+        for keyword in mediterranean_keywords:
+            if keyword in food_name_lower:
+                return 'mediterranean'
+        
+        return 'mixed'  # Default category
+    
+    def estimate_prep_complexity(self, food_name):
+        """Estimate preparation complexity based on food name"""
+        food_name_lower = food_name.lower()
+        
+        # High complexity indicators
+        high_complexity = [
+            'homemade', 'scratch', 'fresh', 'marinated', 'stuffed', 'layered',
+            'casserole', 'roasted', 'braised', 'slow cooked', 'fermented'
+        ]
+        
+        # Low complexity indicators  
+        low_complexity = [
+            'instant', 'microwave', 'frozen', 'canned', 'packaged', 'ready',
+            'quick', 'simple', 'raw', 'fresh fruit', 'fresh vegetable'
+        ]
+        
+        for indicator in high_complexity:
+            if indicator in food_name_lower:
+                return PrepComplexity.HIGH
+        
+        for indicator in low_complexity:
+            if indicator in food_name_lower:
+                return PrepComplexity.LOW
+        
+        return PrepComplexity.MEDIUM  # Default
+    
+    def determine_health_flags(self, food_name, sodium_mg=None):
+        """Determine health condition flags based on food properties"""
+        food_name_lower = food_name.lower()
+        
+        # Low sodium foods
+        low_sodium = True
+        if sodium_mg and sodium_mg > 400:  # High sodium threshold
+            low_sodium = False
+        
+        high_sodium_indicators = [
+            'canned', 'processed', 'pickled', 'cured', 'smoked', 'salted',
+            'soy sauce', 'teriyaki', 'bbq sauce', 'ketchup'
+        ]
+        
+        for indicator in high_sodium_indicators:
+            if indicator in food_name_lower:
+                low_sodium = False
+                break
+        
+        # Diabetic friendly foods
+        diabetic_friendly = True
+        high_sugar_indicators = [
+            'cake', 'cookie', 'candy', 'chocolate', 'ice cream', 'donut',
+            'pie', 'sweet', 'syrup', 'honey', 'sugar', 'frosting'
+        ]
+        
+        for indicator in high_sugar_indicators:
+            if indicator in food_name_lower:
+                diabetic_friendly = False
+                break
+        
+        # Hypertension friendly (similar to low sodium)
+        hypertension_friendly = low_sodium
+        
+        return low_sodium, diabetic_friendly, hypertension_friendly
+    
+    def load_food_items(self, df):
+        """Load processed food items into the database"""
+        print("Loading food items into database...")
+        
+        # Clear existing food items if needed
+        # Uncomment the next line if you want to replace all existing data
+        # self.db.execute(text("DELETE FROM food_items"))
+        
+        batch_size = 1000
+        total_loaded = 0
+        
+        for i in range(0, len(df), batch_size):
+            batch = df.iloc[i:i + batch_size]
+            food_items = []
+            
+            for _, row in batch.iterrows():
+                try:
+                    # Extract values with defaults
+                    name = row.get('name', 'Unknown Food')
+                    calories = float(row.get('calories', 0))
+                    protein_g = float(row.get('protein_g', 0))
+                    carbs_g = float(row.get('carbs_g', 0))
+                    fat_g = float(row.get('fat_g', 0))
+                    fiber_g = float(row.get('fiber_g', 0))
+                    sodium_mg = float(row.get('sodium_mg', 0))
+                    
+                    # Skip items with zero calories (likely incomplete data)
+                    if calories <= 0:
+                        continue
+                    
+                    # Categorize the food
+                    cuisine_type = self.categorize_cuisine(name)
+                    prep_complexity = self.estimate_prep_complexity(name)
+                    low_sodium, diabetic_friendly, hypertension_friendly = self.determine_health_flags(name, sodium_mg)
+                    
+                    # Estimate cost based on food type (this is a rough estimate)
+                    cost = self.estimate_cost(name, calories)
+                    
+                    # Estimate glycemic index (rough approximation)
+                    gi = self.estimate_gi(name, carbs_g, fiber_g)
+                    
+                    food_item = FoodItem(
+                        name=name[:100],  # Limit name length
+                        cuisine_type=cuisine_type,
+                        calories=calories,
+                        protein_g=protein_g,
+                        carbs_g=carbs_g,
+                        fat_g=fat_g,
+                        fiber_g=fiber_g,
+                        cost=cost,
+                        gi=gi,
+                        low_sodium=low_sodium,
+                        diabetic_friendly=diabetic_friendly,
+                        hypertension_friendly=hypertension_friendly,
+                        prep_complexity=prep_complexity,
+                        ingredients=f"Main ingredient: {name.split(',')[0]}",
+                        tags=self.generate_tags(name, protein_g, carbs_g, fat_g, fiber_g)
+                    )
+                    
+                    food_items.append(food_item)
+                    
+                except Exception as e:
+                    print(f"Error processing row: {e}")
+                    continue
+            
+            # Bulk insert the batch
+            if food_items:
+                self.db.add_all(food_items)
+                self.db.commit()
+                total_loaded += len(food_items)
+                print(f"Loaded batch {i//batch_size + 1}: {len(food_items)} items (Total: {total_loaded})")
+        
+        print(f"Successfully loaded {total_loaded} food items from MFP dataset")
+    
+    def estimate_cost(self, food_name, calories):
+        """Estimate food cost based on name and calories"""
+        food_name_lower = food_name.lower()
+        
+        # Expensive foods
+        if any(word in food_name_lower for word in ['salmon', 'tuna', 'lobster', 'crab', 'shrimp', 'steak', 'organic']):
+            return min(15.0, calories * 0.01)
+        
+        # Moderate cost foods
+        if any(word in food_name_lower for word in ['chicken', 'beef', 'pork', 'fish', 'cheese']):
+            return min(8.0, calories * 0.007)
+        
+        # Cheap foods
+        if any(word in food_name_lower for word in ['rice', 'bread', 'pasta', 'beans', 'lentils']):
+            return min(3.0, calories * 0.003)
+        
+        # Default cost
+        return min(5.0, calories * 0.005)
+    
+    def estimate_gi(self, food_name, carbs_g, fiber_g):
+        """Estimate glycemic index"""
+        food_name_lower = food_name.lower()
+        
+        # Low GI foods
+        if any(word in food_name_lower for word in ['oats', 'quinoa', 'lentils', 'beans', 'nuts', 'vegetables']):
+            return 35
+        
+        # High GI foods
+        if any(word in food_name_lower for word in ['white bread', 'white rice', 'potato', 'sugar', 'candy']):
+            return 70
+        
+        # Estimate based on fiber content
+        if fiber_g > 5:
+            return 40  # High fiber = lower GI
+        elif fiber_g < 2 and carbs_g > 20:
+            return 65  # Low fiber, high carbs = higher GI
+        
+        return 50  # Default moderate GI
+    
+    def generate_tags(self, name, protein_g, carbs_g, fat_g, fiber_g):
+        """Generate tags based on nutritional content"""
+        tags = []
+        
+        # Nutritional tags
+        if protein_g > 15:
+            tags.append("high_protein")
+        if fiber_g > 5:
+            tags.append("high_fiber")
+        if fat_g < 3:
+            tags.append("low_fat")
+        if carbs_g < 10:
+            tags.append("low_carb")
+        
+        # Food type tags
+        name_lower = name.lower()
+        if any(word in name_lower for word in ['vegetable', 'veggie', 'salad', 'greens']):
+            tags.append("vegetable")
+        if any(word in name_lower for word in ['fruit', 'berry', 'apple', 'banana', 'orange']):
+            tags.append("fruit")
+        if any(word in name_lower for word in ['whole grain', 'brown rice', 'oats', 'quinoa']):
+            tags.append("whole_grain")
+        if 'organic' in name_lower:
+            tags.append("organic")
+        
+        return tags
+
+def load_sample_challenges():
+    """Load sample challenges for gamification"""
+    db = SessionLocal()
+    
+    # Check if challenges already exist
+    existing_challenge = db.query(Challenge).first()
+    if existing_challenge:
+        print("Challenges already exist. Skipping...")
+        db.close()
+        return
+    
+    challenges = [
+        {
+            "name": "7-Day Logging Challenge",
+            "description": "Log your meals for 7 consecutive days",
+            "rules": {"consecutive_days": 7, "action": "log_meal"},
+            "reward_points": 200,
+            "active_from": datetime.utcnow(),
+            "active_to": datetime.utcnow() + timedelta(days=30)
+        },
+        {
+            "name": "Protein Power Week",
+            "description": "Meet your daily protein goals for 7 days",
+            "rules": {"daily_protein_goal": True, "duration_days": 7},
+            "reward_points": 300,
+            "active_from": datetime.utcnow(),
+            "active_to": datetime.utcnow() + timedelta(days=30)
+        },
+        {
+            "name": "Healthy Explorer",
+            "description": "Try foods from 3 different cuisines this week",
+            "rules": {"different_cuisines": 3, "duration_days": 7},
+            "reward_points": 250,
+            "active_from": datetime.utcnow(),
+            "active_to": datetime.utcnow() + timedelta(days=30)
+        },
+        {
+            "name": "Fiber Champion",
+            "description": "Consume high-fiber foods for 5 days",
+            "rules": {"high_fiber_days": 5},
+            "reward_points": 150,
+            "active_from": datetime.utcnow(),
+            "active_to": datetime.utcnow() + timedelta(days=30)
+        }
+    ]
+    
+    for challenge_data in challenges:
+        challenge = Challenge(**challenge_data)
+        db.add(challenge)
+    
+    db.commit()
+    print(f"Loaded {len(challenges)} sample challenges")
+    db.close()
+
+def main():
+    """Main function to load the MFP dataset"""
+    # Update this path to match your dataset location
+    dataset_path = r"C:\Users\prity\major-project-redo\mfp-diaries.tsv"
+    
+    # Check if file exists
+    if not os.path.exists(dataset_path):
+        print(f"Dataset file not found at: {dataset_path}")
+        print("Please check the file path and make sure the file exists.")
+        return
+    
+    # Create database tables
+    Base.metadata.create_all(bind=engine)
+    print("Database tables created successfully")
+    
+    # Initialize the loader
+    loader = MFPDatasetLoader(dataset_path)
+    
+    # Load the dataset (limiting to 10,000 records for initial testing)
+    # You can increase this number or remove the limit once you're satisfied with the results
+    success = loader.load_and_process_data(max_records=10000)
+    
+    if success:
+        print("Dataset loaded successfully!")
+        
+        # Load sample challenges
+        load_sample_challenges()
+        
+        print("\n✅ Database setup complete!")
+        print("You can now start the application and use the real food data.")
+        print("\nNext steps:")
+        print("1. Start the application: docker-compose up")
+        print("2. Register a user and try generating meal plans")
+        print("3. The system will now use your MFP dataset for food items")
+    else:
+        print("❌ Failed to load dataset. Please check the error messages above.")
+
+if __name__ == "__main__":
+    main()
+
+# Alternative simpler loader if the main one has issues
+def simple_loader():
+    """Simplified loader for basic testing"""
+    dataset_path = r"C:\Users\prity\major-project-redo\mfp-diaries.tsv"
+    
+    try:
+        # Read first 1000 rows to understand structure
+        df = pd.read_csv(dataset_path, sep='\t', nrows=1000)
+        print("Dataset structure:")
+        print(df.info())
+        print("\nColumn names:")
+        print(list(df.columns))
+        print("\nFirst 5 rows:")
+        print(df.head())
+        print("\nSample food names:")
+        if 'Food' in df.columns:
+            print(df['Food'].head(10).tolist())
+        elif 'food' in df.columns:
+            print(df['food'].head(10).tolist())
+        
+    except Exception as e:
+        print(f"Error reading dataset: {e}")
+        print("Try checking the file encoding or delimiter")
+
+# Run simple loader first to understand your data structure
+if __name__ == "__main__":
+    print("Choose an option:")
+    print("1. Load full dataset (main)")
+    print("2. Analyze dataset structure (simple)")
+    
+    choice = input("Enter your choice (1 or 2): ").strip()
+    
+    if choice == "2":
+        simple_loader()
+    else:
+        main()

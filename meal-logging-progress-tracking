@@ -1,0 +1,290 @@
+# app/routers/meals.py
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.orm import Session
+from sqlalchemy import and_
+from typing import List, Optional
+from datetime import datetime, date
+
+from app.database import get_db, User, MealLog, FoodItem
+from app.auth import get_current_user
+from app.schemas import MealLogCreate, MealLogResponse
+
+router = APIRouter()
+
+@router.post("/log", response_model=MealLogResponse, status_code=201)
+def log_meal(
+    meal_data: MealLogCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    # Verify food item exists
+    food_item = db.query(FoodItem).filter(FoodItem.id == meal_data.food_id).first()
+    if not food_item:
+        raise HTTPException(status_code=404, detail="Food item not found")
+    
+    # Create meal log
+    meal_log = MealLog(
+        user_id=current_user.id,
+        food_id=meal_data.food_id,
+        quantity=meal_data.quantity,
+        timestamp=meal_data.timestamp or datetime.utcnow(),
+        planned=meal_data.planned
+    )
+    
+    db.add(meal_log)
+    db.commit()
+    db.refresh(meal_log)
+    
+    return meal_log
+
+@router.get("/logs", response_model=List[MealLogResponse])
+def get_meal_logs(
+    start_date: Optional[date] = Query(None),
+    end_date: Optional[date] = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    query = db.query(MealLog).filter(MealLog.user_id == current_user.id)
+    
+    if start_date:
+        query = query.filter(MealLog.timestamp >= start_date)
+    if end_date:
+        query = query.filter(MealLog.timestamp <= end_date)
+    
+    meal_logs = query.order_by(MealLog.timestamp.desc()).all()
+    return meal_logs
+
+@router.delete("/logs/{log_id}")
+def delete_meal_log(
+    log_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    meal_log = db.query(MealLog).filter(
+        and_(MealLog.id == log_id, MealLog.user_id == current_user.id)
+    ).first()
+    
+    if not meal_log:
+        raise HTTPException(status_code=404, detail="Meal log not found")
+    
+    db.delete(meal_log)
+    db.commit()
+    
+    return {"message": "Meal log deleted successfully"}
+
+# app/routers/tracking.py
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.orm import Session
+from sqlalchemy import func, and_
+from typing import Optional, List, Dict, Any
+from datetime import datetime, date, timedelta
+
+from app.database import get_db, User, MealLog, FoodItem
+from app.auth import get_current_user
+from app.services.nutrition import NutritionCalculator
+
+router = APIRouter()
+
+class TrackingService:
+    def __init__(self, db: Session):
+        self.db = db
+        self.nutrition_calc = NutritionCalculator()
+    
+    def get_nutrition_summary(self, user_id: int, start_date: date, end_date: date) -> Dict[str, Any]:
+        """Get nutrition summary for date range"""
+        query = self.db.query(
+            MealLog.timestamp,
+            FoodItem.calories,
+            FoodItem.protein_g,
+            FoodItem.carbs_g,
+            FoodItem.fat_g,
+            FoodItem.fiber_g,
+            MealLog.quantity
+        ).join(FoodItem).filter(
+            and_(
+                MealLog.user_id == user_id,
+                MealLog.timestamp >= start_date,
+                MealLog.timestamp <= end_date
+            )
+        ).all()
+        
+        total_calories = 0
+        total_protein = 0
+        total_carbs = 0
+        total_fat = 0
+        total_fiber = 0
+        daily_data = {}
+        
+        for log in query:
+            day = log.timestamp.date()
+            if day not in daily_data:
+                daily_data[day] = {
+                    'calories': 0, 'protein': 0, 'carbs': 0, 'fat': 0, 'fiber': 0
+                }
+            
+            calories = log.calories * log.quantity
+            protein = log.protein_g * log.quantity
+            carbs = log.carbs_g * log.quantity
+            fat = log.fat_g * log.quantity
+            fiber = log.fiber_g * log.quantity
+            
+            daily_data[day]['calories'] += calories
+            daily_data[day]['protein'] += protein
+            daily_data[day]['carbs'] += carbs
+            daily_data[day]['fat'] += fat
+            daily_data[day]['fiber'] += fiber
+            
+            total_calories += calories
+            total_protein += protein
+            total_carbs += carbs
+            total_fat += fat
+            total_fiber += fiber
+        
+        days_count = len(daily_data) or 1
+        
+        return {
+            'total_calories': round(total_calories, 2),
+            'total_protein': round(total_protein, 2),
+            'total_carbs': round(total_carbs, 2),
+            'total_fat': round(total_fat, 2),
+            'total_fiber': round(total_fiber, 2),
+            'avg_daily_calories': round(total_calories / days_count, 2),
+            'avg_daily_protein': round(total_protein / days_count, 2),
+            'avg_daily_carbs': round(total_carbs / days_count, 2),
+            'avg_daily_fat': round(total_fat / days_count, 2),
+            'daily_breakdown': [
+                {
+                    'date': str(day),
+                    'calories': round(data['calories'], 2),
+                    'protein': round(data['protein'], 2),
+                    'carbs': round(data['carbs'], 2),
+                    'fat': round(data['fat'], 2),
+                    'fiber': round(data['fiber'], 2)
+                }
+                for day, data in sorted(daily_data.items())
+            ]
+        }
+    
+    def get_adherence_score(self, user: User, days: int = 7) -> Dict[str, Any]:
+        """Calculate adherence score based on planned vs actual meals"""
+        end_date = datetime.utcnow().date()
+        start_date = end_date - timedelta(days=days)
+        
+        planned_meals = self.db.query(MealLog).filter(
+            and_(
+                MealLog.user_id == user.id,
+                MealLog.planned == True,
+                MealLog.timestamp >= start_date,
+                MealLog.timestamp <= end_date
+            )
+        ).count()
+        
+        total_meals = self.db.query(MealLog).filter(
+            and_(
+                MealLog.user_id == user.id,
+                MealLog.timestamp >= start_date,
+                MealLog.timestamp <= end_date
+            )
+        ).count()
+        
+        if total_meals == 0:
+            adherence_score = 0
+        else:
+            adherence_score = (planned_meals / total_meals) * 100
+        
+        target_calories = self.nutrition_calc.get_target_calories(user)
+        summary = self.get_nutrition_summary(user.id, start_date, end_date)
+        avg_calories = summary.get('avg_daily_calories', 0)
+        
+        calorie_adherence = 100 - abs(avg_calories - target_calories) / target_calories * 100
+        calorie_adherence = max(0, calorie_adherence)
+        
+        overall_score = (adherence_score * 0.6) + (calorie_adherence * 0.4)
+        
+        return {
+            'overall_score': round(overall_score, 2),
+            'plan_adherence': round(adherence_score, 2),
+            'calorie_adherence': round(calorie_adherence, 2),
+            'planned_meals': planned_meals,
+            'total_meals': total_meals,
+            'target_calories': round(target_calories, 2),
+            'avg_actual_calories': round(avg_calories, 2)
+        }
+
+@router.get("/summary")
+def get_tracking_summary(
+    start_date: Optional[date] = Query(None),
+    end_date: Optional[date] = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if not start_date:
+        start_date = datetime.utcnow().date() - timedelta(days=7)
+    if not end_date:
+        end_date = datetime.utcnow().date()
+    
+    tracking_service = TrackingService(db)
+    summary = tracking_service.get_nutrition_summary(current_user.id, start_date, end_date)
+    
+    # Add target calories for comparison
+    target_calories = NutritionCalculator.get_target_calories(current_user)
+    summary['target_daily_calories'] = round(target_calories, 2)
+    
+    return summary
+
+@router.get("/adherence")
+def get_adherence_score(
+    days: int = Query(7, ge=1, le=30),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    tracking_service = TrackingService(db)
+    return tracking_service.get_adherence_score(current_user, days)
+
+@router.get("/progress")
+def get_progress_data(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get overall progress data for dashboard"""
+    tracking_service = TrackingService(db)
+    
+    # Get last 30 days summary
+    summary = tracking_service.get_nutrition_summary(
+        current_user.id,
+        datetime.utcnow().date() - timedelta(days=30),
+        datetime.utcnow().date()
+    )
+    
+    # Get adherence score
+    adherence = tracking_service.get_adherence_score(current_user, 7)
+    
+    # Calculate streaks (simplified)
+    recent_logs = db.query(MealLog).filter(
+        MealLog.user_id == current_user.id
+    ).order_by(MealLog.timestamp.desc()).limit(10).all()
+    
+    current_streak = 0
+    if recent_logs:
+        last_log_date = recent_logs[0].timestamp.date()
+        today = datetime.utcnow().date()
+        
+        if last_log_date == today or last_log_date == today - timedelta(days=1):
+            current_streak = 1
+            # Simple streak calculation - count consecutive days with logs
+            logged_dates = set()
+            for log in recent_logs:
+                logged_dates.add(log.timestamp.date())
+            
+            check_date = last_log_date
+            while check_date in logged_dates and current_streak < 30:
+                current_streak += 1
+                check_date -= timedelta(days=1)
+    
+    return {
+        'nutrition_summary': summary,
+        'adherence': adherence,
+        'current_streak': current_streak,
+        'total_meals_logged': len(current_user.meal_logs),
+        'target_calories': round(NutritionCalculator.get_target_calories(current_user), 2)
+    }

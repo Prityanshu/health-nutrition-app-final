@@ -1,0 +1,301 @@
+# Dockerfile (Backend)
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY app/ app/
+COPY scripts/ scripts/
+COPY main.py .
+
+# Expose port
+EXPOSE 8000
+
+# Command to run the application
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+---
+
+# requirements.txt
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+sqlalchemy==2.0.23
+pydantic==2.5.0
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.6
+pydantic[email]==2.5.0
+
+# Optional dependencies for production
+psycopg2-binary==2.9.9
+redis==5.0.1
+celery==5.3.4
+
+---
+
+# docker-compose.yml
+version: '3.8'
+
+services:
+  # Backend API
+  backend:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://nutrition_user:nutrition_pass@db:5432/nutrition_db
+      - SECRET_KEY=your-super-secret-key-change-in-production
+    depends_on:
+      - db
+      - redis
+    volumes:
+      - ./app:/app/app
+      - ./scripts:/app/scripts
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+  # PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=nutrition_db
+      - POSTGRES_USER=nutrition_user
+      - POSTGRES_PASSWORD=nutrition_pass
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  # Redis for caching and background tasks
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  # Celery Worker (for background tasks)
+  worker:
+    build: .
+    environment:
+      - DATABASE_URL=postgresql://nutrition_user:nutrition_pass@db:5432/nutrition_db
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - db
+      - redis
+    volumes:
+      - ./app:/app/app
+    command: ["celery", "-A", "app.workers.tasks", "worker", "--loglevel=info"]
+
+  # Frontend (React - for development)
+  frontend:
+    image: node:18-alpine
+    working_dir: /app
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+    command: sh -c "npm install && npm start"
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000/api
+
+volumes:
+  postgres_data:
+
+---
+
+# .env.example
+# Database
+DATABASE_URL=sqlite:///./nutrition_app.db
+# For production: DATABASE_URL=postgresql://user:password@localhost/nutrition_db
+
+# JWT Security
+SECRET_KEY=your-super-secret-key-change-in-production-min-32-chars
+ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+
+# Redis (for production)
+REDIS_URL=redis://localhost:6379/0
+
+# Email settings (optional)
+SMTP_SERVER=smtp.gmail.com
+SMTP_PORT=587
+EMAIL_ADDRESS=your-app@gmail.com
+EMAIL_PASSWORD=your-app-password
+
+---
+
+# package.json (Frontend)
+{
+  "name": "nutriplan-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "@testing-library/jest-dom": "^5.17.0",
+    "@testing-library/react": "^13.4.0",
+    "@testing-library/user-event": "^13.5.0",
+    "lucide-react": "^0.263.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-scripts": "5.0.1",
+    "web-vitals": "^2.1.4"
+  },
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build",
+    "test": "react-scripts test",
+    "eject": "react-scripts eject"
+  },
+  "eslintConfig": {
+    "extends": [
+      "react-app",
+      "react-app/jest"
+    ]
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
+  "proxy": "http://localhost:8000"
+}
+
+---
+
+# Quick Start Guide
+
+## Development Setup (Local)
+
+### 1. Backend Setup
+```bash
+# Create virtual environment
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Run database migrations and load sample data
+python scripts/load_sample_data.py
+
+# Start the backend server
+uvicorn main:app --reload
+```
+
+### 2. Frontend Setup (Create React App)
+```bash
+# Create React app
+npx create-react-app nutriplan-frontend
+cd nutriplan-frontend
+
+# Install additional dependencies
+npm install lucide-react
+
+# Replace src/App.js with the React component provided above
+# Start the frontend
+npm start
+```
+
+## Docker Setup (Recommended)
+
+### 1. Using Docker Compose
+```bash
+# Clone the repository
+git clone <your-repo>
+cd nutrition-meal-planning
+
+# Create environment file
+cp .env.example .env
+# Edit .env with your settings
+
+# Build and start all services
+docker-compose up --build
+
+# Load sample data (in another terminal)
+docker-compose exec backend python scripts/load_sample_data.py
+```
+
+### 2. Access the application
+- Frontend: http://localhost:3000
+- Backend API: http://localhost:8000
+- API Documentation: http://localhost:8000/docs
+- Database: localhost:5432
+
+## Project Structure
+```
+nutrition-meal-planning/
+├── app/
+│   ├── __init__.py
+│   ├── main.py              # FastAPI app
+│   ├── database.py          # Database models and config
+│   ├── auth.py              # Authentication utilities
+│   ├── schemas.py           # Pydantic schemas
+│   ├── config.py            # Settings
+│   ├── routers/             # API endpoints
+│   │   ├── auth.py
+│   │   ├── users.py
+│   │   ├── planner.py
+│   │   ├── meals.py
+│   │   ├── tracking.py
+│   │   ├── goals.py
+│   │   ├── recipes.py
+│   │   └── gamification.py
+│   ├── services/            # Business logic
+│   │   └── nutrition.py
+│   └── workers/             # Background tasks
+│       └── tasks.py
+├── scripts/
+│   └── load_sample_data.py  # Sample data loader
+├── frontend/                # React frontend
+├── requirements.txt
+├── Dockerfile
+├── docker-compose.yml
+└── README.md
+```
+
+## Key Features Implemented
+
+### ✅ Backend (FastAPI)
+- User authentication (JWT)
+- User profiles with health conditions
+- Meal planning algorithm (greedy approach)
+- Nutrition calculation (BMR/TDEE)
+- Meal logging with timestamps
+- Progress tracking and analytics
+- Gamification system (points, achievements, streaks)
+- Basic recipe generation
+- Sample food database (Indian, Continental, Chinese, Mediterranean, Mexican)
+
+### ✅ Frontend (React)
+- User registration and login
+- Profile management
+- Interactive meal planner
+- Meal logging interface
+- Progress dashboard with charts
+- Responsive design
+- Real-time API integration
+
+### 🔄 Next Steps for Enhancement
+
+1. **ML Integration**
+   - User preference learning
+   - Recommendation engine
+   - Dynamic plan adaptation
+
+2. **Advanced Features**
+   - PDF export for meal plans
+   - Barcode scanning for food items
+   - Wearables integration

@@ -1,0 +1,464 @@
+# app/routers/recipes.py
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from typing import List, Optional, Dict, Any
+from pydantic import BaseModel
+
+from app.database import get_db, User, FoodItem
+from app.auth import get_current_user
+
+router = APIRouter()
+
+class RecipeRequest(BaseModel):
+    ingredients: List[str]
+    target_calories: Optional[int] = None
+    cuisine_type: Optional[str] = None
+    prep_time: Optional[int] = None  # in minutes
+    difficulty: Optional[str] = "medium"
+
+class RecipeResponse(BaseModel):
+    title: str
+    ingredients: List[str]
+    instructions: List[str]
+    estimated_calories: int
+    estimated_protein: float
+    prep_time: int
+    difficulty: str
+    cuisine_type: str
+
+class RecipeGenerator:
+    def __init__(self, db: Session):
+        self.db = db
+        # This is a simple template-based generator
+        # In production, you'd integrate with an LLM like OpenAI GPT or use a more sophisticated system
+    
+    def generate_simple_recipe(self, request: RecipeRequest) -> RecipeResponse:
+        """Generate a simple recipe based on available ingredients"""
+        # Find matching food items
+        available_foods = self.db.query(FoodItem).filter(
+            FoodItem.name.in_(request.ingredients)
+        ).all()
+        
+        if not available_foods:
+            # Fallback - find foods that contain the ingredient names
+            foods_query = self.db.query(FoodItem)
+            for ingredient in request.ingredients:
+                foods_query = foods_query.filter(
+                    FoodItem.name.ilike(f"%{ingredient}%")
+                )
+            available_foods = foods_query.limit(5).all()
+        
+        if not available_foods:
+            raise ValueError("No matching ingredients found in database")
+        
+        # Calculate total nutrition
+        total_calories = sum(food.calories for food in available_foods)
+        total_protein = sum(food.protein_g for food in available_foods)
+        
+        # Generate recipe title
+        main_ingredient = available_foods[0].name
+        cuisine = request.cuisine_type or available_foods[0].cuisine_type or "Mixed"
+        title = f"{cuisine.title()} Style {main_ingredient} Bowl"
+        
+        # Generate ingredients list
+        ingredients = [f"1 serving of {food.name}" for food in available_foods]
+        
+        # Generate simple instructions
+        instructions = [
+            "Prepare all ingredients according to package instructions",
+            f"Cook the {main_ingredient} as your main base",
+            "Add remaining ingredients according to taste",
+            "Season with salt, pepper, and preferred spices",
+            "Serve hot and enjoy!"
+        ]
+        
+        # Estimate prep time based on complexity
+        complexity_times = {"easy": 15, "medium": 30, "hard": 45}
+        estimated_prep_time = complexity_times.get(request.difficulty, 30)
+        
+        return RecipeResponse(
+            title=title,
+            ingredients=ingredients,
+            instructions=instructions,
+            estimated_calories=int(total_calories),
+            estimated_protein=round(total_protein, 2),
+            prep_time=request.prep_time or estimated_prep_time,
+            difficulty=request.difficulty or "medium",
+            cuisine_type=cuisine
+        )
+
+@router.post("/generate", response_model=RecipeResponse)
+def generate_recipe(
+    recipe_request: RecipeRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Generate a recipe based on available ingredients"""
+    try:
+        generator = RecipeGenerator(db)
+        recipe = generator.generate_simple_recipe(recipe_request)
+        return recipe
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.get("/suggestions")
+def get_recipe_suggestions(
+    cuisine_type: Optional[str] = None,
+    max_calories: Optional[int] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get recipe suggestions based on user preferences"""
+    query = db.query(FoodItem)
+    
+    if cuisine_type:
+        query = query.filter(FoodItem.cuisine_type == cuisine_type)
+    elif current_user.cuisine_pref and current_user.cuisine_pref != "mixed":
+        query = query.filter(FoodItem.cuisine_type == current_user.cuisine_pref)
+    
+    if max_calories:
+        query = query.filter(FoodItem.calories <= max_calories)
+    
+    # Apply health condition filters
+    if current_user.health_conditions.get("diabetes"):
+        query = query.filter(FoodItem.diabetic_friendly == True)
+    
+    if current_user.health_conditions.get("hypertension"):
+        query = query.filter(FoodItem.hypertension_friendly == True)
+    
+    foods = query.limit(10).all()
+    
+    suggestions = []
+    for food in foods:
+        suggestions.append({
+            'base_ingredient': food.name,
+            'cuisine_type': food.cuisine_type,
+            'calories_per_serving': food.calories,
+            'protein_per_serving': food.protein_g,
+            'suggested_recipe': f"Simple {food.name} Bowl"
+        })
+    
+    return {'suggestions': suggestions}
+
+# scripts/load_sample_data.py
+"""
+Data loader - loads either sample data or MFP dataset
+"""
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from sqlalchemy.orm import Session
+from app.database import SessionLocal, FoodItem, Challenge, PrepComplexity
+from datetime import datetime, timedelta
+
+def load_sample_food_data():
+    """Load sample food data into the database (fallback if MFP dataset not available)"""
+    db = SessionLocal()
+    
+    # Check if data already exists
+    existing_food = db.query(FoodItem).first()
+    if existing_food:
+        print("Food data already exists. Skipping...")
+        db.close()
+        return
+    
+    sample_foods = [
+        # Indian foods
+        {
+            "name": "Brown Rice",
+            "cuisine_type": "indian",
+            "calories": 216,
+            "protein_g": 5.0,
+            "carbs_g": 45.0,
+            "fat_g": 1.8,
+            "fiber_g": 3.5,
+            "cost": 2.0,
+            "gi": 50,
+            "low_sodium": True,
+            "diabetic_friendly": True,
+            "hypertension_friendly": True,
+            "prep_complexity": PrepComplexity.LOW,
+            "ingredients": "Brown rice, water",
+            "tags": ["whole_grain", "gluten_free"]
+        },
+        {
+            "name": "Dal (Lentils)",
+            "cuisine_type": "indian",
+            "calories": 230,
+            "protein_g": 18.0,
+            "carbs_g": 40.0,
+            "fat_g": 0.8,
+            "fiber_g": 16.0,
+            "cost": 1.5,
+            "gi": 30,
+            "low_sodium": True,
+            "diabetic_friendly": True,
+            "hypertension_friendly": True,
+            "prep_complexity": PrepComplexity.MEDIUM,
+            "ingredients": "Lentils, turmeric, cumin, onions",
+            "tags": ["protein_rich", "fiber_rich", "vegetarian"]
+        },
+        {
+            "name": "Grilled Chicken Breast",
+            "cuisine_type": "indian",
+            "calories": 165,
+            "protein_g": 31.0,
+            "carbs_g": 0.0,
+            "fat_g": 3.6,
+            "fiber_g": 0.0,
+            "cost": 8.0,
+            "gi": 0,
+            "low_sodium": False,
+            "diabetic_friendly": True,
+            "hypertension_friendly": False,
+            "prep_complexity": PrepComplexity.MEDIUM,
+            "ingredients": "Chicken breast, spices, yogurt marinade",
+            "tags": ["high_protein", "low_carb"]
+        },
+        {
+            "name": "Paneer Tikka",
+            "cuisine_type": "indian",
+            "calories": 321,
+            "protein_g": 14.0,
+            "carbs_g": 6.0,
+            "fat_g": 25.0,
+            "fiber_g": 1.0,
+            "cost": 6.0,
+            "gi": 25,
+            "low_sodium": False,
+            "diabetic_friendly": True,
+            "hypertension_friendly": False,
+            "prep_complexity": PrepComplexity.HIGH,
+            "ingredients": "Paneer, yogurt, spices, bell peppers",
+            "tags": ["vegetarian", "protein_rich"]
+        },
+        {
+            "name": "Mixed Vegetable Curry",
+            "cuisine_type": "indian",
+            "calories": 150,
+            "protein_g": 4.0,
+            "carbs_g": 20.0,
+            "fat_g": 7.0,
+            "fiber_g": 6.0,
+            "cost": 3.0,
+            "gi": 35,
+            "low_sodium": False,
+            "diabetic_friendly": True,
+            "hypertension_friendly": False,
+            "prep_complexity": PrepComplexity.MEDIUM,
+            "ingredients": "Mixed vegetables, tomatoes, onions, spices",
+            "tags": ["vegetarian", "fiber_rich"]
+        },
+        
+        # Continental foods
+        {
+            "name": "Quinoa Salad",
+            "cuisine_type": "continental",
+            "calories": 222,
+            "protein_g": 8.0,
+            "carbs_g": 39.0,
+            "fat_g": 3.6,
+            "fiber_g": 5.0,
+            "cost": 4.5,
+            "gi": 53,
+            "low_sodium": True,
+            "diabetic_friendly": True,
+            "hypertension_friendly": True,
+            "prep_complexity": PrepComplexity.LOW,
+            "ingredients": "Quinoa, vegetables, olive oil, lemon",
+            "tags": ["superfood", "gluten_free", "complete_protein"]
+        },
+        {
+            "name": "Grilled Salmon",
+            "cuisine_type": "continental",
+            "calories": 206,
+            "protein_g": 22.0,
+            "carbs_g": 0.0,
+            "fat_g": 12.0,
+            "fiber_g": 0.0,
+            "cost": 12.0,
+            "gi": 0,
+            "low_sodium": False,
+            "diabetic_friendly": True,
+            "hypertension_friendly": False,
+            "prep_complexity": PrepComplexity.MEDIUM,
+            "ingredients": "Salmon fillet, herbs, lemon, olive oil",
+            "tags": ["omega3", "high_protein", "low_carb"]
+        },
+        {
+            "name": "Greek Yogurt Bowl",
+            "cuisine_type": "continental",
+            "calories": 130,
+            "protein_g": 15.0,
+            "carbs_g": 11.0,
+            "fat_g": 4.0,
+            "fiber_g": 2.0,
+            "cost": 3.5,
+            "gi": 35,
+            "low_sodium": True,
+            "diabetic_friendly": True,
+            "hypertension_friendly": True,
+            "prep_complexity": PrepComplexity.LOW,
+            "ingredients": "Greek yogurt, berries, nuts, honey",
+            "tags": ["probiotic", "protein_rich", "quick"]
+        },
+        {
+            "name": "Avocado Toast",
+            "cuisine_type": "continental",
+            "calories": 234,
+            "protein_g": 6.0,
+            "carbs_g": 20.0,
+            "fat_g": 15.0,
+            "fiber_g": 10.0,
+            "cost": 5.0,
+            "gi": 45,
+            "low_sodium": True,
+            "diabetic_friendly": True,
+            "hypertension_friendly": True,
+            "prep_complexity": PrepComplexity.LOW,
+            "ingredients": "Whole grain bread, avocado, lime, salt",
+            "tags": ["healthy_fats", "fiber_rich", "quick"]
+        },
+        
+        # Chinese foods
+        {
+            "name": "Steamed Broccoli",
+            "cuisine_type": "chinese",
+            "calories": 55,
+            "protein_g": 3.7,
+            "carbs_g": 11.0,
+            "fat_g": 0.6,
+            "fiber_g": 5.0,
+            "cost": 2.0,
+            "gi": 25,
+            "low_sodium": True,
+            "diabetic_friendly": True,
+            "hypertension_friendly": True,
+            "prep_complexity": PrepComplexity.LOW,
+            "ingredients": "Fresh broccoli, garlic, ginger",
+            "tags": ["low_calorie", "high_fiber", "antioxidant"]
+        },
+        {
+            "name": "Tofu Stir Fry",
+            "cuisine_type": "chinese",
+            "calories": 180,
+            "protein_g": 12.0,
+            "carbs_g": 8.0,
+            "fat_g": 11.0,
+            "fiber_g": 3.0,
+            "cost": 4.0,
+            "gi": 30,
+            "low_sodium": False,
+            "diabetic_friendly": True,
+            "hypertension_friendly": False,
+            "prep_complexity": PrepComplexity.MEDIUM,
+            "ingredients": "Tofu, vegetables, soy sauce, ginger",
+            "tags": ["vegetarian", "protein_rich", "low_carb"]
+        },
+        
+        # Mediterranean foods
+        {
+            "name": "Hummus with Vegetables",
+            "cuisine_type": "mediterranean",
+            "calories": 166,
+            "protein_g": 8.0,
+            "carbs_g": 14.0,
+            "fat_g": 10.0,
+            "fiber_g": 6.0,
+            "cost": 3.0,
+            "gi": 25,
+            "low_sodium": True,
+            "diabetic_friendly": True,
+            "hypertension_friendly": True,
+            "prep_complexity": PrepComplexity.LOW,
+            "ingredients": "Chickpeas, tahini, vegetables, olive oil",
+            "tags": ["plant_based", "fiber_rich", "healthy_fats"]
+        },
+        {
+            "name": "Grilled Chicken Souvlaki",
+            "cuisine_type": "mediterranean",
+            "calories": 195,
+            "protein_g": 28.0,
+            "carbs_g": 3.0,
+            "fat_g": 8.0,
+            "fiber_g": 1.0,
+            "cost": 7.0,
+            "gi": 15,
+            "low_sodium": False,
+            "diabetic_friendly": True,
+            "hypertension_friendly": False,
+            "prep_complexity": PrepComplexity.MEDIUM,
+            "ingredients": "Chicken, olive oil, lemon, herbs",
+            "tags": ["high_protein", "mediterranean_diet"]
+        },
+        
+        # Mexican foods
+        {
+            "name": "Black Bean Bowl",
+            "cuisine_type": "mexican",
+            "calories": 245,
+            "protein_g": 15.0,
+            "carbs_g": 45.0,
+            "fat_g": 1.0,
+            "fiber_g": 15.0,
+            "cost": 2.5,
+            "gi": 35,
+            "low_sodium": True,
+            "diabetic_friendly": True,
+            "hypertension_friendly": True,
+            "prep_complexity": PrepComplexity.LOW,
+            "ingredients": "Black beans, rice, corn, cilantro",
+            "tags": ["plant_based", "fiber_rich", "protein_rich"]
+        }
+    ]
+    
+    # Insert food items
+    for food_data in sample_foods:
+        food_item = FoodItem(**food_data)
+        db.add(food_item)
+    
+    db.commit()
+    print(f"Loaded {len(sample_foods)} sample food items")
+    
+    # Load sample challenges
+    challenges = [
+        {
+            "name": "7-Day Logging Challenge",
+            "description": "Log your meals for 7 consecutive days",
+            "rules": {"consecutive_days": 7, "action": "log_meal"},
+            "reward_points": 200,
+            "active_from": datetime.utcnow(),
+            "active_to": datetime.utcnow() + timedelta(days=30)
+        },
+        {
+            "name": "Protein Power Week",
+            "description": "Meet your daily protein goals for 7 days",
+            "rules": {"daily_protein_goal": True, "duration_days": 7},
+            "reward_points": 300,
+            "active_from": datetime.utcnow(),
+            "active_to": datetime.utcnow() + timedelta(days=30)
+        },
+        {
+            "name": "Vegetarian Week",
+            "description": "Go vegetarian for a full week",
+            "rules": {"vegetarian_only": True, "duration_days": 7},
+            "reward_points": 250,
+            "active_from": datetime.utcnow(),
+            "active_to": datetime.utcnow() + timedelta(days=30)
+        }
+    ]
+    
+    from app.database import Challenge
+    for challenge_data in challenges:
+        challenge = Challenge(**challenge_data)
+        db.add(challenge)
+    
+    db.commit()
+    print(f"Loaded {len(challenges)} sample challenges")
+    
+    db.close()
+    print("Sample data loading completed!")
+
+if __name__ == "__main__":
+    load_sample_food_data()
