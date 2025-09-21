@@ -27,8 +27,8 @@ function App() {
 
   // Login form state
   const [loginForm, setLoginForm] = useState({
-    username: '',
-    password: ''
+    username: 'chatbotuser',
+    password: 'testpass123'
   });
 
   // Registration form state
@@ -197,6 +197,111 @@ function App() {
     new_requirements: {}
   });
 
+  // Chatbot state
+  const [chatbotMessages, setChatbotMessages] = useState([]);
+  const [chatbotInput, setChatbotInput] = useState('');
+  const [isChatbotLoading, setIsChatbotLoading] = useState(false);
+  const [availableAgents, setAvailableAgents] = useState([]);
+
+  // Chatbot functions
+  const fetchAvailableAgents = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${API_BASE_URL}/chatbot/agents`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (response.ok) {
+        const agents = await response.json();
+        setAvailableAgents(agents);
+      }
+    } catch (error) {
+      console.error('Error fetching agents:', error);
+    }
+  };
+
+  const sendChatbotMessage = async () => {
+    if (!chatbotInput.trim() || isChatbotLoading) return;
+
+    const userMessage = {
+      id: Date.now(),
+      type: 'user',
+      content: chatbotInput.trim(),
+      timestamp: new Date()
+    };
+
+    setChatbotMessages(prev => [...prev, userMessage]);
+    setChatbotInput('');
+    setIsChatbotLoading(true);
+
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${API_BASE_URL}/chatbot/chat/simple`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          query: userMessage.content
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        let formattedResponse = data.response || 'Sorry, I couldn\'t process your request.';
+        
+        // Format the response if it's a string representation of a dict
+        if (typeof formattedResponse === 'string' && formattedResponse.startsWith('{')) {
+          try {
+            const parsedResponse = JSON.parse(formattedResponse);
+            if (parsedResponse.recipe) {
+              formattedResponse = parsedResponse.recipe;
+            } else if (parsedResponse.success && parsedResponse.data) {
+              formattedResponse = parsedResponse.data;
+            }
+          } catch (e) {
+            // Keep original response if parsing fails
+          }
+        }
+        
+        const botMessage = {
+          id: Date.now() + 1,
+          type: 'bot',
+          content: formattedResponse,
+          timestamp: new Date()
+        };
+        setChatbotMessages(prev => [...prev, botMessage]);
+      } else {
+        const errorMessage = {
+          id: Date.now() + 1,
+          type: 'bot',
+          content: 'Sorry, I encountered an error. Please try again.',
+          timestamp: new Date()
+        };
+        setChatbotMessages(prev => [...prev, errorMessage]);
+      }
+    } catch (error) {
+      console.error('Error sending message:', error);
+      const errorMessage = {
+        id: Date.now() + 1,
+        type: 'bot',
+        content: 'Sorry, I\'m having trouble connecting. Please try again.',
+        timestamp: new Date()
+      };
+      setChatbotMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setIsChatbotLoading(false);
+    }
+  };
+
+  const clearChatbotHistory = () => {
+    setChatbotMessages([]);
+  };
+
   // Goals state
   const [goals, setGoals] = useState([]);
   const [goalForm, setGoalForm] = useState({
@@ -314,6 +419,10 @@ function App() {
     // Fetch FitMentor data when fitmentor view is active
     if (activeView === 'fitmentor') {
       // FitMentor doesn't need to fetch existing data, it generates on demand
+    }
+    // Fetch chatbot agents when chatbot view is active
+    if (activeView === 'chatbot') {
+      fetchAvailableAgents();
     }
     // Fetch BudgetChef data when budgetchef view is active
     if (activeView === 'budgetchef') {
@@ -2603,7 +2712,7 @@ function App() {
 
       <div className="container mx-auto px-4 py-8">
         <div className="max-w-6xl mx-auto">
-
+          
           {/* ChefGenius Recipe Generator */}
           <div className="card mb-8">
             <h2 className="text-xl font-bold mb-6 flex items-center">
@@ -2612,12 +2721,12 @@ function App() {
             </h2>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
+                  <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Available Ingredients
                 </label>
                 <div className="flex gap-2">
-                  <input
+                    <input
                     type="text"
                     placeholder="Type ingredient name..."
                     value={ingredientSearchQuery}
@@ -2652,7 +2761,7 @@ function App() {
                   >
                     Add
                   </button>
-              </div>
+                  </div>
               
                 {/* Selected Ingredients for ChefGenius */}
                 {chefgeniusForm.ingredients.length > 0 && (
@@ -2680,44 +2789,44 @@ function App() {
               </div>
               
               <div className="space-y-4">
-              <div>
+                  <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Meal Type
                 </label>
-                <select
+                    <select
                     value={chefgeniusForm.meal_type}
                     onChange={(e) => setChefgeniusForm({...chefgeniusForm, meal_type: e.target.value})}
-                  className="form-input"
+                      className="form-input"
                 >
                   <option value="breakfast">Breakfast</option>
                   <option value="lunch">Lunch</option>
                   <option value="dinner">Dinner</option>
                   <option value="snack">Snack</option>
-                </select>
-              </div>
-              
-              <div>
+                    </select>
+                </div>
+
+                  <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                     Time Constraint (minutes)
                 </label>
-                <input
-                  type="number"
+                    <input
+                      type="number"
                   min="15"
                   max="300"
                     value={chefgeniusForm.time_constraint}
                     onChange={(e) => setChefgeniusForm({...chefgeniusForm, time_constraint: parseInt(e.target.value)})}
-                    className="form-input"
-                />
-              </div>
+                      className="form-input"
+                    />
+                  </div>
               
-              <div>
+                  <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                     Dietary Restrictions
                 </label>
                   <div className="space-y-2">
                     {['vegetarian', 'vegan', 'gluten-free', 'dairy-free', 'nut-free'].map((restriction) => (
                       <label key={restriction} className="flex items-center">
-                <input
+                    <input
                           type="checkbox"
                           checked={chefgeniusForm.dietary_restrictions.includes(restriction)}
                           onChange={(e) => {
@@ -2738,19 +2847,19 @@ function App() {
                         <span className="text-sm text-gray-700 capitalize">{restriction.replace('-', ' ')}</span>
                 </label>
                       ))}
-                    </div>
                   </div>
-              </div>
-            </div>
-            
+                  </div>
+                </div>
+                </div>
+
             <div className="mt-6">
-              <button
+                <button
                 onClick={generateChefgeniusRecipe}
                 className="btn btn-primary"
                 disabled={isGeneratingChefgenius}
               >
                 {isGeneratingChefgenius ? 'Generating Recipe...' : 'Generate ChefGenius Recipe'}
-              </button>
+                </button>
             </div>
           </div>
 
@@ -2774,30 +2883,30 @@ function App() {
                   <div>
                     <span className="font-medium">Difficulty:</span>
                     <span className="ml-2 capitalize">{generatedRecipe.difficulty}</span>
-                  </div>
+                </div>
                   <div>
                     <span className="font-medium">Prep Time:</span>
                     <span className="ml-2">{generatedRecipe.preparation_time} min</span>
-                  </div>
+                </div>
                   <div>
                     <span className="font-medium">Cook Time:</span>
                     <span className="ml-2">{generatedRecipe.cooking_time} min</span>
-                  </div>
+                </div>
                 </div>
               </div>
-              
+
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                 {/* Ingredients */}
                 <div>
                   <h4 className="text-lg font-bold mb-4">Ingredients</h4>
-                  <div className="space-y-2">
+                          <div className="space-y-2">
                     {generatedRecipe.ingredients && generatedRecipe.ingredients.map((ingredient, index) => (
                       <div key={index} className="flex justify-between items-center py-2 border-b border-gray-100">
                         <span className="text-gray-800">{ingredient.name}</span>
                         <span className="text-gray-600 font-medium">
                           {ingredient.quantity} {ingredient.unit}
                         </span>
-                      </div>
+                                </div>
                     ))}
                   </div>
                 </div>
@@ -2812,11 +2921,11 @@ function App() {
                           {index + 1}
                         </span>
                         <span className="text-gray-700">{instruction}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
+                              </div>
+                            ))}
+                          </div>
+                          </div>
+                        </div>
               
               {/* Nutrition Info */}
               <div className="mt-8 bg-gray-50 rounded-lg p-6">
@@ -2850,9 +2959,9 @@ function App() {
                       <span key={index} className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm">
                         {benefit}
                       </span>
-                    ))}
-                  </div>
-                </div>
+                      ))}
+                    </div>
+                    </div>
               )}
             </div>
           )}
@@ -3074,8 +3183,8 @@ function App() {
                   placeholder="Enter your weight"
                 />
               </div>
-            </div>
-            
+              </div>
+              
             <div className="mt-4">
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Constraints (optional)
@@ -3162,8 +3271,8 @@ function App() {
                 <div>
                   <h4 className="text-lg font-bold mb-4">Adapt Your Plan</h4>
                   <div className="space-y-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
                         Current Plan
                       </label>
                       <textarea
@@ -3356,7 +3465,7 @@ function App() {
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Age (optional)
                 </label>
-                <input
+                  <input
                   type="number"
                   min="13"
                   max="100"
@@ -3365,8 +3474,8 @@ function App() {
                   className="form-input"
                   placeholder="For calorie estimation"
                 />
-              </div>
-              
+                  </div>
+                  
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Weight (kg, optional)
@@ -3423,8 +3532,8 @@ function App() {
               >
                 {isGeneratingBudgetchef ? 'Generating Plan...' : 'Generate Budget Meal Plan'}
               </button>
-            </div>
-          </div>
+                                  </div>
+                                    </div>
 
           {/* BudgetChef Generated Plan */}
           {budgetchefPlan && (
@@ -3436,7 +3545,7 @@ function App() {
               
               <div className="bg-green-50 border border-green-200 rounded-lg p-6 mb-6">
                 <div className="prose max-w-none" dangerouslySetInnerHTML={{ __html: budgetchefPlan.meal_plan.replace(/\n/g, '<br>') }} />
-              </div>
+                                </div>
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
@@ -3445,19 +3554,19 @@ function App() {
                     <div className="flex justify-between">
                       <span className="text-gray-600">Daily Budget:</span>
                       <span className="font-medium">₹{budgetchefPlan.budget_per_day}</span>
-                    </div>
+                                </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">Calorie Target:</span>
                       <span className="font-medium">{budgetchefPlan.calorie_target || 'Estimated'}</span>
-                    </div>
+                              </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">Meals per Day:</span>
                       <span className="font-medium">{budgetchefPlan.meals_per_day}</span>
-                    </div>
+                            </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">Cooking Time:</span>
                       <span className="font-medium capitalize">{budgetchefPlan.cooking_time}</span>
-                    </div>
+                        </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">Skill Level:</span>
                       <span className="font-medium capitalize">{budgetchefPlan.skill_level}</span>
@@ -3466,8 +3575,8 @@ function App() {
                       <div className="flex justify-between">
                         <span className="text-gray-600">Dietary Preferences:</span>
                         <span className="font-medium">{budgetchefPlan.dietary_preferences.join(', ')}</span>
-                      </div>
-                    )}
+                    </div>
+                  )}
                   </div>
                 </div>
                 
@@ -3528,21 +3637,21 @@ function App() {
                         />
                       </div>
                     </div>
-                    <button
+                          <button
                       onClick={adaptBudgetchefPlan}
                       className="btn btn-secondary"
                       disabled={isGeneratingBudgetchef || !budgetAdaptationForm.current_plan || !budgetAdaptationForm.feedback}
                     >
                       {isGeneratingBudgetchef ? 'Adapting Plan...' : 'Adapt Meal Plan'}
-                    </button>
+                          </button>
                   </div>
                 </div>
+                    </div>
+                  </div>
+                )}
+
               </div>
             </div>
-          )}
-
-        </div>
-      </div>
     </div>
   );
 
@@ -3570,7 +3679,7 @@ function App() {
               >
                 Logout
               </button>
-            </div>
+          </div>
           </div>
         </div>
       </header>
@@ -3579,14 +3688,14 @@ function App() {
         <div className="max-w-6xl mx-auto">
 
           {/* CulinaryExplorer Regional Cuisine Planner */}
-          <div className="card mb-8">
-            <h2 className="text-xl font-bold mb-6 flex items-center">
+            <div className="card mb-8">
+              <h2 className="text-xl font-bold mb-6 flex items-center">
               <Globe className="mr-2" size={24} />
               Explore Regional Cuisines & Cultural Foods
-            </h2>
-            
+              </h2>
+              
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
+                  <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Cuisine Region *
                 </label>
@@ -3647,9 +3756,9 @@ function App() {
                     <option value="puducherry">Puducherry</option>
                   </optgroup>
                 </select>
-              </div>
+                  </div>
               
-              <div>
+                  <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Meal Type *
                 </label>
@@ -3664,9 +3773,9 @@ function App() {
                   <option value="snack">Snack</option>
                   <option value="full_day">Full Day Plan</option>
                 </select>
-              </div>
+                  </div>
               
-              <div>
+                  <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Time Constraint (minutes) *
                 </label>
@@ -3678,9 +3787,9 @@ function App() {
                   onChange={(e) => setCulinaryexplorerForm({...culinaryexplorerForm, time_constraint: parseInt(e.target.value)})}
                   className="form-input"
                 />
-              </div>
+                  </div>
               
-              <div>
+                  <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Cooking Skill Level *
                 </label>
@@ -3693,14 +3802,14 @@ function App() {
                   <option value="intermediate">Intermediate</option>
                   <option value="advanced">Advanced</option>
                 </select>
+                </div>
               </div>
-            </div>
-            
+              
             <div className="mt-4">
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Dietary Restrictions (optional)
               </label>
-              <div className="space-y-2">
+                  <div className="space-y-2">
                 {['vegetarian', 'vegan', 'gluten-free', 'dairy-free', 'nut-free', 'low-carb', 'high-protein', 'keto', 'paleo', 'halal', 'kosher'].map((restriction) => (
                   <label key={restriction} className="flex items-center">
                     <input
@@ -3723,10 +3832,10 @@ function App() {
                     />
                     <span className="text-sm text-gray-700 capitalize">{restriction.replace('-', ' ')}</span>
                   </label>
-                ))}
-              </div>
-            </div>
-            
+                    ))}
+                  </div>
+                </div>
+                
             <div className="mt-6">
               <button
                 onClick={generateCulinaryexplorerPlan}
@@ -3735,8 +3844,8 @@ function App() {
               >
                 {isGeneratingCulinaryexplorer ? 'Generating Plan...' : 'Generate Regional Meal Plan'}
               </button>
-            </div>
-          </div>
+                      </div>
+                  </div>
 
           {/* CulinaryExplorer Generated Plan */}
           {culinaryexplorerPlan && (
@@ -3757,28 +3866,28 @@ function App() {
                     <div className="flex justify-between">
                       <span className="text-gray-600">Cuisine Region:</span>
                       <span className="font-medium capitalize">{culinaryexplorerPlan.cuisine_region.replace('_', ' ')}</span>
-                    </div>
+                  </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">Meal Type:</span>
                       <span className="font-medium capitalize">{culinaryexplorerPlan.meal_type.replace('_', ' ')}</span>
-                    </div>
+                  </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">Time Constraint:</span>
                       <span className="font-medium">{culinaryexplorerPlan.time_constraint} minutes</span>
-                    </div>
+                  </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">Cooking Skill:</span>
                       <span className="font-medium capitalize">{culinaryexplorerPlan.cooking_skill}</span>
-                    </div>
+                  </div>
                     {culinaryexplorerPlan.dietary_restrictions.length > 0 && (
                       <div className="flex justify-between">
                         <span className="text-gray-600">Dietary Restrictions:</span>
                         <span className="font-medium">{culinaryexplorerPlan.dietary_restrictions.join(', ')}</span>
                       </div>
                     )}
-                  </div>
                 </div>
-                
+              </div>
+              
                 <div>
                   <h4 className="text-lg font-bold mb-4">Adapt Your Plan</h4>
                   <div className="space-y-4">
@@ -3793,7 +3902,7 @@ function App() {
                         rows="3"
                         placeholder="Paste your current meal plan here..."
                       />
-                    </div>
+                  </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Feedback
@@ -3805,7 +3914,7 @@ function App() {
                         rows="3"
                         placeholder="What would you like to change? What's working/not working?"
                       />
-                    </div>
+                </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -3818,7 +3927,7 @@ function App() {
                           className="form-input"
                           placeholder="e.g., Italian, Kerala"
                         />
-                      </div>
+            </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
                           New Dietary Restrictions (optional)
@@ -3832,15 +3941,15 @@ function App() {
                         />
                       </div>
                     </div>
-                    <button
+                      <button 
                       onClick={adaptCulinaryexplorerPlan}
                       className="btn btn-secondary"
                       disabled={isGeneratingCulinaryexplorer || !culinaryAdaptationForm.current_plan || !culinaryAdaptationForm.feedback}
-                    >
+                      >
                       {isGeneratingCulinaryexplorer ? 'Adapting Plan...' : 'Adapt Meal Plan'}
-                    </button>
+                      </button>
+                    </div>
                   </div>
-                </div>
               </div>
             </div>
           )}
@@ -4030,7 +4139,7 @@ function App() {
               <div className="text-center">
                 <Target className="mx-auto mb-2" size={32} />
                 <div className="font-medium">FitMentor</div>
-          </div>
+              </div>
             </button>
             <button 
               className="card hover:shadow-lg transition-shadow cursor-pointer"
@@ -4039,7 +4148,7 @@ function App() {
               <div className="text-center">
                 <Utensils className="mx-auto mb-2" size={32} />
                 <div className="font-medium">BudgetChef</div>
-        </div>
+          </div>
             </button>
             <button 
               className="card hover:shadow-lg transition-shadow cursor-pointer"
@@ -4048,7 +4157,7 @@ function App() {
               <div className="text-center">
                 <Globe className="mx-auto mb-2" size={32} />
                 <div className="font-medium">CulinaryExplorer</div>
-              </div>
+        </div>
             </button>
             <button 
               className="card hover:shadow-lg transition-shadow cursor-pointer"
@@ -4059,6 +4168,204 @@ function App() {
                 <div className="font-medium">Advanced Planner</div>
               </div>
             </button>
+            <button 
+              className="card hover:shadow-lg transition-shadow cursor-pointer"
+              onClick={() => setActiveView('chatbot')}
+            >
+              <div className="text-center">
+                <Brain className="mx-auto mb-2" size={32} />
+                <div className="font-medium">AI Chatbot</div>
+              </div>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderChatbot = () => (
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <header className="bg-white shadow">
+        <div className="container mx-auto px-4 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center">
+              <button
+                onClick={() => setActiveView('dashboard')}
+                className="btn btn-secondary mr-4"
+              >
+                <ArrowLeft size={20} className="mr-2" />
+                Back to Dashboard
+              </button>
+              <h1 className="text-2xl font-bold text-gray-900">AI Chatbot Assistant</h1>
+            </div>
+            <div className="flex items-center gap-4">
+              <span className="text-gray-700">Welcome, {user?.full_name || user?.username}</span>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <div className="container mx-auto px-4 py-8">
+        <div className="max-w-4xl mx-auto">
+          
+            {/* Service Status */}
+            <div className="card mb-6">
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-bold flex items-center">
+                  <Brain className="mr-2" size={20} />
+                  AI Service Status
+                </h2>
+                <div className="flex items-center">
+                  <div className="w-3 h-3 bg-yellow-400 rounded-full mr-2 animate-pulse"></div>
+                  <span className="text-sm text-yellow-600">Rate Limited - Using Fallback Responses</span>
+                </div>
+              </div>
+              <p className="text-sm text-gray-600 mt-2">
+                Our AI service is currently experiencing high usage. We're providing helpful fallback responses until the service is restored.
+              </p>
+            </div>
+
+            {/* Available Agents Info */}
+          {availableAgents.length > 0 && (
+            <div className="card mb-6">
+              <h2 className="text-lg font-bold mb-4 flex items-center">
+                <Brain className="mr-2" size={20} />
+                Available AI Agents
+              </h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {availableAgents.map((agent, index) => (
+                  <div key={index} className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                    <div className="font-medium text-blue-900 capitalize">{agent.name.replace(/([A-Z])/g, ' $1').trim()}</div>
+                    <div className="text-sm text-blue-700">{agent.description}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Chat Interface */}
+          <div className="card">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-bold flex items-center">
+                <Brain className="mr-2" size={24} />
+                Chat with AI Assistant
+              </h2>
+              <button
+                onClick={clearChatbotHistory}
+                className="btn btn-secondary text-sm"
+                disabled={chatbotMessages.length === 0}
+              >
+                Clear History
+              </button>
+            </div>
+
+            {/* Messages */}
+            <div className="h-96 overflow-y-auto border border-gray-200 rounded-lg p-4 mb-4 bg-gray-50">
+              {chatbotMessages.length === 0 ? (
+                <div className="text-center text-gray-500 py-8">
+                  <Brain size={48} className="mx-auto mb-4 text-gray-300" />
+                  <p>Start a conversation with our AI assistant!</p>
+                  <p className="text-sm mt-2">Try asking about recipes, meal plans, workouts, or nutrition advice.</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {chatbotMessages.map((message) => (
+                    <div
+                      key={message.id}
+                      className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
+                    >
+                      <div
+                        className={`max-w-xs lg:max-w-2xl px-4 py-2 rounded-lg ${
+                          message.type === 'user'
+                            ? 'bg-blue-500 text-white'
+                            : 'bg-white border border-gray-200'
+                        }`}
+                      >
+                        <div className={`text-sm ${message.type === 'bot' ? 'prose prose-sm max-w-none' : ''}`}>
+                          {message.type === 'bot' ? (
+                            <div 
+                              className="whitespace-pre-wrap"
+                              dangerouslySetInnerHTML={{
+                                __html: message.content
+                                  .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                                  .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                                  .replace(/### (.*?)/g, '<h3 class="font-bold text-lg mt-4 mb-2">$1</h3>')
+                                  .replace(/## (.*?)/g, '<h2 class="font-bold text-xl mt-4 mb-2">$1</h2>')
+                                  .replace(/# (.*?)/g, '<h1 class="font-bold text-2xl mt-4 mb-2">$1</h1>')
+                                  .replace(/\n\n/g, '<br><br>')
+                                  .replace(/\n/g, '<br>')
+                                  .replace(/- (.*?)(?=\n|$)/g, '<li class="ml-4">$1</li>')
+                                  .replace(/(\d+)\. (.*?)(?=\n|$)/g, '<li class="ml-4">$1. $2</li>')
+                              }}
+                            />
+                          ) : (
+                            message.content
+                          )}
+                        </div>
+                        <div className={`text-xs mt-1 ${
+                          message.type === 'user' ? 'text-blue-100' : 'text-gray-500'
+                        }`}>
+                          {message.timestamp.toLocaleTimeString()}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  {isChatbotLoading && (
+                    <div className="flex justify-start">
+                      <div className="bg-white border border-gray-200 rounded-lg px-4 py-2">
+                        <div className="flex items-center space-x-2">
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
+                          <span className="text-sm text-gray-600">AI is thinking...</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Input */}
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={chatbotInput}
+                onChange={(e) => setChatbotInput(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && sendChatbotMessage()}
+                placeholder="Ask me anything about nutrition, recipes, workouts, or meal planning..."
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                disabled={isChatbotLoading}
+              />
+              <button
+                onClick={sendChatbotMessage}
+                disabled={!chatbotInput.trim() || isChatbotLoading}
+                className="btn btn-primary px-6"
+              >
+                {isChatbotLoading ? 'Sending...' : 'Send'}
+              </button>
+            </div>
+
+            {/* Quick Suggestions */}
+            <div className="mt-4">
+              <p className="text-sm text-gray-600 mb-2">Try asking:</p>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  "Plan a workout for muscle gain, 60 minutes, gym equipment",
+                  "I want a Kerala lunch recipe with chicken",
+                  "Create a budget meal plan for 200 rupees per day",
+                  "Analyze the nutrition in chicken curry 100g",
+                  "Suggest a 7-day meal plan for 2000 calories"
+                ].map((suggestion, index) => (
+                  <button
+                    key={index}
+                    onClick={() => setChatbotInput(suggestion)}
+                    className="text-xs bg-gray-100 hover:bg-gray-200 px-3 py-1 rounded-full transition-colors"
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -4416,6 +4723,8 @@ function App() {
       return renderCulinaryExplorer();
     } else if (activeView === 'advancedmealplanner') {
       return renderAdvancedMealPlanner();
+    } else if (activeView === 'chatbot') {
+      return renderChatbot();
     } else {
       return renderDashboard();
     }

@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import engine, Base
-from app.routers import auth, users, planner, meals, tracking, goals, recipes, gamification, ml_recommendations, fitness, budget, culinary, nutrient_analyzer, advanced_meal_planner
+from app.routers import auth, users, planner, meals, tracking, goals, recipes, gamification, ml_recommendations, fitness, budget, culinary, nutrient_analyzer, advanced_meal_planner, chatbot
 from app.routers.ai_recipe_router import router as ai_recipe_router
 
 # Create database tables
@@ -16,7 +16,7 @@ app = FastAPI(
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3001", "http://127.0.0.1:3001"],
+    allow_origins=["http://localhost:3000", "http://localhost:3001", "http://localhost:3002", "http://127.0.0.1:3000", "http://127.0.0.1:3001", "http://127.0.0.1:3002"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -36,6 +36,7 @@ app.include_router(budget.router, prefix="/api", tags=["budget"])
 app.include_router(culinary.router, prefix="/api", tags=["culinary"])
 app.include_router(nutrient_analyzer.router, prefix="/api", tags=["nutrient-analyzer"])
 app.include_router(advanced_meal_planner.router, prefix="/api", tags=["advanced-meal-planner"])
+app.include_router(chatbot.router, prefix="/api/chatbot", tags=["chatbot"])
 app.include_router(gamification.router, prefix="/api/gamification", tags=["gamification"])
 app.include_router(ml_recommendations.router, prefix="/api/ml", tags=["ml-recommendations"])
 
