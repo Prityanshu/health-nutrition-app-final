@@ -166,7 +166,7 @@ function App() {
   // Meal logging state
   const [foodItems, setFoodItems] = useState([]);
   
-  // Food search states
+  // Food search states (legacy - keeping for compatibility)
   const [foodSearchQuery, setFoodSearchQuery] = useState('');
   const [showFoodDropdown, setShowFoodDropdown] = useState(false);
   const [filteredFoodItems, setFilteredFoodItems] = useState([]);
@@ -175,6 +175,16 @@ function App() {
     meal_type: 'breakfast',
     quantity: 1.0
   });
+
+  // NutrientAnalyzer state
+  const [nutrientAnalysis, setNutrientAnalysis] = useState(null);
+  const [isAnalyzingNutrition, setIsAnalyzingNutrition] = useState(false);
+  const [nutrientForm, setNutrientForm] = useState({
+    food_name: '',
+    serving_size: '',
+    meal_type: 'lunch'
+  });
+  const [showNutrientAnalysis, setShowNutrientAnalysis] = useState(false);
 
   // Goals state
   const [goals, setGoals] = useState([]);
@@ -901,6 +911,134 @@ function App() {
     }
   };
 
+  const analyzeNutrition = async () => {
+    if (!nutrientForm.food_name || !nutrientForm.serving_size) {
+      setError('Please enter both food name and serving size');
+      return;
+    }
+
+    setIsAnalyzingNutrition(true);
+    setError('');
+
+    try {
+      const token = localStorage.getItem('token');
+      const headers = {
+        'Authorization': `Bearer ${token}`
+      };
+
+      const response = await fetch(`${API_BASE_URL}/nutrient/analyze`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...headers
+        },
+        body: JSON.stringify({
+          food_name: nutrientForm.food_name,
+          serving_size: nutrientForm.serving_size
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.data) {
+          setNutrientAnalysis(data.data);
+          setShowNutrientAnalysis(true);
+          alert('Nutrition analysis completed!');
+        } else {
+          setError('Failed to analyze nutrition');
+        }
+      } else {
+        const errorData = await response.json();
+        let errorMessage = 'Failed to analyze nutrition';
+        
+        if (typeof errorData.detail === 'string') {
+          errorMessage = errorData.detail;
+        } else if (errorData.detail && typeof errorData.detail === 'object') {
+          if (errorData.detail.error_type === 'rate_limit') {
+            errorMessage = 'AI service is temporarily unavailable due to high usage. Please try again in a few minutes.';
+          } else {
+            errorMessage = errorData.detail.error || JSON.stringify(errorData.detail);
+          }
+        } else {
+          errorMessage = JSON.stringify(errorData.detail) || 'Failed to analyze nutrition';
+        }
+        
+        setError(errorMessage);
+      }
+    } catch (error) {
+      console.error('Error analyzing nutrition:', error);
+      setError('Failed to connect to server');
+    } finally {
+      setIsAnalyzingNutrition(false);
+    }
+  };
+
+  const logMealWithAnalysis = async () => {
+    if (!nutrientForm.food_name || !nutrientForm.serving_size) {
+      setError('Please enter both food name and serving size');
+      return;
+    }
+
+    setIsLoading(true);
+    setError('');
+
+    try {
+      const token = localStorage.getItem('token');
+      const headers = {
+        'Authorization': `Bearer ${token}`
+      };
+
+      const response = await fetch(`${API_BASE_URL}/nutrient/log-meal`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...headers
+        },
+        body: JSON.stringify({
+          food_name: nutrientForm.food_name,
+          serving_size: nutrientForm.serving_size,
+          meal_type: nutrientForm.meal_type
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.data) {
+          setNutrientAnalysis(data.data);
+          setNutrientForm({ food_name: '', serving_size: '', meal_type: 'lunch' });
+          setShowNutrientAnalysis(false);
+          alert('Meal logged with nutrition analysis successfully!');
+          // Refresh dashboard data
+          loadDashboardData();
+        } else {
+          setError('Failed to log meal with analysis');
+        }
+      } else {
+        const errorData = await response.json();
+        let errorMessage = 'Failed to log meal';
+        
+        if (typeof errorData.detail === 'string') {
+          errorMessage = errorData.detail;
+        } else if (errorData.detail && typeof errorData.detail === 'object') {
+          if (errorData.detail.error_type === 'rate_limit') {
+            errorMessage = 'AI service is temporarily unavailable due to high usage. Please try again in a few minutes.';
+          } else {
+            errorMessage = errorData.detail.error || JSON.stringify(errorData.detail);
+          }
+        } else {
+          errorMessage = JSON.stringify(errorData.detail) || 'Failed to log meal';
+        }
+        
+        setError(errorMessage);
+      }
+    } catch (error) {
+      console.error('Error logging meal with analysis:', error);
+      setError('Failed to connect to server');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const fetchGoals = async () => {
     try {
       const token = localStorage.getItem('token');
@@ -1441,7 +1579,7 @@ function App() {
                 <ArrowLeft size={20} className="mr-2" />
                 Back to Dashboard
               </button>
-              <h1 className="text-2xl font-bold text-gray-900">Log Meal</h1>
+              <h1 className="text-2xl font-bold text-gray-900">AI-Powered Meal Logging</h1>
             </div>
             <div className="flex items-center gap-4">
               <span className="text-gray-700">Welcome, {user?.full_name || user?.username}</span>
@@ -1457,126 +1595,191 @@ function App() {
       </header>
 
       <div className="container mx-auto px-4 py-8">
-        <div className="max-w-2xl mx-auto">
-          <div className="card">
-            <h2 className="text-xl font-bold mb-6 text-center">Log Your Meal</h2>
+        <div className="max-w-4xl mx-auto">
+          
+          {/* AI-Powered Nutrition Analysis */}
+          <div className="card mb-8">
+            <h2 className="text-xl font-bold mb-6 flex items-center">
+              <Brain className="mr-2" size={24} />
+              AI Nutrition Analysis
+            </h2>
+            <p className="text-gray-600 mb-6">
+              Simply enter any food name and serving size. Our AI will analyze the complete nutritional content and log your meal automatically.
+            </p>
             
-            <form onSubmit={handleLogMeal} className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
-                <label className="form-label">Search Food Item</label>
-                <div className="relative">
+                <label className="form-label">Food Name *</label>
                   <input
                     type="text"
-                    placeholder="Search from 5,621+ MyFitnessPal foods..."
-                    className="form-input pr-10"
-                    value={foodSearchQuery}
-                    onChange={(e) => setFoodSearchQuery(e.target.value)}
-                    onFocus={() => setShowFoodDropdown(true)}
-                    onBlur={() => setTimeout(() => setShowFoodDropdown(false), 200)}
-                  />
-                  <div className="absolute inset-y-0 right-0 flex items-center pr-3">
-                    <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                    </svg>
+                  placeholder="e.g., Grilled Chicken Breast, Apple, Brown Rice"
+                  className="form-input"
+                  value={nutrientForm.food_name}
+                  onChange={(e) => setNutrientForm({...nutrientForm, food_name: e.target.value})}
+                />
                   </div>
                   
-                  {/* Search Results Dropdown */}
-                  {showFoodDropdown && (foodSearchQuery.length >= 2 || (filteredFoodItems && filteredFoodItems.length > 0)) && (
-                    <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
-                      {filteredFoodItems && filteredFoodItems.length > 0 ? (
-                        filteredFoodItems.map((item) => {
-                          // Safety check to ensure item is valid
-                          if (!item || typeof item !== 'object' || !item.id) {
-                            return null;
-                          }
-                          return (
-                            <div
-                              key={item.id}
-                              className="px-4 py-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
-                              onClick={() => {
-                                setMealLogForm({...mealLogForm, food_item_id: item.id});
-                                setFoodSearchQuery(item.name || '');
-                                setShowFoodDropdown(false);
-                              }}
-                            >
-                              <div className="flex justify-between items-start">
-                                <div className="flex-1">
-                                  <div className="font-medium text-gray-900">{item.name || 'Unknown Food'}</div>
-                                  <div className="text-sm text-gray-500">
-                                    {item.cuisine_type || 'Unknown'} • {item.calories || 0} cal
-                                  </div>
-                                  {item.tags && typeof item.tags === 'string' && (
-                                    <div className="text-xs text-blue-600 mt-1">
-                                      {item.tags.split(',').slice(0, 3).join(', ')}
-                                    </div>
-                                  )}
-                                </div>
-                                <div className="text-sm text-gray-600 ml-2">
-                                  P: {item.protein_g || 0}g • C: {item.carbs_g || 0}g • F: {item.fat_g || 0}g
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })
-                      ) : foodSearchQuery.length >= 2 ? (
-                        <div className="px-4 py-3 text-gray-500 text-center">
-                          No foods found for "{foodSearchQuery}"
-                        </div>
-                      ) : null}
-                    </div>
-                  )}
-                </div>
-                
-                {/* Selected Food Display */}
-                {mealLogForm.food_item_id && (
-                  <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-md">
-                    <div className="text-sm text-blue-800">
-                      <strong>Selected:</strong> {foodItems.find(item => item.id == mealLogForm.food_item_id)?.name}
-                    </div>
-                  </div>
-                )}
-              </div>
-
               <div>
-                <label className="form-label">Meal Type</label>
-                <select
-                  required
+                <label className="form-label">Serving Size *</label>
+                <input
+                  type="text"
+                  placeholder="e.g., 150g, 1 cup, 2 pieces, 1 medium"
                   className="form-input"
-                  value={mealLogForm.meal_type}
-                  onChange={(e) => setMealLogForm({...mealLogForm, meal_type: e.target.value})}
+                  value={nutrientForm.serving_size}
+                  onChange={(e) => setNutrientForm({...nutrientForm, serving_size: e.target.value})}
+                />
+              </div>
+              
+              <div>
+                <label className="form-label">Meal Type *</label>
+                <select
+                  className="form-input"
+                  value={nutrientForm.meal_type}
+                  onChange={(e) => setNutrientForm({...nutrientForm, meal_type: e.target.value})}
                 >
                   <option value="breakfast">Breakfast</option>
                   <option value="lunch">Lunch</option>
                   <option value="dinner">Dinner</option>
                   <option value="snack">Snack</option>
                 </select>
+                                  </div>
+              
+              <div className="flex items-end">
+                <button
+                  onClick={analyzeNutrition}
+                  disabled={isAnalyzingNutrition || !nutrientForm.food_name || !nutrientForm.serving_size}
+                  className="btn btn-secondary w-full"
+                >
+                  {isAnalyzingNutrition ? 'Analyzing...' : 'Analyze Nutrition'}
+                </button>
+                                    </div>
+            </div>
+            
+            {error && (
+              <div className="mt-4 text-red-600 text-sm text-center">{error}</div>
+                                  )}
+                                </div>
+
+          {/* Nutrition Analysis Results */}
+          {showNutrientAnalysis && nutrientAnalysis && (
+            <div className="card mb-8">
+              <h3 className="text-lg font-bold mb-4 flex items-center">
+                <Brain className="mr-2" size={20} />
+                Nutrition Analysis Results
+              </h3>
+              
+              <div className="bg-green-50 border border-green-200 rounded-lg p-6 mb-6">
+                <h4 className="font-bold text-lg mb-4">
+                  {nutrientAnalysis.food_name} ({nutrientAnalysis.serving_size})
+                </h4>
+                
+                {nutrientAnalysis.parsed_nutrients && (
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                    <div className="text-center">
+                      <div className="text-2xl font-bold text-green-600">
+                        {nutrientAnalysis.parsed_nutrients.calories || 0}
+                                </div>
+                      <div className="text-sm text-gray-600">Calories</div>
+                              </div>
+                    <div className="text-center">
+                      <div className="text-2xl font-bold text-blue-600">
+                        {nutrientAnalysis.parsed_nutrients.protein || 0}g
+                            </div>
+                      <div className="text-sm text-gray-600">Protein</div>
+                        </div>
+                    <div className="text-center">
+                      <div className="text-2xl font-bold text-orange-600">
+                        {nutrientAnalysis.parsed_nutrients.carbohydrates || 0}g
+                    </div>
+                      <div className="text-sm text-gray-600">Carbs</div>
+                </div>
+                    <div className="text-center">
+                      <div className="text-2xl font-bold text-purple-600">
+                        {nutrientAnalysis.parsed_nutrients.fat || 0}g
+                    </div>
+                      <div className="text-sm text-gray-600">Fat</div>
+                  </div>
+              </div>
+                )}
+                
+                {nutrientAnalysis.parsed_nutrients && nutrientAnalysis.parsed_nutrients.health_tags && nutrientAnalysis.parsed_nutrients.health_tags.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mb-4">
+                    {nutrientAnalysis.parsed_nutrients.health_tags.map((tag, index) => (
+                      <span key={index} className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full">
+                        {tag}
+                      </span>
+                    ))}
+              </div>
+                )}
+                
+                <div className="prose max-w-none text-sm">
+                  <div dangerouslySetInnerHTML={{ __html: nutrientAnalysis.raw_analysis.replace(/\n/g, '<br>') }} />
+                </div>
               </div>
 
-              <div>
-                <label className="form-label">Quantity (servings)</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  min="0.1"
-                  required
-                  className="form-input"
-                  value={mealLogForm.quantity}
-                  onChange={(e) => setMealLogForm({...mealLogForm, quantity: parseFloat(e.target.value)})}
-                />
-              </div>
-
-              {error && (
-                <div className="text-red-600 text-sm text-center">{error}</div>
-              )}
-
+              <div className="flex gap-4">
               <button
-                type="submit"
+                  onClick={logMealWithAnalysis}
                 disabled={isLoading}
-                className="btn btn-primary w-full"
+                  className="btn btn-primary flex-1"
               >
-                {isLoading ? 'Logging Meal...' : 'Log Meal'}
+                  {isLoading ? 'Logging Meal...' : 'Log This Meal'}
               </button>
-            </form>
+                <button
+                  onClick={() => setShowNutrientAnalysis(false)}
+                  className="btn btn-secondary"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Sample Foods */}
+          <div className="card">
+            <h3 className="text-lg font-bold mb-4">Sample Foods to Try</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="bg-gray-50 p-4 rounded-lg">
+                <h4 className="font-semibold mb-2">Proteins</h4>
+                <div className="space-y-1 text-sm">
+                  <div>Chicken Breast - 100g</div>
+                  <div>Salmon Fillet - 150g</div>
+                  <div>Greek Yogurt - 1 cup</div>
+                  <div>Eggs - 2 large</div>
+                  <div>Tofu - 100g</div>
+                </div>
+              </div>
+              <div className="bg-gray-50 p-4 rounded-lg">
+                <h4 className="font-semibold mb-2">Carbohydrates</h4>
+                <div className="space-y-1 text-sm">
+                  <div>Brown Rice - 1 cup cooked</div>
+                  <div>Quinoa - 1 cup cooked</div>
+                  <div>Sweet Potato - 1 medium</div>
+                  <div>Oatmeal - 1 cup cooked</div>
+                  <div>Banana - 1 medium</div>
+                </div>
+              </div>
+              <div className="bg-gray-50 p-4 rounded-lg">
+                <h4 className="font-semibold mb-2">Vegetables</h4>
+                <div className="space-y-1 text-sm">
+                  <div>Broccoli - 1 cup</div>
+                  <div>Spinach - 2 cups raw</div>
+                  <div>Carrots - 1 cup chopped</div>
+                  <div>Bell Peppers - 1 medium</div>
+                  <div>Avocado - 1/2 medium</div>
+                </div>
+              </div>
+              <div className="bg-gray-50 p-4 rounded-lg">
+                <h4 className="font-semibold mb-2">Fruits</h4>
+                <div className="space-y-1 text-sm">
+                  <div>Apple - 1 medium</div>
+                  <div>Blueberries - 1 cup</div>
+                  <div>Orange - 1 medium</div>
+                  <div>Strawberries - 1 cup</div>
+                  <div>Mango - 1 cup sliced</div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -2589,8 +2792,8 @@ function App() {
                   >
                     Add
                   </button>
-                </div>
-                
+              </div>
+              
                 {/* Selected Ingredients for ChefGenius */}
                 {chefgeniusForm.ingredients.length > 0 && (
                   <div className="mt-3">
@@ -2617,44 +2820,44 @@ function App() {
               </div>
               
               <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Meal Type
-                  </label>
-                  <select
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Meal Type
+                </label>
+                <select
                     value={chefgeniusForm.meal_type}
                     onChange={(e) => setChefgeniusForm({...chefgeniusForm, meal_type: e.target.value})}
-                    className="form-input"
-                  >
-                    <option value="breakfast">Breakfast</option>
-                    <option value="lunch">Lunch</option>
-                    <option value="dinner">Dinner</option>
-                    <option value="snack">Snack</option>
-                  </select>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  className="form-input"
+                >
+                  <option value="breakfast">Breakfast</option>
+                  <option value="lunch">Lunch</option>
+                  <option value="dinner">Dinner</option>
+                  <option value="snack">Snack</option>
+                </select>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
                     Time Constraint (minutes)
-                  </label>
-                  <input
-                    type="number"
-                    min="15"
-                    max="300"
+                </label>
+                <input
+                  type="number"
+                  min="15"
+                  max="300"
                     value={chefgeniusForm.time_constraint}
                     onChange={(e) => setChefgeniusForm({...chefgeniusForm, time_constraint: parseInt(e.target.value)})}
                     className="form-input"
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
                     Dietary Restrictions
-                  </label>
+                </label>
                   <div className="space-y-2">
                     {['vegetarian', 'vegan', 'gluten-free', 'dairy-free', 'nut-free'].map((restriction) => (
                       <label key={restriction} className="flex items-center">
-                        <input
+                <input
                           type="checkbox"
                           checked={chefgeniusForm.dietary_restrictions.includes(restriction)}
                           onChange={(e) => {
@@ -2673,10 +2876,10 @@ function App() {
                           className="mr-2"
                         />
                         <span className="text-sm text-gray-700 capitalize">{restriction.replace('-', ' ')}</span>
-                      </label>
-                    ))}
+                </label>
+                      ))}
+                    </div>
                   </div>
-                </div>
               </div>
             </div>
             
@@ -3976,7 +4179,7 @@ function App() {
               <div className="text-center">
                 <Target className="mx-auto mb-2" size={32} />
                 <div className="font-medium">FitMentor</div>
-              </div>
+          </div>
             </button>
             <button 
               className="card hover:shadow-lg transition-shadow cursor-pointer"
@@ -3985,7 +4188,7 @@ function App() {
               <div className="text-center">
                 <Utensils className="mx-auto mb-2" size={32} />
                 <div className="font-medium">BudgetChef</div>
-              </div>
+        </div>
             </button>
             <button 
               className="card hover:shadow-lg transition-shadow cursor-pointer"
