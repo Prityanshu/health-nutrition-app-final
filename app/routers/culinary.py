@@ -33,20 +33,45 @@ class CuisineRegion(str, Enum):
     INDIAN = "indian"
     
     # Indian States
-    PUNJAB = "punjab"
-    KERALA = "kerala"
-    GUJARAT = "gujarat"
-    TAMIL_NADU = "tamil_nadu"
-    RAJASTHAN = "rajasthan"
-    BENGAL = "bengal"
-    MAHARASHTRA = "maharashtra"
-    KARNATAKA = "karnataka"
     ANDHRA_PRADESH = "andhra_pradesh"
-    UTTAR_PRADESH = "uttar_pradesh"
-    DELHI = "delhi"
+    ARUNACHAL_PRADESH = "arunachal_pradesh"
+    ASSAM = "assam"
+    BIHAR = "bihar"
+    CHHATTISGARH = "chhattisgarh"
     GOA = "goa"
+    GUJARAT = "gujarat"
+    HARYANA = "haryana"
     HIMACHAL_PRADESH = "himachal_pradesh"
-    KASHMIR = "kashmir"
+    JHARKHAND = "jharkhand"
+    KARNATAKA = "karnataka"
+    KERALA = "kerala"
+    MADHYA_PRADESH = "madhya_pradesh"
+    MAHARASHTRA = "maharashtra"
+    MANIPUR = "manipur"
+    MEGHALAYA = "meghalaya"
+    MIZORAM = "mizoram"
+    NAGALAND = "nagaland"
+    ODISHA = "odisha"
+    PUNJAB = "punjab"
+    RAJASTHAN = "rajasthan"
+    SIKKIM = "sikkim"
+    TAMIL_NADU = "tamil_nadu"
+    TELANGANA = "telangana"
+    TRIPURA = "tripura"
+    UTTAR_PRADESH = "uttar_pradesh"
+    UTTARAKHAND = "uttarakhand"
+    WEST_BENGAL = "west_bengal"
+    
+    # Union Territories
+    ANDAMAN_NICOBAR = "andaman_nicobar"
+    CHANDIGARH = "chandigarh"
+    DADRA_NAGAR_HAVELI = "dadra_nagar_haveli"
+    DAMAN_DIU = "daman_diu"
+    DELHI = "delhi"
+    JAMMU_KASHMIR = "jammu_kashmir"
+    LADAKH = "ladakh"
+    LAKSHADWEEP = "lakshadweep"
+    PUDUCHERRY = "puducherry"
 
 class RegionalMealPlanRequest(BaseModel):
     cuisine_region: CuisineRegion = Field(..., description="Preferred cuisine or regional preference")
@@ -140,12 +165,27 @@ async def get_cuisine_regions():
     global_cuisines = [{"value": region.value, "label": region.value.replace('_', ' ').title(), "type": "global"} 
                       for region in CuisineRegion if region.value in ["mediterranean", "japanese", "mexican", "italian", "chinese", "thai", "french", "indian"]]
     
+    # Indian States (28 states)
     indian_states = [{"value": region.value, "label": region.value.replace('_', ' ').title(), "type": "indian_state"} 
-                    for region in CuisineRegion if region.value not in ["mediterranean", "japanese", "mexican", "italian", "chinese", "thai", "french", "indian"]]
+                    for region in CuisineRegion if region.value in [
+                        "andhra_pradesh", "arunachal_pradesh", "assam", "bihar", "chhattisgarh", "goa", "gujarat", 
+                        "haryana", "himachal_pradesh", "jharkhand", "karnataka", "kerala", "madhya_pradesh", 
+                        "maharashtra", "manipur", "meghalaya", "mizoram", "nagaland", "odisha", "punjab", 
+                        "rajasthan", "sikkim", "tamil_nadu", "telangana", "tripura", "uttar_pradesh", 
+                        "uttarakhand", "west_bengal"
+                    ]]
+    
+    # Union Territories (8 union territories)
+    union_territories = [{"value": region.value, "label": region.value.replace('_', ' ').title(), "type": "union_territory"} 
+                        for region in CuisineRegion if region.value in [
+                            "andaman_nicobar", "chandigarh", "dadra_nagar_haveli", "daman_diu", "delhi", 
+                            "jammu_kashmir", "ladakh", "lakshadweep", "puducherry"
+                        ]]
     
     return {
         "global_cuisines": global_cuisines,
-        "indian_states": indian_states
+        "indian_states": indian_states,
+        "union_territories": union_territories
     }
 
 @router.get("/culinary/meal-types")
