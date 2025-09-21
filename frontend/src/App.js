@@ -116,6 +116,27 @@ function App() {
     feedback: '',
     progress_notes: ''
   });
+
+  // BudgetChef state
+  const [budgetchefPlan, setBudgetchefPlan] = useState(null);
+  const [isGeneratingBudgetchef, setIsGeneratingBudgetchef] = useState(false);
+  const [budgetchefForm, setBudgetchefForm] = useState({
+    budget_per_day: 300,
+    calorie_target: null,
+    dietary_preferences: [],
+    meals_per_day: 3,
+    cooking_time: 'moderate',
+    skill_level: 'intermediate',
+    age: null,
+    weight: null,
+    activity_level: 'moderate'
+  });
+  const [budgetAdaptationForm, setBudgetAdaptationForm] = useState({
+    current_plan: '',
+    feedback: '',
+    new_budget: null,
+    new_calorie_target: null
+  });
   
   // Ingredient search states
   const [ingredientSearchQuery, setIngredientSearchQuery] = useState('');
@@ -257,6 +278,10 @@ function App() {
     // Fetch FitMentor data when fitmentor view is active
     if (activeView === 'fitmentor') {
       // FitMentor doesn't need to fetch existing data, it generates on demand
+    }
+    // Fetch BudgetChef data when budgetchef view is active
+    if (activeView === 'budgetchef') {
+      // BudgetChef doesn't need to fetch existing data, it generates on demand
     }
   }, [activeView]);
 
@@ -599,6 +624,114 @@ function App() {
       setError('Failed to connect to server');
     } finally {
       setIsGeneratingFitmentor(false);
+    }
+  };
+
+  // BudgetChef functions
+  const generateBudgetchefPlan = async () => {
+    if (!budgetchefForm.budget_per_day) {
+      setError('Please enter your daily budget');
+      return;
+    }
+
+    setIsGeneratingBudgetchef(true);
+    setError('');
+
+    try {
+      const token = localStorage.getItem('token');
+      const headers = {
+        'Authorization': `Bearer ${token}`
+      };
+
+      const response = await fetch(`${API_BASE_URL}/budget/generate-meal-plan`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...headers
+        },
+        body: JSON.stringify(budgetchefForm)
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.data) {
+          setBudgetchefPlan(data.data);
+          // Pre-populate the adaptation form with the current plan
+          setBudgetAdaptationForm(prev => ({
+            ...prev,
+            current_plan: data.data.meal_plan
+          }));
+          alert('BudgetChef Meal Plan generated successfully!');
+        } else {
+          setError('Failed to generate budget meal plan');
+        }
+      } else {
+        const errorData = await response.json();
+        const errorMessage = typeof errorData.detail === 'string'
+          ? errorData.detail
+          : JSON.stringify(errorData.detail) || 'Failed to generate budget meal plan';
+        setError(errorMessage);
+      }
+    } catch (error) {
+      console.error('Error generating BudgetChef plan:', error);
+      setError('Failed to connect to server');
+    } finally {
+      setIsGeneratingBudgetchef(false);
+    }
+  };
+
+  const adaptBudgetchefPlan = async () => {
+    if (!budgetAdaptationForm.current_plan || !budgetAdaptationForm.feedback) {
+      setError('Please provide current plan and feedback');
+      return;
+    }
+
+    setIsGeneratingBudgetchef(true);
+    setError('');
+
+    try {
+      const token = localStorage.getItem('token');
+      const headers = {
+        'Authorization': `Bearer ${token}`
+      };
+
+      const response = await fetch(`${API_BASE_URL}/budget/adapt-meal-plan`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...headers
+        },
+        body: JSON.stringify(budgetAdaptationForm)
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.data) {
+          // Update the existing plan with the adapted version
+          setBudgetchefPlan(prevPlan => ({
+            ...prevPlan,
+            meal_plan: data.data.adapted_plan,
+            feedback: data.data.feedback,
+            new_budget: data.data.new_budget,
+            new_calorie_target: data.data.new_calorie_target
+          }));
+          setBudgetAdaptationForm({ current_plan: '', feedback: '', new_budget: null, new_calorie_target: null });
+          alert('Budget meal plan adapted successfully!');
+        } else {
+          setError('Failed to adapt budget meal plan');
+        }
+      } else {
+        const errorData = await response.json();
+        const errorMessage = typeof errorData.detail === 'string'
+          ? errorData.detail
+          : JSON.stringify(errorData.detail) || 'Failed to adapt budget meal plan';
+        setError(errorMessage);
+      }
+    } catch (error) {
+      console.error('Error adapting BudgetChef plan:', error);
+      setError('Failed to connect to server');
+    } finally {
+      setIsGeneratingBudgetchef(false);
     }
   };
 
@@ -2894,6 +3027,336 @@ function App() {
     </div>
   );
 
+  const renderBudgetChef = () => (
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <header className="bg-white shadow">
+        <div className="container mx-auto px-4 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center">
+              <button
+                onClick={() => setActiveView('dashboard')}
+                className="mr-4 flex items-center text-gray-600 hover:text-gray-900"
+              >
+                <ArrowLeft size={20} className="mr-2" />
+                Back to Dashboard
+              </button>
+              <h1 className="text-2xl font-bold text-gray-900">BudgetChef - AI Budget Meal Planner</h1>
+            </div>
+            <div className="flex items-center gap-4">
+              <span className="text-gray-700">Welcome, {user?.full_name || user?.username}</span>
+              <button
+                onClick={handleLogout}
+                className="btn btn-secondary"
+              >
+                Logout
+              </button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <div className="container mx-auto px-4 py-8">
+        <div className="max-w-6xl mx-auto">
+
+          {/* BudgetChef Meal Planner */}
+          <div className="card mb-8">
+            <h2 className="text-xl font-bold mb-6 flex items-center">
+              <Utensils className="mr-2" size={24} />
+              Create Your Budget Meal Plan
+            </h2>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Daily Budget (₹) *
+                </label>
+                <input
+                  type="number"
+                  min="50"
+                  max="2000"
+                  step="10"
+                  value={budgetchefForm.budget_per_day}
+                  onChange={(e) => setBudgetchefForm({...budgetchefForm, budget_per_day: parseFloat(e.target.value)})}
+                  className="form-input"
+                  placeholder="Enter your daily budget"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Target Calories (optional)
+                </label>
+                <input
+                  type="number"
+                  min="1000"
+                  max="5000"
+                  value={budgetchefForm.calorie_target || ''}
+                  onChange={(e) => setBudgetchefForm({...budgetchefForm, calorie_target: e.target.value ? parseInt(e.target.value) : null})}
+                  className="form-input"
+                  placeholder="Will be estimated if not provided"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Meals per Day *
+                </label>
+                <select
+                  value={budgetchefForm.meals_per_day}
+                  onChange={(e) => setBudgetchefForm({...budgetchefForm, meals_per_day: parseInt(e.target.value)})}
+                  className="form-input"
+                >
+                  <option value={1}>1 meal</option>
+                  <option value={2}>2 meals</option>
+                  <option value={3}>3 meals</option>
+                  <option value={4}>4 meals</option>
+                  <option value={5}>5 meals</option>
+                  <option value={6}>6 meals</option>
+                </select>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Cooking Time *
+                </label>
+                <select
+                  value={budgetchefForm.cooking_time}
+                  onChange={(e) => setBudgetchefForm({...budgetchefForm, cooking_time: e.target.value})}
+                  className="form-input"
+                >
+                  <option value="quick">Quick (15-30 min)</option>
+                  <option value="moderate">Moderate (30-60 min)</option>
+                  <option value="extensive">Extensive (60+ min)</option>
+                </select>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Cooking Skill Level *
+                </label>
+                <select
+                  value={budgetchefForm.skill_level}
+                  onChange={(e) => setBudgetchefForm({...budgetchefForm, skill_level: e.target.value})}
+                  className="form-input"
+                >
+                  <option value="beginner">Beginner</option>
+                  <option value="intermediate">Intermediate</option>
+                  <option value="advanced">Advanced</option>
+                </select>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Activity Level *
+                </label>
+                <select
+                  value={budgetchefForm.activity_level}
+                  onChange={(e) => setBudgetchefForm({...budgetchefForm, activity_level: e.target.value})}
+                  className="form-input"
+                >
+                  <option value="sedentary">Sedentary</option>
+                  <option value="light">Light</option>
+                  <option value="moderate">Moderate</option>
+                  <option value="active">Active</option>
+                  <option value="very_active">Very Active</option>
+                </select>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Age (optional)
+                </label>
+                <input
+                  type="number"
+                  min="13"
+                  max="100"
+                  value={budgetchefForm.age || ''}
+                  onChange={(e) => setBudgetchefForm({...budgetchefForm, age: e.target.value ? parseInt(e.target.value) : null})}
+                  className="form-input"
+                  placeholder="For calorie estimation"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Weight (kg, optional)
+                </label>
+                <input
+                  type="number"
+                  min="30"
+                  max="300"
+                  step="0.1"
+                  value={budgetchefForm.weight || ''}
+                  onChange={(e) => setBudgetchefForm({...budgetchefForm, weight: e.target.value ? parseFloat(e.target.value) : null})}
+                  className="form-input"
+                  placeholder="For calorie estimation"
+                />
+              </div>
+            </div>
+            
+            <div className="mt-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Dietary Preferences (optional)
+              </label>
+              <div className="space-y-2">
+                {['vegetarian', 'vegan', 'gluten-free', 'dairy-free', 'nut-free', 'low-carb', 'high-protein'].map((preference) => (
+                  <label key={preference} className="flex items-center">
+                    <input
+                      type="checkbox"
+                      checked={budgetchefForm.dietary_preferences.includes(preference)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setBudgetchefForm({
+                            ...budgetchefForm,
+                            dietary_preferences: [...budgetchefForm.dietary_preferences, preference]
+                          });
+                        } else {
+                          setBudgetchefForm({
+                            ...budgetchefForm,
+                            dietary_preferences: budgetchefForm.dietary_preferences.filter(p => p !== preference)
+                          });
+                        }
+                      }}
+                      className="mr-2"
+                    />
+                    <span className="text-sm text-gray-700 capitalize">{preference.replace('-', ' ')}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            
+            <div className="mt-6">
+              <button
+                onClick={generateBudgetchefPlan}
+                className="btn btn-primary"
+                disabled={isGeneratingBudgetchef}
+              >
+                {isGeneratingBudgetchef ? 'Generating Plan...' : 'Generate Budget Meal Plan'}
+              </button>
+            </div>
+          </div>
+
+          {/* BudgetChef Generated Plan */}
+          {budgetchefPlan && (
+            <div className="card mb-8">
+              <h2 className="text-xl font-bold mb-6 flex items-center">
+                <Utensils className="mr-2" size={24} />
+                Your BudgetChef Meal Plan
+              </h2>
+              
+              <div className="bg-green-50 border border-green-200 rounded-lg p-6 mb-6">
+                <div className="prose max-w-none" dangerouslySetInnerHTML={{ __html: budgetchefPlan.meal_plan.replace(/\n/g, '<br>') }} />
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <h4 className="text-lg font-bold mb-4">Plan Details</h4>
+                  <div className="space-y-2">
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Daily Budget:</span>
+                      <span className="font-medium">₹{budgetchefPlan.budget_per_day}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Calorie Target:</span>
+                      <span className="font-medium">{budgetchefPlan.calorie_target || 'Estimated'}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Meals per Day:</span>
+                      <span className="font-medium">{budgetchefPlan.meals_per_day}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Cooking Time:</span>
+                      <span className="font-medium capitalize">{budgetchefPlan.cooking_time}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Skill Level:</span>
+                      <span className="font-medium capitalize">{budgetchefPlan.skill_level}</span>
+                    </div>
+                    {budgetchefPlan.dietary_preferences.length > 0 && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Dietary Preferences:</span>
+                        <span className="font-medium">{budgetchefPlan.dietary_preferences.join(', ')}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                
+                <div>
+                  <h4 className="text-lg font-bold mb-4">Adapt Your Plan</h4>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Current Plan
+                      </label>
+                      <textarea
+                        value={budgetAdaptationForm.current_plan}
+                        onChange={(e) => setBudgetAdaptationForm({...budgetAdaptationForm, current_plan: e.target.value})}
+                        className="form-input"
+                        rows="3"
+                        placeholder="Paste your current meal plan here..."
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Feedback
+                      </label>
+                      <textarea
+                        value={budgetAdaptationForm.feedback}
+                        onChange={(e) => setBudgetAdaptationForm({...budgetAdaptationForm, feedback: e.target.value})}
+                        className="form-input"
+                        rows="3"
+                        placeholder="What would you like to change? What's working/not working?"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          New Budget (₹, optional)
+                        </label>
+                        <input
+                          type="number"
+                          min="50"
+                          max="2000"
+                          value={budgetAdaptationForm.new_budget || ''}
+                          onChange={(e) => setBudgetAdaptationForm({...budgetAdaptationForm, new_budget: e.target.value ? parseFloat(e.target.value) : null})}
+                          className="form-input"
+                          placeholder="New budget"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          New Calorie Target (optional)
+                        </label>
+                        <input
+                          type="number"
+                          min="1000"
+                          max="5000"
+                          value={budgetAdaptationForm.new_calorie_target || ''}
+                          onChange={(e) => setBudgetAdaptationForm({...budgetAdaptationForm, new_calorie_target: e.target.value ? parseInt(e.target.value) : null})}
+                          className="form-input"
+                          placeholder="New calories"
+                        />
+                      </div>
+                    </div>
+                    <button
+                      onClick={adaptBudgetchefPlan}
+                      className="btn btn-secondary"
+                      disabled={isGeneratingBudgetchef || !budgetAdaptationForm.current_plan || !budgetAdaptationForm.feedback}
+                    >
+                      {isGeneratingBudgetchef ? 'Adapting Plan...' : 'Adapt Meal Plan'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+        </div>
+      </div>
+    </div>
+  );
+
   const renderDashboard = () => (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -3085,6 +3548,15 @@ function App() {
                 <div className="font-medium">FitMentor</div>
               </div>
             </button>
+            <button 
+              className="card hover:shadow-lg transition-shadow cursor-pointer"
+              onClick={() => setActiveView('budgetchef')}
+            >
+              <div className="text-center">
+                <Utensils className="mx-auto mb-2" size={32} />
+                <div className="font-medium">BudgetChef</div>
+              </div>
+            </button>
           </div>
         </div>
       </div>
@@ -3113,6 +3585,8 @@ function App() {
       return renderAIRecipes();
     } else if (activeView === 'fitmentor') {
       return renderFitMentor();
+    } else if (activeView === 'budgetchef') {
+      return renderBudgetChef();
     } else {
       return renderDashboard();
     }
