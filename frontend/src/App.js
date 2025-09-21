@@ -524,6 +524,11 @@ function App() {
         const data = await response.json();
         if (data.success && data.data) {
           setFitmentorPlan(data.data);
+          // Pre-populate the adaptation form with the current plan
+          setAdaptationForm(prev => ({
+            ...prev,
+            current_plan: data.data.workout_plan
+          }));
           alert('FitMentor Workout Plan generated successfully!');
         } else {
           setError('Failed to generate workout plan');
@@ -570,7 +575,13 @@ function App() {
       if (response.ok) {
         const data = await response.json();
         if (data.success && data.data) {
-          setFitmentorPlan(data.data);
+          // Update the existing plan with the adapted version
+          setFitmentorPlan(prevPlan => ({
+            ...prevPlan,
+            workout_plan: data.data.adapted_plan,
+            feedback: data.data.feedback,
+            progress_notes: data.data.progress_notes
+          }));
           setAdaptationForm({ current_plan: '', feedback: '', progress_notes: '' });
           alert('Workout plan adapted successfully!');
         } else {
