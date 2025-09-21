@@ -203,6 +203,12 @@ function App() {
   const [isChatbotLoading, setIsChatbotLoading] = useState(false);
   const [availableAgents, setAvailableAgents] = useState([]);
 
+  // Enhanced Challenges state
+  const [enhancedChallenges, setEnhancedChallenges] = useState([]);
+  const [challengeRecommendations, setChallengeRecommendations] = useState([]);
+  const [challengeAnalytics, setChallengeAnalytics] = useState(null);
+  const [isGeneratingChallenges, setIsGeneratingChallenges] = useState(false);
+
   // Chatbot functions
   const fetchAvailableAgents = async () => {
     try {
@@ -300,6 +306,114 @@ function App() {
 
   const clearChatbotHistory = () => {
     setChatbotMessages([]);
+  };
+
+  // Enhanced Challenges functions
+  const generateWeeklyChallenges = async () => {
+    try {
+      setIsGeneratingChallenges(true);
+      const token = localStorage.getItem('token');
+      
+      const response = await fetch(`${API_BASE_URL}/enhanced-challenges/generate-weekly-challenges`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setEnhancedChallenges(data.active_challenges || []);
+        setChallengeRecommendations(data.recommendations || []);
+        setError('');
+      } else {
+        const errorData = await response.json();
+        setError(errorData.detail || 'Failed to generate challenges');
+      }
+    } catch (err) {
+      setError('Error generating challenges: ' + err.message);
+    } finally {
+      setIsGeneratingChallenges(false);
+    }
+  };
+
+  const fetchActiveChallenges = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      
+      const response = await fetch(`${API_BASE_URL}/enhanced-challenges/active-challenges`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setEnhancedChallenges(data.active_challenges || []);
+      } else {
+        const errorData = await response.json();
+        setError(errorData.detail || 'Failed to fetch challenges');
+      }
+    } catch (err) {
+      setError('Error fetching challenges: ' + err.message);
+    }
+  };
+
+  const updateChallengeProgress = async (challengeId, dailyValue) => {
+    try {
+      const token = localStorage.getItem('token');
+      
+      const response = await fetch(`${API_BASE_URL}/enhanced-challenges/update-challenge-progress`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          challenge_id: challengeId,
+          daily_value: dailyValue
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        // Refresh challenges
+        fetchActiveChallenges();
+        return data;
+      } else {
+        const errorData = await response.json();
+        setError(errorData.detail || 'Failed to update progress');
+      }
+    } catch (err) {
+      setError('Error updating progress: ' + err.message);
+    }
+  };
+
+  const fetchChallengeAnalytics = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      
+      const response = await fetch(`${API_BASE_URL}/enhanced-challenges/challenge-analytics`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setChallengeAnalytics(data.analytics);
+      } else {
+        const errorData = await response.json();
+        setError(errorData.detail || 'Failed to fetch analytics');
+      }
+    } catch (err) {
+      setError('Error fetching analytics: ' + err.message);
+    }
   };
 
   // Goals state
@@ -423,6 +537,11 @@ function App() {
     // Fetch chatbot agents when chatbot view is active
     if (activeView === 'chatbot') {
       fetchAvailableAgents();
+    }
+    // Fetch enhanced challenges when enhanced-challenges view is active
+    if (activeView === 'enhanced-challenges') {
+      fetchActiveChallenges();
+      fetchChallengeAnalytics();
     }
     // Fetch BudgetChef data when budgetchef view is active
     if (activeView === 'budgetchef') {
@@ -4177,6 +4296,15 @@ function App() {
                 <div className="font-medium">AI Chatbot</div>
               </div>
             </button>
+            <button 
+              className="card hover:shadow-lg transition-shadow cursor-pointer"
+              onClick={() => setActiveView('enhanced-challenges')}
+            >
+              <div className="text-center">
+                <Award className="mx-auto mb-2" size={32} />
+                <div className="font-medium">Smart Challenges</div>
+              </div>
+            </button>
           </div>
         </div>
       </div>
@@ -4697,6 +4825,249 @@ function App() {
     </div>
   );
 
+  // Enhanced Challenges View
+  const renderEnhancedChallenges = () => (
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <div className="bg-white shadow-sm border-b">
+        <div className="container mx-auto px-4 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center">
+              <button
+                onClick={() => setActiveView('dashboard')}
+                className="mr-4 p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <ArrowLeft size={20} />
+              </button>
+              <div>
+                <h1 className="text-2xl font-bold flex items-center">
+                  <Award className="mr-2" size={24} />
+                  Smart Challenges
+                </h1>
+                <p className="text-gray-600">Data-driven personalized challenges based on your nutrition and workout patterns</p>
+              </div>
+            </div>
+            <button
+              onClick={generateWeeklyChallenges}
+              disabled={isGeneratingChallenges}
+              className="btn-primary flex items-center"
+            >
+              {isGeneratingChallenges ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                  Generating...
+                </>
+              ) : (
+                <>
+                  <Lightbulb className="mr-2" size={16} />
+                  Generate Weekly Challenges
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="container mx-auto px-4 py-8">
+        <div className="max-w-6xl mx-auto">
+          {/* Analytics Overview */}
+          {challengeAnalytics && (
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+              <div className="card">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-gray-600">Total Challenges</p>
+                    <p className="text-2xl font-bold">{challengeAnalytics.total_challenges}</p>
+                  </div>
+                  <Award className="text-blue-500" size={24} />
+                </div>
+              </div>
+              <div className="card">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-gray-600">Completed</p>
+                    <p className="text-2xl font-bold text-green-600">{challengeAnalytics.completed_challenges}</p>
+                  </div>
+                  <Target className="text-green-500" size={24} />
+                </div>
+              </div>
+              <div className="card">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-gray-600">Completion Rate</p>
+                    <p className="text-2xl font-bold">{challengeAnalytics.completion_rate.toFixed(1)}%</p>
+                  </div>
+                  <TrendingUp className="text-purple-500" size={24} />
+                </div>
+              </div>
+              <div className="card">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-gray-600">Points Earned</p>
+                    <p className="text-2xl font-bold text-yellow-600">{challengeAnalytics.total_points_earned}</p>
+                  </div>
+                  <BarChart3 className="text-yellow-500" size={24} />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Active Challenges */}
+          <div className="card mb-8">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-bold flex items-center">
+                <Target className="mr-2" size={20} />
+                Active Challenges
+              </h2>
+              <span className="text-sm text-gray-600">
+                {enhancedChallenges.length} active challenge{enhancedChallenges.length !== 1 ? 's' : ''}
+              </span>
+            </div>
+
+            {enhancedChallenges.length === 0 ? (
+              <div className="text-center py-12">
+                <Award className="mx-auto mb-4 text-gray-400" size={48} />
+                <h3 className="text-lg font-semibold text-gray-600 mb-2">No Active Challenges</h3>
+                <p className="text-gray-500 mb-4">Generate personalized challenges based on your data</p>
+                <button
+                  onClick={generateWeeklyChallenges}
+                  disabled={isGeneratingChallenges}
+                  className="btn-primary"
+                >
+                  Generate Challenges
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {enhancedChallenges.map((challenge) => (
+                  <div key={challenge.challenge_id} className="border rounded-lg p-6 hover:shadow-md transition-shadow">
+                    <div className="flex items-start justify-between mb-4">
+                      <div>
+                        <h3 className="font-semibold text-lg mb-1">{challenge.title}</h3>
+                        <p className="text-sm text-gray-600 mb-2">{challenge.description}</p>
+                        <div className="flex items-center space-x-4 text-sm text-gray-500">
+                          <span className="capitalize">{challenge.difficulty}</span>
+                          <span>•</span>
+                          <span>{challenge.days_remaining} days left</span>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-2xl font-bold text-blue-600">
+                          {challenge.progress_percentage.toFixed(0)}%
+                        </div>
+                        <div className="text-sm text-gray-500">Complete</div>
+                      </div>
+                    </div>
+
+                    {/* Progress Bar */}
+                    <div className="mb-4">
+                      <div className="flex justify-between text-sm text-gray-600 mb-1">
+                        <span>Progress</span>
+                        <span>{challenge.current_value.toFixed(1)} / {challenge.target_value} {challenge.unit}</span>
+                      </div>
+                      <div className="w-full bg-gray-200 rounded-full h-2">
+                        <div
+                          className="bg-blue-500 h-2 rounded-full transition-all duration-300"
+                          style={{ width: `${Math.min(100, challenge.progress_percentage)}%` }}
+                        ></div>
+                      </div>
+                    </div>
+
+                    {/* Daily Targets */}
+                    {challenge.daily_targets && (
+                      <div className="mb-4">
+                        <h4 className="text-sm font-semibold text-gray-700 mb-2">Daily Targets</h4>
+                        <div className="grid grid-cols-7 gap-1">
+                          {challenge.daily_targets.map((target, index) => (
+                            <div
+                              key={index}
+                              className={`text-center p-2 rounded text-xs ${
+                                target.achieved
+                                  ? 'bg-green-100 text-green-800'
+                                  : 'bg-gray-100 text-gray-600'
+                              }`}
+                            >
+                              <div className="font-semibold">Day {target.day}</div>
+                              <div>{target.value.toFixed(1)}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Rewards */}
+                    <div className="flex items-center justify-between text-sm">
+                      <div className="flex items-center space-x-4">
+                        <span className="flex items-center">
+                          <Award className="mr-1" size={14} />
+                          {challenge.points_reward} pts
+                        </span>
+                        {challenge.badge_reward && (
+                          <span className="flex items-center">
+                            <Target className="mr-1" size={14} />
+                            {challenge.badge_reward}
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => {
+                          const value = prompt(`Enter your progress for today (${challenge.unit}):`);
+                          if (value && !isNaN(value)) {
+                            updateChallengeProgress(challenge.challenge_id, parseFloat(value));
+                          }
+                        }}
+                        className="text-blue-600 hover:text-blue-800 font-medium"
+                      >
+                        Update Progress
+                      </button>
+                    </div>
+
+                    {/* Motivational Messages */}
+                    {challenge.motivational_messages && challenge.motivational_messages.length > 0 && (
+                      <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+                        <p className="text-sm text-blue-800 italic">
+                          "{challenge.motivational_messages[0]}"
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Challenge Recommendations */}
+          {challengeRecommendations.length > 0 && (
+            <div className="card">
+              <h2 className="text-xl font-bold mb-6 flex items-center">
+                <Lightbulb className="mr-2" size={20} />
+                Recommended Challenges
+              </h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {challengeRecommendations.map((rec, index) => (
+                  <div key={index} className="border rounded-lg p-4 hover:shadow-md transition-shadow">
+                    <h3 className="font-semibold mb-2">{rec.title}</h3>
+                    <p className="text-sm text-gray-600 mb-3">{rec.description}</p>
+                    <div className="flex items-center justify-between">
+                      <div className="text-sm text-gray-500">
+                        <span className="capitalize">{rec.difficulty}</span>
+                        <span> • </span>
+                        <span>{rec.duration_days} days</span>
+                      </div>
+                      <button className="text-blue-600 hover:text-blue-800 font-medium text-sm">
+                        Accept Challenge
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
   if (currentView === 'login') {
     return renderLogin();
   } else if (currentView === 'register') {
@@ -4725,6 +5096,8 @@ function App() {
       return renderAdvancedMealPlanner();
     } else if (activeView === 'chatbot') {
       return renderChatbot();
+    } else if (activeView === 'enhanced-challenges') {
+      return renderEnhancedChallenges();
     } else {
       return renderDashboard();
     }
