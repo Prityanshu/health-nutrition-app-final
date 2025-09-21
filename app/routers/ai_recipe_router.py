@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 # Import the service
 from ..services.ai_recipe_service import recipe_service, RecipeGeneratorService
+from ..services.chefgenius_service import chefgenius_service
 from ..database import get_db, FoodItem
 
 # Configure logging
@@ -37,6 +38,27 @@ class DifficultyLevel(str, Enum):
     EASY = "easy"
     MEDIUM = "medium"
     HARD = "hard"
+
+class IngredientRecipeRequest(BaseModel):
+    """Request model for ingredient-based recipe generation"""
+    ingredients: List[str] = Field(
+        ..., 
+        description="List of available ingredients"
+    )
+    dietary_restrictions: List[str] = Field(
+        default=[], 
+        description="Dietary restrictions (e.g., 'vegetarian', 'vegan', 'gluten-free')"
+    )
+    time_constraint: int = Field(
+        default=60, 
+        ge=15, 
+        le=300, 
+        description="Maximum cooking time in minutes"
+    )
+    meal_type: str = Field(
+        default="dinner", 
+        description="Type of meal (breakfast, lunch, dinner, snack)"
+    )
 
 class RecipeGenerationRequest(BaseModel):
     """Request model for recipe generation"""
@@ -159,27 +181,24 @@ class SubstitutionResponse(BaseModel):
 async def get_recipe_service() -> RecipeGeneratorService:
     return recipe_service
 
-@router.post("/generate", response_model=RecipeResponse, status_code=201)
+@router.post("/generate", status_code=201)
 async def generate_recipe(
     request: RecipeGenerationRequest,
     service: RecipeGeneratorService = Depends(get_recipe_service)
 ):
     """
-    Generate a new AI recipe based on the provided parameters.
+    Generate a new ChefGenius recipe based on the provided parameters.
     
-    This endpoint creates a personalized recipe considering:
-    - Cuisine preferences
-    - Dietary restrictions
+    This endpoint creates a personalized recipe using ChefGenius AI agent considering:
     - Available ingredients
-    - Budget and time constraints
-    - Health conditions
+    - Dietary restrictions
+    - Time constraints
+    - Meal type preferences
     """
     try:
         # Convert to dictionary for service
         request_dict = request.dict()
-        request_dict["cuisine_preference"] = [c.value for c in request.cuisine_preference]
         request_dict["meal_type"] = request.meal_type.value
-        request_dict["difficulty_level"] = request.difficulty_level.value
         
         recipe = await service.generate_recipe(request_dict)
         
@@ -187,13 +206,55 @@ async def generate_recipe(
             status_code=201,
             content={
                 "success": True,
-                "message": "Recipe generated successfully",
+                "message": "ChefGenius recipe generated successfully",
                 "data": recipe
             }
         )
         
     except Exception as e:
         logger.error(f"Error in generate_recipe endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/generate-from-ingredients", status_code=201)
+async def generate_recipe_from_ingredients(
+    request: IngredientRecipeRequest
+):
+    """
+    Generate a recipe using ChefGenius agent based on available ingredients.
+    
+    This endpoint uses the ChefGenius AI agent to create personalized recipes
+    based on the ingredients you have available, considering dietary restrictions
+    and time constraints.
+    """
+    try:
+        result = await chefgenius_service.generate_recipe_from_ingredients(
+            ingredients=request.ingredients,
+            dietary_restrictions=request.dietary_restrictions,
+            time_constraint=request.time_constraint,
+            meal_type=request.meal_type
+        )
+        
+        if result["success"]:
+            return JSONResponse(
+                status_code=201,
+                content={
+                    "success": True,
+                    "message": "Recipe generated successfully using ChefGenius",
+                    "data": result
+                }
+            )
+        else:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "success": False,
+                    "message": "Recipe generation failed",
+                    "error": result["error"]
+                }
+            )
+        
+    except Exception as e:
+        logger.error(f"Error in generate_recipe_from_ingredients endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/{recipe_id}", response_model=RecipeResponse)

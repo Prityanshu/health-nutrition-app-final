@@ -10,5 +10,9 @@ psycopg2-binary==2.9.9
 redis==5.0.1
 celery==5.3.4
 pandas==2.1.4
-numpy==1.24.3
+numpy>=1.26.0
 python-dotenv==1.0.0
+openai>=1.0.0
+agno>=0.1.0
+exa-py>=1.0.0
+groq>=0.4.0

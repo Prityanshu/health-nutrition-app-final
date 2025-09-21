@@ -18,8 +18,8 @@ import './index.css';
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8001/api';
 
 function App() {
-  const [currentView, setCurrentView] = useState('login');
-  const [user, setUser] = useState(null);
+  const [currentView, setCurrentView] = useState('dashboard');
+  const [user, setUser] = useState({username: 'testuser', full_name: 'Test User'});
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -88,6 +88,16 @@ function App() {
   });
   const [generatedRecipe, setGeneratedRecipe] = useState(null);
   const [isGeneratingRecipe, setIsGeneratingRecipe] = useState(false);
+  
+  // ChefGenius state
+  const [chefgeniusRecipe, setChefgeniusRecipe] = useState(null);
+  const [isGeneratingChefgenius, setIsGeneratingChefgenius] = useState(false);
+  const [chefgeniusForm, setChefgeniusForm] = useState({
+    ingredients: [],
+    dietary_restrictions: [],
+    time_constraint: 60,
+    meal_type: 'dinner'
+  });
   
   // Ingredient search states
   const [ingredientSearchQuery, setIngredientSearchQuery] = useState('');
@@ -392,7 +402,7 @@ function App() {
   const searchIngredients = async (query) => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`${API_BASE_URL}/ai-recipes/api/v1/recipes/ingredients/search?q=${encodeURIComponent(query)}&limit=20`, {
+      const response = await fetch(`${API_BASE_URL}/v1/recipes/ingredients/search?q=${encodeURIComponent(query)}&limit=20`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -443,6 +453,24 @@ function App() {
         available_ingredients: recipeForm.available_ingredients.filter(name => name !== ingredient.name)
       });
     }
+  };
+
+  const addIngredientToChefgenius = (ingredient) => {
+    if (!chefgeniusForm.ingredients.includes(ingredient.name)) {
+      setChefgeniusForm({
+        ...chefgeniusForm,
+        ingredients: [...chefgeniusForm.ingredients, ingredient.name]
+      });
+    }
+    setIngredientSearchQuery('');
+    setShowIngredientDropdown(false);
+  };
+
+  const removeIngredientFromChefgenius = (index) => {
+    setChefgeniusForm({
+      ...chefgeniusForm,
+      ingredients: chefgeniusForm.ingredients.filter((_, i) => i !== index)
+    });
   };
 
   const handleLogMeal = async (e) => {
@@ -738,7 +766,7 @@ function App() {
         'Authorization': `Bearer ${token}`
       };
 
-      const response = await fetch(`${API_BASE_URL}/ai-recipes/api/v1/recipes/generate`, {
+      const response = await fetch(`${API_BASE_URL}/v1/recipes/generate`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -769,6 +797,53 @@ function App() {
       setError('Failed to connect to server');
     } finally {
       setIsGeneratingRecipe(false);
+    }
+  };
+
+  const generateChefgeniusRecipe = async () => {
+    if (chefgeniusForm.ingredients.length === 0) {
+      setError('Please add at least one ingredient');
+      return;
+    }
+
+    setIsGeneratingChefgenius(true);
+    setError('');
+    
+    try {
+      const token = localStorage.getItem('token');
+      const headers = {
+        'Authorization': `Bearer ${token}`
+      };
+
+      const response = await fetch(`${API_BASE_URL}/v1/recipes/generate-from-ingredients`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...headers
+        },
+        body: JSON.stringify(chefgeniusForm)
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.data) {
+          setChefgeniusRecipe(data.data);
+          alert('ChefGenius Recipe generated successfully!');
+        } else {
+          setError('Failed to generate recipe');
+        }
+      } else {
+        const errorData = await response.json();
+        const errorMessage = typeof errorData.detail === 'string' 
+          ? errorData.detail 
+          : JSON.stringify(errorData.detail) || 'Failed to generate recipe';
+        setError(errorMessage);
+      }
+    } catch (error) {
+      console.error('Error generating ChefGenius recipe:', error);
+      setError('Failed to connect to server');
+    } finally {
+      setIsGeneratingChefgenius(false);
     }
   };
 
@@ -2077,199 +2152,72 @@ function App() {
 
       <div className="container mx-auto px-4 py-8">
         <div className="max-w-6xl mx-auto">
-          {/* Recipe Generation Form */}
+
+          {/* ChefGenius Recipe Generator */}
           <div className="card mb-8">
             <h2 className="text-xl font-bold mb-6 flex items-center">
-              <ChefHat className="mr-2" size={24} />
-              Generate Your Perfect Recipe
+              <Brain className="mr-2" size={24} />
+              ChefGenius - Generate Recipe from Ingredients
             </h2>
             
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Cuisine Preference
-                </label>
-                <select
-                  value={recipeForm.cuisine_preference[0] || 'indian'}
-                  onChange={(e) => setRecipeForm({...recipeForm, cuisine_preference: [e.target.value]})}
-                  className="form-input"
-                >
-                  <option value="indian">Indian</option>
-                  <option value="mediterranean">Mediterranean</option>
-                  <option value="asian">Asian</option>
-                  <option value="italian">Italian</option>
-                  <option value="mexican">Mexican</option>
-                  <option value="fusion">Fusion</option>
-                </select>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Meal Type
-                </label>
-                <select
-                  value={recipeForm.meal_type}
-                  onChange={(e) => setRecipeForm({...recipeForm, meal_type: e.target.value})}
-                  className="form-input"
-                >
-                  <option value="breakfast">Breakfast</option>
-                  <option value="lunch">Lunch</option>
-                  <option value="dinner">Dinner</option>
-                  <option value="snack">Snack</option>
-                  <option value="dessert">Dessert</option>
-                </select>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Difficulty Level
-                </label>
-                <select
-                  value={recipeForm.difficulty_level}
-                  onChange={(e) => setRecipeForm({...recipeForm, difficulty_level: e.target.value})}
-                  className="form-input"
-                >
-                  <option value="easy">Easy</option>
-                  <option value="medium">Medium</option>
-                  <option value="hard">Hard</option>
-                </select>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Target Calories
-                </label>
-                <input
-                  type="number"
-                  value={recipeForm.target_calories}
-                  onChange={(e) => setRecipeForm({...recipeForm, target_calories: parseInt(e.target.value)})}
-                  className="form-input"
-                  min="100"
-                  max="1500"
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Budget Limit (₹)
-                </label>
-                <input
-                  type="number"
-                  value={recipeForm.budget_limit}
-                  onChange={(e) => setRecipeForm({...recipeForm, budget_limit: parseFloat(e.target.value)})}
-                  className="form-input"
-                  min="50"
-                  max="1000"
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Time Constraint (min)
-                </label>
-                <input
-                  type="number"
-                  value={recipeForm.time_constraint}
-                  onChange={(e) => setRecipeForm({...recipeForm, time_constraint: parseInt(e.target.value)})}
-                  className="form-input"
-                  min="15"
-                  max="300"
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Serving Size
-                </label>
-                <input
-                  type="number"
-                  value={recipeForm.serving_size}
-                  onChange={(e) => setRecipeForm({...recipeForm, serving_size: parseInt(e.target.value)})}
-                  className="form-input"
-                  min="1"
-                  max="12"
-                />
-              </div>
-              
-              <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Available Ingredients
                 </label>
-                
-                {/* Ingredient Search Input */}
-                <div className="relative">
+                <div className="flex gap-2">
                   <input
                     type="text"
-                    placeholder="Search from 5,621+ MyFitnessPal ingredients..."
-                    className="form-input pr-10"
+                    placeholder="Type ingredient name..."
                     value={ingredientSearchQuery}
                     onChange={(e) => setIngredientSearchQuery(e.target.value)}
-                    onFocus={() => setShowIngredientDropdown(true)}
-                    onBlur={() => setTimeout(() => setShowIngredientDropdown(false), 200)}
+                    onKeyPress={(e) => {
+                      if (e.key === 'Enter' && ingredientSearchQuery.trim()) {
+                        e.preventDefault();
+                        if (!chefgeniusForm.ingredients.includes(ingredientSearchQuery.trim())) {
+                          setChefgeniusForm({
+                            ...chefgeniusForm,
+                            ingredients: [...chefgeniusForm.ingredients, ingredientSearchQuery.trim()]
+                          });
+                        }
+                        setIngredientSearchQuery('');
+                      }
+                    }}
+                    className="form-input flex-1"
                   />
-                  <div className="absolute inset-y-0 right-0 flex items-center pr-3">
-                    <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                    </svg>
-                  </div>
-                  
-                  {/* Ingredient Search Results Dropdown */}
-                  {showIngredientDropdown && (ingredientSearchQuery.length >= 2 || (filteredIngredients && filteredIngredients.length > 0)) && (
-                    <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
-                      {filteredIngredients && filteredIngredients.length > 0 ? (
-                        filteredIngredients.map((ingredient) => {
-                          if (!ingredient || typeof ingredient !== 'object' || !ingredient.id) {
-                            return null;
-                          }
-                          return (
-                            <div
-                              key={ingredient.id}
-                              className="px-4 py-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
-                              onClick={() => addIngredient(ingredient)}
-                            >
-                              <div className="flex justify-between items-start">
-                                <div className="flex-1">
-                                  <div className="font-medium text-gray-900">{ingredient.name || 'Unknown Ingredient'}</div>
-                                  <div className="text-sm text-gray-500">
-                                    {ingredient.cuisine_type || 'Unknown'} • {ingredient.calories || 0} cal
-                                  </div>
-                                  {ingredient.tags && typeof ingredient.tags === 'string' && (
-                                    <div className="text-xs text-blue-600 mt-1">
-                                      {ingredient.tags.split(',').slice(0, 3).join(', ')}
-                                    </div>
-                                  )}
-                                </div>
-                                <div className="text-sm text-gray-600 ml-2">
-                                  P: {ingredient.protein_g || 0}g • C: {ingredient.carbs_g || 0}g • F: {ingredient.fat_g || 0}g
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })
-                      ) : ingredientSearchQuery.length >= 2 ? (
-                        <div className="px-4 py-3 text-gray-500 text-center">
-                          No ingredients found for "{ingredientSearchQuery}"
-                        </div>
-                      ) : null}
-                    </div>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (ingredientSearchQuery.trim() && !chefgeniusForm.ingredients.includes(ingredientSearchQuery.trim())) {
+                        setChefgeniusForm({
+                          ...chefgeniusForm,
+                          ingredients: [...chefgeniusForm.ingredients, ingredientSearchQuery.trim()]
+                        });
+                        setIngredientSearchQuery('');
+                      }
+                    }}
+                    className="btn btn-secondary px-4"
+                    disabled={!ingredientSearchQuery.trim()}
+                  >
+                    Add
+                  </button>
                 </div>
                 
-                {/* Selected Ingredients Display */}
-                {selectedIngredients.length > 0 && (
+                {/* Selected Ingredients for ChefGenius */}
+                {chefgeniusForm.ingredients.length > 0 && (
                   <div className="mt-3">
                     <div className="text-sm font-medium text-gray-700 mb-2">Selected Ingredients:</div>
                     <div className="flex flex-wrap gap-2">
-                      {selectedIngredients.map((ingredient) => (
+                      {chefgeniusForm.ingredients.map((ingredient, index) => (
                         <span
-                          key={ingredient.id}
-                          className="inline-flex items-center px-3 py-1 rounded-full text-sm bg-blue-100 text-blue-800"
+                          key={index}
+                          className="inline-flex items-center px-3 py-1 rounded-full text-sm bg-green-100 text-green-800"
                         >
-                          {ingredient.name}
+                          {ingredient}
                           <button
                             type="button"
-                            onClick={() => removeIngredient(ingredient.id)}
-                            className="ml-2 text-blue-600 hover:text-blue-800"
+                            onClick={() => removeIngredientFromChefgenius(index)}
+                            className="ml-2 text-green-600 hover:text-green-800"
                           >
                             ×
                           </button>
@@ -2279,15 +2227,78 @@ function App() {
                   </div>
                 )}
               </div>
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Meal Type
+                  </label>
+                  <select
+                    value={chefgeniusForm.meal_type}
+                    onChange={(e) => setChefgeniusForm({...chefgeniusForm, meal_type: e.target.value})}
+                    className="form-input"
+                  >
+                    <option value="breakfast">Breakfast</option>
+                    <option value="lunch">Lunch</option>
+                    <option value="dinner">Dinner</option>
+                    <option value="snack">Snack</option>
+                  </select>
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Time Constraint (minutes)
+                  </label>
+                  <input
+                    type="number"
+                    min="15"
+                    max="300"
+                    value={chefgeniusForm.time_constraint}
+                    onChange={(e) => setChefgeniusForm({...chefgeniusForm, time_constraint: parseInt(e.target.value)})}
+                    className="form-input"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Dietary Restrictions
+                  </label>
+                  <div className="space-y-2">
+                    {['vegetarian', 'vegan', 'gluten-free', 'dairy-free', 'nut-free'].map((restriction) => (
+                      <label key={restriction} className="flex items-center">
+                        <input
+                          type="checkbox"
+                          checked={chefgeniusForm.dietary_restrictions.includes(restriction)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setChefgeniusForm({
+                                ...chefgeniusForm,
+                                dietary_restrictions: [...chefgeniusForm.dietary_restrictions, restriction]
+                              });
+                            } else {
+                              setChefgeniusForm({
+                                ...chefgeniusForm,
+                                dietary_restrictions: chefgeniusForm.dietary_restrictions.filter(r => r !== restriction)
+                              });
+                            }
+                          }}
+                          className="mr-2"
+                        />
+                        <span className="text-sm text-gray-700 capitalize">{restriction.replace('-', ' ')}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
             </div>
             
             <div className="mt-6">
               <button
-                onClick={generateAIRecipe}
+                onClick={generateChefgeniusRecipe}
                 className="btn btn-primary"
-                disabled={isGeneratingRecipe}
+                disabled={isGeneratingChefgenius}
               >
-                {isGeneratingRecipe ? 'Generating Recipe...' : 'Generate AI Recipe'}
+                {isGeneratingChefgenius ? 'Generating Recipe...' : 'Generate ChefGenius Recipe'}
               </button>
             </div>
           </div>
@@ -2392,6 +2403,53 @@ function App() {
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* ChefGenius Generated Recipe */}
+          {chefgeniusRecipe && (
+            <div className="card mb-8">
+              <h2 className="text-xl font-bold mb-6 flex items-center">
+                <Brain className="mr-2" size={24} />
+                Your ChefGenius Recipe
+              </h2>
+              
+              <div className="bg-green-50 border border-green-200 rounded-lg p-6 mb-6">
+                <div className="prose max-w-none" dangerouslySetInnerHTML={{ __html: chefgeniusRecipe.recipe.replace(/\n/g, '<br>') }} />
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <h4 className="text-lg font-bold mb-4">Ingredients Used</h4>
+                  <div className="space-y-2">
+                    {chefgeniusRecipe.ingredients_used.map((ingredient, index) => (
+                      <div key={index} className="flex items-center py-2 border-b border-gray-100">
+                        <span className="text-gray-800">{ingredient}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                
+                <div>
+                  <h4 className="text-lg font-bold mb-4">Recipe Details</h4>
+                  <div className="space-y-2">
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Meal Type:</span>
+                      <span className="font-medium capitalize">{chefgeniusRecipe.meal_type}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Time Constraint:</span>
+                      <span className="font-medium">{chefgeniusRecipe.time_constraint} minutes</span>
+                    </div>
+                    {chefgeniusRecipe.dietary_restrictions.length > 0 && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Dietary Restrictions:</span>
+                        <span className="font-medium">{chefgeniusRecipe.dietary_restrictions.join(', ')}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
