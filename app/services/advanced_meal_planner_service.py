@@ -48,7 +48,7 @@ class AdvancedMealPlannerService:
                     "assumptions": "...string describing any assumptions made...",
                     "total_daily_calories": int,
                     "meals_per_day": int,
-                    "budget_per_day": number (currency units),
+                    "budget_per_day": number (in Indian Rupees ₹),
                     "food_preferences": [ ... ],
                     "dietary_restrictions": [ ... ]
                   },
@@ -81,7 +81,8 @@ class AdvancedMealPlannerService:
                 CALCULATION RULES:
                 - Provide numeric macros for each meal; totals for each day should approximate the target daily calories.
                 - Round estimates reasonably (two decimals for grams / two decimals for currency).
-                - If cost data isn't exact, give approximate est_cost values.
+                - ALL COSTS MUST BE IN INDIAN RUPEES (₹) - use realistic Indian market prices for ingredients.
+                - If cost data isn't exact, give approximate est_cost values in ₹.
                 - If a requested preference item is unavailable or conflicts with restrictions, pick the closest appropriate swap and explain in meta.assumptions.
 
                 If user input is ambiguous, make a reasonable assumption and include it in meta.assumptions.

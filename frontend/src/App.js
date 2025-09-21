@@ -62,16 +62,6 @@ function App() {
     macroAdjustments: []
   });
 
-  // Advanced Planning state
-  const [advancedPlan, setAdvancedPlan] = useState(null);
-  const [planningForm, setPlanningForm] = useState({
-    target_calories: '',
-    protein_percentage: 25,
-    carb_percentage: 45,
-    fat_percentage: 30,
-    meals_per_day: 3,
-    cuisine_type: 'mixed'
-  });
 
   // AI Recipe Generator state
   const [aiRecipes, setAiRecipes] = useState([]);
@@ -193,7 +183,7 @@ function App() {
     target_calories: 2000,
     meals_per_day: 3,
     food_preferences: [],
-    budget_per_day: 50.0,
+    budget_per_day: 300.0,
     work_hours_per_day: 8,
     dietary_restrictions: [],
     equipment: ['stove'],
@@ -317,10 +307,6 @@ function App() {
   }, [activeView]);
 
   useEffect(() => {
-    // Fetch advanced planning data when advanced-planning view is active
-    if (activeView === 'advanced-planning') {
-      fetchAdvancedPlanningData();
-    }
     // Fetch AI recipes when ai-recipes view is active
     if (activeView === 'ai-recipes') {
       fetchAIRecipes();
@@ -1357,53 +1343,7 @@ function App() {
     }
   };
 
-  const fetchAdvancedPlanningData = async () => {
-    try {
-      const token = localStorage.getItem('token');
-      const headers = {
-        'Authorization': `Bearer ${token}`
-      };
 
-      // Fetch variety analysis
-      const varietyResponse = await fetch(`${API_BASE_URL}/advanced-planning/meal-variety-analysis`, { headers });
-      
-      if (varietyResponse.ok) {
-        const varietyData = await varietyResponse.json();
-        // Store variety data for display
-        console.log('Variety analysis:', varietyData);
-      }
-    } catch (error) {
-      console.error('Error fetching advanced planning data:', error);
-    }
-  };
-
-  const generateAdvancedPlan = async () => {
-    try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`${API_BASE_URL}/advanced-planning/generate-week-plan`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify(planningForm)
-      });
-
-      if (response.ok) {
-        const plan = await response.json();
-        setAdvancedPlan(plan);
-        alert('Advanced meal plan generated successfully!');
-      } else {
-        const errorData = await response.json();
-        const errorMessage = typeof errorData.detail === 'string' 
-          ? errorData.detail 
-          : JSON.stringify(errorData.detail) || 'Failed to generate meal plan';
-        setError(errorMessage);
-      }
-    } catch (error) {
-      setError('Network error. Please try again.');
-    }
-  };
 
   const generateAIRecipe = async () => {
     setIsGeneratingRecipe(true);
@@ -2627,207 +2567,6 @@ function App() {
               Refresh Recommendations
             </button>
           </div>
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderAdvancedPlanning = () => (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white shadow">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center">
-              <button
-                onClick={() => setActiveView('dashboard')}
-                className="mr-4 flex items-center text-gray-600 hover:text-gray-900"
-              >
-                <ArrowLeft size={20} className="mr-2" />
-                Back to Dashboard
-              </button>
-              <h1 className="text-2xl font-bold text-gray-900">Advanced Meal Planning</h1>
-            </div>
-            <div className="flex items-center gap-4">
-              <span className="text-gray-700">Welcome, {user?.full_name || user?.username}</span>
-              <button
-                onClick={handleLogout}
-                className="btn btn-secondary"
-              >
-                Logout
-              </button>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      <div className="container mx-auto px-4 py-8">
-        <div className="max-w-6xl mx-auto">
-          
-          {/* Planning Form */}
-          <div className="mb-8">
-            <h2 className="text-2xl font-bold mb-6 flex items-center">
-              <Calendar className="mr-2" />
-              Generate Advanced Meal Plan
-            </h2>
-            <div className="card">
-              <form onSubmit={(e) => { e.preventDefault(); generateAdvancedPlan(); }} className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="form-label">Target Calories (per day)</label>
-                    <input
-                      type="number"
-                      className="form-input"
-                      value={planningForm.target_calories}
-                      onChange={(e) => setPlanningForm({...planningForm, target_calories: e.target.value})}
-                      placeholder="e.g., 2000"
-                    />
-                  </div>
-                  <div>
-                    <label className="form-label">Meals per Day</label>
-                    <select
-                      className="form-input"
-                      value={planningForm.meals_per_day}
-                      onChange={(e) => setPlanningForm({...planningForm, meals_per_day: parseInt(e.target.value)})}
-                    >
-                      <option value={3}>3 meals</option>
-                      <option value={4}>4 meals</option>
-                      <option value={5}>5 meals</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="form-label">Protein %</label>
-                    <input
-                      type="number"
-                      min="10"
-                      max="50"
-                      className="form-input"
-                      value={planningForm.protein_percentage}
-                      onChange={(e) => setPlanningForm({...planningForm, protein_percentage: parseInt(e.target.value)})}
-                    />
-                  </div>
-                  <div>
-                    <label className="form-label">Carbs %</label>
-                    <input
-                      type="number"
-                      min="20"
-                      max="70"
-                      className="form-input"
-                      value={planningForm.carb_percentage}
-                      onChange={(e) => setPlanningForm({...planningForm, carb_percentage: parseInt(e.target.value)})}
-                    />
-                  </div>
-                  <div>
-                    <label className="form-label">Fat %</label>
-                    <input
-                      type="number"
-                      min="10"
-                      max="40"
-                      className="form-input"
-                      value={planningForm.fat_percentage}
-                      onChange={(e) => setPlanningForm({...planningForm, fat_percentage: parseInt(e.target.value)})}
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="form-label">Cuisine Type</label>
-                  <select
-                    className="form-input"
-                    value={planningForm.cuisine_type}
-                    onChange={(e) => setPlanningForm({...planningForm, cuisine_type: e.target.value})}
-                  >
-                    <option value="mixed">Mixed</option>
-                    <option value="indian">Indian</option>
-                    <option value="chinese">Chinese</option>
-                    <option value="mediterranean">Mediterranean</option>
-                    <option value="mexican">Mexican</option>
-                  </select>
-                </div>
-
-                {error && (
-                  <div className="text-red-600 text-sm text-center">{error}</div>
-                )}
-
-                <button
-                  type="submit"
-                  disabled={isLoading}
-                  className="btn btn-primary w-full"
-                >
-                  {isLoading ? 'Generating Plan...' : 'Generate Advanced Meal Plan'}
-                </button>
-              </form>
-            </div>
-          </div>
-
-          {/* Generated Plan */}
-          {advancedPlan && (
-            <div className="mb-8">
-              <h2 className="text-2xl font-bold mb-6 flex items-center">
-                <BarChart3 className="mr-2" />
-                Your Advanced Meal Plan
-              </h2>
-              
-              {/* Plan Summary */}
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-                <div className="card text-center">
-                  <div className="text-2xl font-bold text-blue-600">
-                    {advancedPlan.total_weekly_calories.toFixed(0)}
-                  </div>
-                  <div className="text-sm text-gray-600">Weekly Calories</div>
-                </div>
-                <div className="text-2xl font-bold text-green-600">
-                  {advancedPlan.total_weekly_protein.toFixed(0)}g
-                </div>
-                <div className="text-sm text-gray-600">Weekly Protein</div>
-                <div className="text-2xl font-bold text-purple-600">
-                  {(advancedPlan.variety_score * 100).toFixed(0)}%
-                </div>
-                <div className="text-sm text-gray-600">Variety Score</div>
-                <div className="text-2xl font-bold text-orange-600">
-                  {(advancedPlan.macro_balance_score * 100).toFixed(0)}%
-                </div>
-                <div className="text-sm text-gray-600">Macro Balance</div>
-              </div>
-
-              {/* Week Plan */}
-              <div className="space-y-6">
-                {advancedPlan.week_plans.map((day, dayIndex) => (
-                  <div key={dayIndex} className="card">
-                    <h3 className="text-lg font-bold mb-4">Day {day.day}</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      {day.meals.map((meal, mealIndex) => (
-                        <div key={mealIndex} className="border border-gray-200 rounded-lg p-4">
-                          <h4 className="font-medium mb-2">
-                            {mealIndex === 0 ? 'Breakfast' : mealIndex === 1 ? 'Lunch' : 'Dinner'}
-                          </h4>
-                          <div className="space-y-2">
-                            {meal.items.map((item, itemIndex) => (
-                              <div key={itemIndex} className="text-sm">
-                                <div className="font-medium">{item.name}</div>
-                                <div className="text-gray-600">
-                                  {item.calories.toFixed(0)} cal • {item.quantity}x
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                          <div className="mt-2 text-xs text-gray-500">
-                            Total: {meal.total_calories.toFixed(0)} cal, {meal.total_protein.toFixed(1)}g protein
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="mt-4 text-sm text-gray-600">
-                      Day Total: {day.total_calories.toFixed(0)} calories, {day.total_protein.toFixed(1)}g protein
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       </div>
     </div>
@@ -4277,15 +4016,6 @@ function App() {
             </button>
             <button 
               className="card hover:shadow-lg transition-shadow cursor-pointer"
-              onClick={() => setActiveView('advanced-planning')}
-            >
-              <div className="text-center">
-                <Calendar className="mx-auto mb-2" size={32} />
-                <div className="font-medium">Advanced Planning</div>
-              </div>
-            </button>
-            <button 
-              className="card hover:shadow-lg transition-shadow cursor-pointer"
               onClick={() => setActiveView('ai-recipes')}
             >
               <div className="text-center">
@@ -4402,15 +4132,17 @@ function App() {
               </div>
               
               <div>
-                <label className="form-label">Budget Per Day ($)</label>
+                <label className="form-label">Budget Per Day (₹)</label>
                 <input
                   type="number"
                   className="form-input"
                   value={advancedPlanForm.budget_per_day}
                   onChange={(e) => setAdvancedPlanForm({...advancedPlanForm, budget_per_day: parseFloat(e.target.value) || 0})}
                   min="0"
-                  step="0.01"
+                  step="10"
+                  placeholder="e.g., 300"
                 />
+                <p className="text-sm text-gray-500 mt-1">Enter your daily food budget in Indian Rupees</p>
               </div>
               
               <div>
@@ -4533,7 +4265,7 @@ function App() {
                   </div>
                   <div className="text-center">
                     <div className="text-2xl font-bold text-purple-600">
-                      ${advancedMealPlan.summary?.avg_daily_cost || 'N/A'}
+                      ₹{advancedMealPlan.summary?.avg_daily_cost || 'N/A'}
                     </div>
                     <div className="text-sm text-gray-600">Avg Daily Cost</div>
                   </div>
@@ -4590,7 +4322,7 @@ function App() {
                               <div className="flex flex-wrap gap-2">
                                 {meal.ingredients.map((ingredient, idx) => (
                                   <span key={idx} className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded">
-                                    {ingredient.name} ({ingredient.qty})
+                                    {ingredient.name} ({ingredient.qty}) {ingredient.est_cost ? `₹${ingredient.est_cost}` : ''}
                                   </span>
                                 ))}
                               </div>
@@ -4617,7 +4349,10 @@ function App() {
                     {advancedMealPlan.summary.weekly_shopping_list.map((item, index) => (
                       <div key={index} className="flex justify-between items-center bg-white rounded p-2">
                         <span className="text-sm">{item.name}</span>
-                        <span className="text-sm font-semibold">{item.qty_est}</span>
+                        <div className="text-right">
+                          <div className="text-sm font-semibold">{item.qty_est}</div>
+                          {item.est_cost && <div className="text-xs text-green-600">₹{item.est_cost}</div>}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -4671,8 +4406,6 @@ function App() {
       return renderChallenges();
     } else if (activeView === 'ml-recommendations') {
       return renderMLRecommendations();
-    } else if (activeView === 'advanced-planning') {
-      return renderAdvancedPlanning();
     } else if (activeView === 'ai-recipes') {
       return renderAIRecipes();
     } else if (activeView === 'fitmentor') {
