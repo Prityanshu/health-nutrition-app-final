@@ -11,7 +11,8 @@ import {
   Calendar,
   ChefHat,
   Lightbulb,
-  BarChart3
+  BarChart3,
+  Globe
 } from 'lucide-react';
 import './index.css';
 
@@ -136,6 +137,24 @@ function App() {
     feedback: '',
     new_budget: null,
     new_calorie_target: null
+  });
+
+  // CulinaryExplorer state
+  const [culinaryexplorerPlan, setCulinaryexplorerPlan] = useState(null);
+  const [isGeneratingCulinaryexplorer, setIsGeneratingCulinaryexplorer] = useState(false);
+  const [culinaryexplorerForm, setCulinaryexplorerForm] = useState({
+    cuisine_region: 'indian',
+    meal_type: 'full_day',
+    dietary_restrictions: [],
+    time_constraint: 60,
+    cooking_skill: 'intermediate',
+    available_ingredients: []
+  });
+  const [culinaryAdaptationForm, setCulinaryAdaptationForm] = useState({
+    current_plan: '',
+    feedback: '',
+    new_cuisine_preference: null,
+    new_dietary_restrictions: null
   });
   
   // Ingredient search states
@@ -732,6 +751,113 @@ function App() {
       setError('Failed to connect to server');
     } finally {
       setIsGeneratingBudgetchef(false);
+    }
+  };
+
+  const generateCulinaryexplorerPlan = async () => {
+    if (!culinaryexplorerForm.cuisine_region) {
+      setError('Please select a cuisine region');
+      return;
+    }
+
+    setIsGeneratingCulinaryexplorer(true);
+    setError('');
+
+    try {
+      const token = localStorage.getItem('token');
+      const headers = {
+        'Authorization': `Bearer ${token}`
+      };
+
+      const response = await fetch(`${API_BASE_URL}/culinary/generate-meal-plan`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...headers
+        },
+        body: JSON.stringify(culinaryexplorerForm)
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.data) {
+          setCulinaryexplorerPlan(data.data);
+          // Pre-populate the adaptation form with the current plan
+          setCulinaryAdaptationForm(prev => ({
+            ...prev,
+            current_plan: data.data.meal_plan
+          }));
+          alert('CulinaryExplorer Regional Meal Plan generated successfully!');
+        } else {
+          setError('Failed to generate regional meal plan');
+        }
+      } else {
+        const errorData = await response.json();
+        const errorMessage = typeof errorData.detail === 'string'
+          ? errorData.detail
+          : JSON.stringify(errorData.detail) || 'Failed to generate regional meal plan';
+        setError(errorMessage);
+      }
+    } catch (error) {
+      console.error('Error generating CulinaryExplorer plan:', error);
+      setError('Failed to connect to server');
+    } finally {
+      setIsGeneratingCulinaryexplorer(false);
+    }
+  };
+
+  const adaptCulinaryexplorerPlan = async () => {
+    if (!culinaryAdaptationForm.current_plan || !culinaryAdaptationForm.feedback) {
+      setError('Please provide current plan and feedback');
+      return;
+    }
+
+    setIsGeneratingCulinaryexplorer(true);
+    setError('');
+
+    try {
+      const token = localStorage.getItem('token');
+      const headers = {
+        'Authorization': `Bearer ${token}`
+      };
+
+      const response = await fetch(`${API_BASE_URL}/culinary/adapt-plan`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...headers
+        },
+        body: JSON.stringify(culinaryAdaptationForm)
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.data) {
+          // Update the existing plan with the adapted version
+          setCulinaryexplorerPlan(prevPlan => ({
+            ...prevPlan,
+            meal_plan: data.data.adapted_plan,
+            feedback: data.data.feedback,
+            new_cuisine_preference: data.data.new_cuisine_preference,
+            new_dietary_restrictions: data.data.new_dietary_restrictions
+          }));
+          setCulinaryAdaptationForm({ current_plan: '', feedback: '', new_cuisine_preference: null, new_dietary_restrictions: null });
+          alert('Regional meal plan adapted successfully!');
+        } else {
+          setError('Failed to adapt regional meal plan');
+        }
+      } else {
+        const errorData = await response.json();
+        const errorMessage = typeof errorData.detail === 'string'
+          ? errorData.detail
+          : JSON.stringify(errorData.detail) || 'Failed to adapt regional meal plan';
+        setError(errorMessage);
+      }
+    } catch (error) {
+      console.error('Error adapting CulinaryExplorer plan:', error);
+      setError('Failed to connect to server');
+    } finally {
+      setIsGeneratingCulinaryexplorer(false);
     }
   };
 
@@ -3357,6 +3483,285 @@ function App() {
     </div>
   );
 
+  const renderCulinaryExplorer = () => (
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <header className="bg-white shadow">
+        <div className="container mx-auto px-4 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center">
+              <button
+                onClick={() => setActiveView('dashboard')}
+                className="mr-4 flex items-center text-gray-600 hover:text-gray-900"
+              >
+                <ArrowLeft size={20} className="mr-2" />
+                Back to Dashboard
+              </button>
+              <h1 className="text-2xl font-bold text-gray-900">CulinaryExplorer - Regional Cuisine Planner</h1>
+            </div>
+            <div className="flex items-center gap-4">
+              <span className="text-gray-700">Welcome, {user?.full_name || user?.username}</span>
+              <button
+                onClick={handleLogout}
+                className="btn btn-secondary"
+              >
+                Logout
+              </button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <div className="container mx-auto px-4 py-8">
+        <div className="max-w-6xl mx-auto">
+
+          {/* CulinaryExplorer Regional Cuisine Planner */}
+          <div className="card mb-8">
+            <h2 className="text-xl font-bold mb-6 flex items-center">
+              <Globe className="mr-2" size={24} />
+              Explore Regional Cuisines & Cultural Foods
+            </h2>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Cuisine Region *
+                </label>
+                <select
+                  value={culinaryexplorerForm.cuisine_region}
+                  onChange={(e) => setCulinaryexplorerForm({...culinaryexplorerForm, cuisine_region: e.target.value})}
+                  className="form-input"
+                >
+                  <optgroup label="Global Cuisines">
+                    <option value="mediterranean">Mediterranean</option>
+                    <option value="japanese">Japanese</option>
+                    <option value="mexican">Mexican</option>
+                    <option value="italian">Italian</option>
+                    <option value="chinese">Chinese</option>
+                    <option value="thai">Thai</option>
+                    <option value="french">French</option>
+                    <option value="indian">Indian</option>
+                  </optgroup>
+                  <optgroup label="Indian States">
+                    <option value="punjab">Punjab</option>
+                    <option value="kerala">Kerala</option>
+                    <option value="gujarat">Gujarat</option>
+                    <option value="tamil_nadu">Tamil Nadu</option>
+                    <option value="rajasthan">Rajasthan</option>
+                    <option value="bengal">Bengal</option>
+                    <option value="maharashtra">Maharashtra</option>
+                    <option value="karnataka">Karnataka</option>
+                    <option value="andhra_pradesh">Andhra Pradesh</option>
+                    <option value="uttar_pradesh">Uttar Pradesh</option>
+                    <option value="delhi">Delhi</option>
+                    <option value="goa">Goa</option>
+                    <option value="himachal_pradesh">Himachal Pradesh</option>
+                    <option value="kashmir">Kashmir</option>
+                  </optgroup>
+                </select>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Meal Type *
+                </label>
+                <select
+                  value={culinaryexplorerForm.meal_type}
+                  onChange={(e) => setCulinaryexplorerForm({...culinaryexplorerForm, meal_type: e.target.value})}
+                  className="form-input"
+                >
+                  <option value="breakfast">Breakfast</option>
+                  <option value="lunch">Lunch</option>
+                  <option value="dinner">Dinner</option>
+                  <option value="snack">Snack</option>
+                  <option value="full_day">Full Day Plan</option>
+                </select>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Time Constraint (minutes) *
+                </label>
+                <input
+                  type="number"
+                  min="15"
+                  max="300"
+                  value={culinaryexplorerForm.time_constraint}
+                  onChange={(e) => setCulinaryexplorerForm({...culinaryexplorerForm, time_constraint: parseInt(e.target.value)})}
+                  className="form-input"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Cooking Skill Level *
+                </label>
+                <select
+                  value={culinaryexplorerForm.cooking_skill}
+                  onChange={(e) => setCulinaryexplorerForm({...culinaryexplorerForm, cooking_skill: e.target.value})}
+                  className="form-input"
+                >
+                  <option value="beginner">Beginner</option>
+                  <option value="intermediate">Intermediate</option>
+                  <option value="advanced">Advanced</option>
+                </select>
+              </div>
+            </div>
+            
+            <div className="mt-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Dietary Restrictions (optional)
+              </label>
+              <div className="space-y-2">
+                {['vegetarian', 'vegan', 'gluten-free', 'dairy-free', 'nut-free', 'low-carb', 'high-protein', 'keto', 'paleo', 'halal', 'kosher'].map((restriction) => (
+                  <label key={restriction} className="flex items-center">
+                    <input
+                      type="checkbox"
+                      checked={culinaryexplorerForm.dietary_restrictions.includes(restriction)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setCulinaryexplorerForm({
+                            ...culinaryexplorerForm,
+                            dietary_restrictions: [...culinaryexplorerForm.dietary_restrictions, restriction]
+                          });
+                        } else {
+                          setCulinaryexplorerForm({
+                            ...culinaryexplorerForm,
+                            dietary_restrictions: culinaryexplorerForm.dietary_restrictions.filter(r => r !== restriction)
+                          });
+                        }
+                      }}
+                      className="mr-2"
+                    />
+                    <span className="text-sm text-gray-700 capitalize">{restriction.replace('-', ' ')}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            
+            <div className="mt-6">
+              <button
+                onClick={generateCulinaryexplorerPlan}
+                className="btn btn-primary"
+                disabled={isGeneratingCulinaryexplorer}
+              >
+                {isGeneratingCulinaryexplorer ? 'Generating Plan...' : 'Generate Regional Meal Plan'}
+              </button>
+            </div>
+          </div>
+
+          {/* CulinaryExplorer Generated Plan */}
+          {culinaryexplorerPlan && (
+            <div className="card mb-8">
+              <h2 className="text-xl font-bold mb-6 flex items-center">
+                <Globe className="mr-2" size={24} />
+                Your CulinaryExplorer Regional Meal Plan
+              </h2>
+              
+              <div className="bg-orange-50 border border-orange-200 rounded-lg p-6 mb-6">
+                <div className="prose max-w-none" dangerouslySetInnerHTML={{ __html: culinaryexplorerPlan.meal_plan.replace(/\n/g, '<br>') }} />
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <h4 className="text-lg font-bold mb-4">Plan Details</h4>
+                  <div className="space-y-2">
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Cuisine Region:</span>
+                      <span className="font-medium capitalize">{culinaryexplorerPlan.cuisine_region.replace('_', ' ')}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Meal Type:</span>
+                      <span className="font-medium capitalize">{culinaryexplorerPlan.meal_type.replace('_', ' ')}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Time Constraint:</span>
+                      <span className="font-medium">{culinaryexplorerPlan.time_constraint} minutes</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Cooking Skill:</span>
+                      <span className="font-medium capitalize">{culinaryexplorerPlan.cooking_skill}</span>
+                    </div>
+                    {culinaryexplorerPlan.dietary_restrictions.length > 0 && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Dietary Restrictions:</span>
+                        <span className="font-medium">{culinaryexplorerPlan.dietary_restrictions.join(', ')}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                
+                <div>
+                  <h4 className="text-lg font-bold mb-4">Adapt Your Plan</h4>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Current Plan
+                      </label>
+                      <textarea
+                        value={culinaryAdaptationForm.current_plan}
+                        onChange={(e) => setCulinaryAdaptationForm({...culinaryAdaptationForm, current_plan: e.target.value})}
+                        className="form-input"
+                        rows="3"
+                        placeholder="Paste your current meal plan here..."
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Feedback
+                      </label>
+                      <textarea
+                        value={culinaryAdaptationForm.feedback}
+                        onChange={(e) => setCulinaryAdaptationForm({...culinaryAdaptationForm, feedback: e.target.value})}
+                        className="form-input"
+                        rows="3"
+                        placeholder="What would you like to change? What's working/not working?"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          New Cuisine Preference (optional)
+                        </label>
+                        <input
+                          type="text"
+                          value={culinaryAdaptationForm.new_cuisine_preference || ''}
+                          onChange={(e) => setCulinaryAdaptationForm({...culinaryAdaptationForm, new_cuisine_preference: e.target.value})}
+                          className="form-input"
+                          placeholder="e.g., Italian, Kerala"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          New Dietary Restrictions (optional)
+                        </label>
+                        <input
+                          type="text"
+                          value={culinaryAdaptationForm.new_dietary_restrictions || ''}
+                          onChange={(e) => setCulinaryAdaptationForm({...culinaryAdaptationForm, new_dietary_restrictions: e.target.value.split(',').map(s => s.trim())})}
+                          className="form-input"
+                          placeholder="e.g., vegetarian, gluten-free"
+                        />
+                      </div>
+                    </div>
+                    <button
+                      onClick={adaptCulinaryexplorerPlan}
+                      className="btn btn-secondary"
+                      disabled={isGeneratingCulinaryexplorer || !culinaryAdaptationForm.current_plan || !culinaryAdaptationForm.feedback}
+                    >
+                      {isGeneratingCulinaryexplorer ? 'Adapting Plan...' : 'Adapt Meal Plan'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+        </div>
+      </div>
+    </div>
+  );
+
   const renderDashboard = () => (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -3557,6 +3962,15 @@ function App() {
                 <div className="font-medium">BudgetChef</div>
               </div>
             </button>
+            <button 
+              className="card hover:shadow-lg transition-shadow cursor-pointer"
+              onClick={() => setActiveView('culinaryexplorer')}
+            >
+              <div className="text-center">
+                <Globe className="mx-auto mb-2" size={32} />
+                <div className="font-medium">CulinaryExplorer</div>
+              </div>
+            </button>
           </div>
         </div>
       </div>
@@ -3587,6 +4001,8 @@ function App() {
       return renderFitMentor();
     } else if (activeView === 'budgetchef') {
       return renderBudgetChef();
+    } else if (activeView === 'culinaryexplorer') {
+      return renderCulinaryExplorer();
     } else {
       return renderDashboard();
     }
