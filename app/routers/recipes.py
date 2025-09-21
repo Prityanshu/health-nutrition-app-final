@@ -27,17 +27,34 @@ async def generate_recipe(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    """Generate a recipe based on preferences"""
-    # Simple recipe generation - in a real app, this would use ML/AI
-    food_items = db.query(FoodItem).filter(
-        FoodItem.cuisine_type == recipe_request.cuisine_type
-    ).limit(5).all()
+    """Generate a recipe based on preferences using MyFitnessPal data"""
+    # Enhanced recipe generation with MyFitnessPal data
+    query = db.query(FoodItem)
+    
+    # Filter by cuisine type
+    if recipe_request.cuisine_type and recipe_request.cuisine_type != "mixed":
+        query = query.filter(FoodItem.cuisine_type == recipe_request.cuisine_type)
+    
+    # Filter out very high calorie items for better recipes
+    query = query.filter(FoodItem.calories <= 600)
+    
+    # Filter out items with very high sodium
+    query = query.filter(FoodItem.sodium_mg <= 600)
+    
+    # Order by calories for balanced recipes
+    query = query.order_by(FoodItem.calories)
+    
+    food_items = query.limit(10).all()
     
     if not food_items:
-        # Fallback to any food items
-        food_items = db.query(FoodItem).limit(5).all()
+        # Fallback to any food items with filters
+        fallback_query = db.query(FoodItem).filter(
+            FoodItem.calories <= 600,
+            FoodItem.sodium_mg <= 600
+        ).limit(10)
+        food_items = fallback_query.all()
     
-    # Create a simple recipe
+    # Create a more sophisticated recipe
     recipe_name = f"{recipe_request.cuisine_type.title()} {recipe_request.meal_type.title()}"
     
     ingredients = []
@@ -46,8 +63,18 @@ async def generate_recipe(
     total_carbs = 0
     total_fat = 0
     
-    for i, item in enumerate(food_items[:3]):  # Use first 3 items
-        quantity = 1.0 if i == 0 else 0.5  # Main ingredient gets full portion
+    # Select ingredients based on meal type and nutritional balance
+    selected_items = food_items[:4]  # Use up to 4 items
+    
+    for i, item in enumerate(selected_items):
+        # Adjust quantities based on meal type and item position
+        if recipe_request.meal_type == "breakfast":
+            quantity = 1.0 if i == 0 else 0.3  # Smaller portions for breakfast
+        elif recipe_request.meal_type == "lunch":
+            quantity = 1.0 if i == 0 else 0.5  # Medium portions for lunch
+        else:  # dinner or snack
+            quantity = 1.0 if i == 0 else 0.7  # Larger portions for dinner
+        
         ingredients.append({
             "name": item.name,
             "quantity": quantity,
@@ -63,13 +90,8 @@ async def generate_recipe(
         total_carbs += item.carbs_g * quantity
         total_fat += item.fat_g * quantity
     
-    # Simple cooking instructions
-    instructions = [
-        f"Prepare all ingredients for {recipe_name.lower()}",
-        "Heat a pan over medium heat",
-        "Add main ingredients and cook for 10-15 minutes",
-        "Season to taste and serve hot"
-    ]
+    # Enhanced cooking instructions based on cuisine type
+    instructions = _generate_cooking_instructions(recipe_request.cuisine_type, recipe_name)
     
     return RecipeResponse(
         name=recipe_name,
@@ -78,12 +100,53 @@ async def generate_recipe(
         ingredients=ingredients,
         instructions=instructions,
         nutrition={
-            "calories": total_calories,
-            "protein": total_protein,
-            "carbs": total_carbs,
-            "fat": total_fat
+            "calories": round(total_calories, 1),
+            "protein": round(total_protein, 1),
+            "carbs": round(total_carbs, 1),
+            "fat": round(total_fat, 1)
         }
     )
+
+def _generate_cooking_instructions(cuisine_type: str, recipe_name: str) -> List[str]:
+    """Generate cooking instructions based on cuisine type"""
+    base_instructions = [
+        f"Prepare all ingredients for {recipe_name.lower()}",
+        "Wash and prepare fresh ingredients",
+        "Heat cooking oil in a pan over medium heat"
+    ]
+    
+    if cuisine_type == "italian":
+        base_instructions.extend([
+            "Add aromatics and cook until fragrant",
+            "Add main ingredients and simmer for 15-20 minutes",
+            "Season with herbs and serve with fresh bread"
+        ])
+    elif cuisine_type == "chinese":
+        base_instructions.extend([
+            "Stir-fry ingredients in hot oil for 3-5 minutes",
+            "Add sauce and toss to combine",
+            "Serve immediately over rice or noodles"
+        ])
+    elif cuisine_type == "mexican":
+        base_instructions.extend([
+            "Sauté ingredients with spices for 5-7 minutes",
+            "Add liquid and simmer for 10-15 minutes",
+            "Garnish with fresh cilantro and serve with tortillas"
+        ])
+    elif cuisine_type == "indian":
+        base_instructions.extend([
+            "Toast spices in hot oil until fragrant",
+            "Add main ingredients and cook for 10-15 minutes",
+            "Finish with fresh herbs and serve with rice or bread"
+        ])
+    else:  # mixed or other
+        base_instructions.extend([
+            "Cook main ingredients for 10-15 minutes",
+            "Season to taste and adjust flavors",
+            "Serve hot and enjoy"
+        ])
+    
+    return base_instructions
 
 @router.get("/cuisines")
 async def get_available_cuisines(db: Session = Depends(get_db)):

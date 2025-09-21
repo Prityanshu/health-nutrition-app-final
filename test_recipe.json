@@ -1,0 +1,13 @@
+{
+  "cuisine_preference": ["indian"],
+  "meal_type": "lunch",
+  "target_calories": 400,
+  "serving_size": 2,
+  "difficulty_level": "easy",
+  "budget_limit": 200,
+  "time_constraint": 60,
+  "available_ingredients": ["chicken", "rice"],
+  "dietary_restrictions": [],
+  "health_conditions": []
+}
+

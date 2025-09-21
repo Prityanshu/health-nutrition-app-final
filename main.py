@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import engine, Base
 from app.routers import auth, users, planner, meals, tracking, goals, recipes, gamification, ml_recommendations, advanced_planning
+from app.routers.ai_recipe_router import router as ai_recipe_router
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -29,6 +30,7 @@ app.include_router(meals.router, prefix="/api/meals", tags=["meals"])
 app.include_router(tracking.router, prefix="/api/tracking", tags=["progress-tracking"])
 app.include_router(goals.router, prefix="/api/goals", tags=["goals"])
 app.include_router(recipes.router, prefix="/api/recipes", tags=["recipes"])
+app.include_router(ai_recipe_router, prefix="/api/ai-recipes", tags=["ai-recipes"])
 app.include_router(gamification.router, prefix="/api/gamification", tags=["gamification"])
 app.include_router(ml_recommendations.router, prefix="/api/ml", tags=["ml-recommendations"])
 app.include_router(advanced_planning.router, prefix="/api/advanced-planning", tags=["advanced-meal-planning"])

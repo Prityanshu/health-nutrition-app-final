@@ -311,7 +311,7 @@ class IntelligentRecommendationEngine:
         return recommendations
     
     def recommend_foods(self, user: User, preferences: Dict, meal_type: str) -> List[Dict]:
-        """Recommend specific foods based on preferences and context"""
+        """Recommend specific foods based on preferences and context using MyFitnessPal data"""
         
         # Get preferred cuisines
         cuisine_prefs = preferences.get('cuisine_preferences', {})
@@ -335,12 +335,19 @@ class IntelligentRecommendationEngine:
         if top_cuisines:
             query = query.filter(FoodItem.cuisine_type.in_(top_cuisines))
         
+        # Filter out very high calorie items for better recommendations
+        query = query.filter(FoodItem.calories <= 1000)
+        
+        # Filter out items with very high sodium
+        query = query.filter(FoodItem.sodium_mg <= 1000)
+        
         # Get recent foods to avoid repetition
         recent_foods = self.get_recent_foods(user.id, days=7)
         if recent_foods:
             query = query.filter(~FoodItem.id.in_(recent_foods))
         
-        foods = query.limit(20).all()
+        # Increase limit for better variety with MFP data
+        foods = query.limit(50).all()
         
         # Score foods based on preferences
         scored_foods = []
@@ -354,6 +361,8 @@ class IntelligentRecommendationEngine:
                 'cuisine_type': food.cuisine_type,
                 'calories': food.calories,
                 'protein_g': food.protein_g,
+                'carbs_g': food.carbs_g,
+                'fat_g': food.fat_g,
                 'recommendation_score': score,
                 'reason': self.generate_recommendation_reason(food, preferences, meal_type)
             })

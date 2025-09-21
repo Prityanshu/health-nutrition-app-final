@@ -178,7 +178,7 @@ class AdvancedMealPlanner:
     
     def get_varied_food_selection(self, user: User, exclude_ids: set, 
                                 preferences: Dict) -> List[FoodItem]:
-        """Get a varied selection of foods for meal planning"""
+        """Get a varied selection of foods for meal planning using MyFitnessPal data"""
         
         query = self.db.query(FoodItem)
         
@@ -199,18 +199,28 @@ class AdvancedMealPlanner:
         if cuisine_pref and cuisine_pref != "mixed":
             query = query.filter(FoodItem.cuisine_type == cuisine_pref)
         
+        # Filter out very high calorie items for better meal planning
+        query = query.filter(FoodItem.calories <= 800)
+        
+        # Filter out items with very high sodium
+        query = query.filter(FoodItem.sodium_mg <= 800)
+        
         # Exclude recently eaten foods for variety
         if exclude_ids:
             query = query.filter(~FoodItem.id.in_(exclude_ids))
         
-        foods = query.all()
+        # Increase limit for better variety with MFP data
+        foods = query.limit(200).all()
         
         # If we don't have enough variety, include some recent foods
         if len(foods) < 20:
             fallback_query = self.db.query(FoodItem)
             if cuisine_pref and cuisine_pref != "mixed":
                 fallback_query = fallback_query.filter(FoodItem.cuisine_type == cuisine_pref)
-            foods = fallback_query.all()
+            # Apply same filters to fallback
+            fallback_query = fallback_query.filter(FoodItem.calories <= 800)
+            fallback_query = fallback_query.filter(FoodItem.sodium_mg <= 800)
+            foods = fallback_query.limit(100).all()
         
         return foods
     

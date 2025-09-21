@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from app.database import get_db, User, FoodItem, MealLog
 from app.auth import get_current_active_user
@@ -113,17 +113,33 @@ async def get_meal_history(
 async def get_food_items(
     search: Optional[str] = None,
     cuisine_type: Optional[str] = None,
-    limit: int = 50,
+    limit: int = 100,
     db: Session = Depends(get_db)
 ):
-    """Get food items with optional filtering"""
+    """Get food items with enhanced search functionality using MyFitnessPal data"""
     query = db.query(FoodItem)
     
     if search:
-        query = query.filter(FoodItem.name.contains(search))
+        # Simple search - search in name only for now
+        search_term = f"%{search.lower()}%"
+        query = query.filter(FoodItem.name.ilike(search_term))
     
-    if cuisine_type:
+    if cuisine_type and cuisine_type != "mixed":
         query = query.filter(FoodItem.cuisine_type == cuisine_type)
+    
+    # Filter out very high calorie items for better food selection
+    query = query.filter(FoodItem.calories <= 1000)
+    
+    # Filter out items with very high sodium
+    query = query.filter(FoodItem.sodium_mg <= 1000)
+    
+    # Order by relevance and name for better search results
+    if search:
+        # If searching, order by name length (shorter names first) then by name
+        query = query.order_by(db.func.length(FoodItem.name), FoodItem.name)
+    else:
+        # If not searching, order by name
+        query = query.order_by(FoodItem.name)
     
     food_items = query.limit(limit).all()
     
@@ -137,7 +153,49 @@ async def get_food_items(
             "carbs_g": item.carbs_g,
             "fat_g": item.fat_g,
             "fiber_g": item.fiber_g,
-            "sodium_mg": item.sodium_mg
+            "sodium_mg": item.sodium_mg,
+            "tags": item.tags
         }
         for item in food_items
     ]
+
+@router.get("/food-items/search", response_model=List[dict])
+async def search_food_items(
+    q: str = Query(..., description="Search query"),
+    limit: int = Query(20, description="Maximum number of results"),
+    db: Session = Depends(get_db)
+):
+    """Simple food search that works reliably"""
+    if len(q.strip()) < 2:
+        return []
+    
+    try:
+        # Simple search in name only
+        search_term = f"%{q.lower()}%"
+        food_items = db.query(FoodItem).filter(
+            FoodItem.name.ilike(search_term)
+        ).filter(
+            FoodItem.calories <= 1000
+        ).order_by(
+            FoodItem.name
+        ).limit(limit).all()
+        
+        return [
+            {
+                "id": item.id,
+                "name": item.name,
+                "cuisine_type": item.cuisine_type,
+                "calories": item.calories,
+                "protein_g": item.protein_g,
+                "carbs_g": item.carbs_g,
+                "fat_g": item.fat_g,
+                "fiber_g": item.fiber_g,
+                "sodium_mg": item.sodium_mg,
+                "tags": item.tags or "",
+                "ingredients": item.ingredients or ""
+            }
+            for item in food_items
+        ]
+    except Exception as e:
+        print(f"Search error: {e}")
+        return []
