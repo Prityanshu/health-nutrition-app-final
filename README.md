@@ -23,6 +23,20 @@ A comprehensive full-stack nutrition tracking application built with FastAPI (Py
 - Goals vs actual progress comparison
 - Visual progress indicators
 
+### 🤖 **AI-Powered Chatbot Assistant**
+- **Intelligent Agent Routing** - Automatically detects which AI agent to use based on user queries
+- **Conversation Memory** - Remembers last 5-6 messages for context-aware responses
+- **Smart Field Collection** - Reduces repetitive questions with intelligent defaults
+- **Multi-Agent Support** - Works with 6 specialized AI agents:
+  - **ChefGenius** - Recipe generation and cooking advice
+  - **CulinaryExplorer** - Regional and cultural cuisine exploration
+  - **BudgetChef** - Budget-friendly meal planning
+  - **FitMentor** - Fitness and workout planning
+  - **AdvancedMealPlanner** - Comprehensive 7-day meal planning
+  - **NutrientAnalyzer** - Nutritional analysis and tracking
+- **Fallback Responses** - Helpful responses even when AI services are unavailable
+- **Beautiful Chat Interface** - Markdown rendering with rich text formatting
+
 ### 🏆 **Challenges & Gamification**
 - Active challenges with reward points
 - User achievements and badges
@@ -40,10 +54,12 @@ A comprehensive full-stack nutrition tracking application built with FastAPI (Py
 
 ### Backend
 - **FastAPI** - Modern, fast web framework for building APIs
-- **PostgreSQL** - Relational database
+- **SQLite/PostgreSQL** - Relational database
 - **SQLAlchemy** - SQL toolkit and ORM
 - **JWT** - JSON Web Tokens for authentication
 - **Pydantic** - Data validation using Python type annotations
+- **Agno** - AI agent framework for intelligent chatbot
+- **Groq** - High-performance AI model inference
 
 ### Frontend
 - **React 18** - JavaScript library for building user interfaces
@@ -114,22 +130,43 @@ A comprehensive full-stack nutrition tracking application built with FastAPI (Py
 ## 📁 **Project Structure**
 
 ```
-major-project-redo/
+health-nutrition-app-final/
 ├── app/
-│   ├── routers/          # API route handlers
-│   ├── database.py       # Database configuration
-│   └── auth.py          # Authentication logic
+│   ├── routers/                    # API route handlers
+│   │   ├── chatbot.py             # AI chatbot endpoints
+│   │   ├── auth.py                # Authentication routes
+│   │   ├── users.py               # User management
+│   │   ├── meals.py               # Meal logging
+│   │   ├── goals.py               # Goal setting
+│   │   ├── tracking.py            # Progress tracking
+│   │   ├── gamification.py        # Challenges & achievements
+│   │   ├── fitness.py             # Workout planning
+│   │   ├── budget.py              # Budget meal planning
+│   │   ├── culinary.py            # Regional cuisine
+│   │   ├── nutrient_analyzer.py   # Nutrition analysis
+│   │   └── advanced_meal_planner.py # Advanced meal planning
+│   ├── services/                  # Business logic services
+│   │   ├── chatbot_manager.py     # AI chatbot orchestration
+│   │   ├── chefgenius_service.py  # Recipe generation
+│   │   ├── fitmentor_service.py   # Workout planning
+│   │   ├── budgetchef_service.py  # Budget meal planning
+│   │   ├── culinaryexplorer_service.py # Regional cuisine
+│   │   ├── advanced_meal_planner_service.py # Meal planning
+│   │   └── nutrient_analyzer_service.py # Nutrition analysis
+│   ├── database.py                # Database configuration
+│   ├── auth.py                    # Authentication logic
+│   └── schemas.py                 # Pydantic models
 ├── frontend/
 │   ├── src/
-│   │   ├── App.js       # Main React component
-│   │   └── index.css    # Styling
-│   ├── public/          # Static assets
-│   └── package.json     # Frontend dependencies
-├── scripts/             # Data loading scripts
-├── main.py             # FastAPI application entry point
-├── requirements.txt    # Python dependencies
-├── docker-compose.yml  # Docker configuration
-└── README.md          # This file
+│   │   ├── App.js                 # Main React component with chatbot
+│   │   └── index.css              # Styling
+│   ├── public/                    # Static assets
+│   └── package.json               # Frontend dependencies
+├── scripts/                       # Data loading scripts
+├── main.py                       # FastAPI application entry point
+├── requirements.txt              # Python dependencies
+├── docker-compose.yml            # Docker configuration
+└── README.md                     # This file
 ```
 
 ## 🔧 **API Endpoints**
@@ -160,6 +197,50 @@ major-project-redo/
 - `GET /api/gamification/achievements` - Get user achievements
 - `GET /api/gamification/stats` - Get user stats
 
+### AI Chatbot
+- `POST /api/chatbot/chat` - Main chatbot endpoint with full response
+- `POST /api/chatbot/chat/simple` - Simplified chatbot endpoint
+- `GET /api/chatbot/agents` - Get available AI agents
+- `GET /api/chatbot/health` - Chatbot service health check
+
+## 🤖 **AI Chatbot Usage Examples**
+
+### Recipe Generation
+```
+User: "I want a Kerala lunch recipe with chicken"
+Bot: [Generates detailed Kerala chicken curry recipe with ingredients, instructions, and nutrition info]
+```
+
+### Workout Planning
+```
+User: "Plan a workout for muscle gain, 60 minutes, gym equipment"
+Bot: [Creates comprehensive 7-day workout plan with exercises, sets, reps, and progression tips]
+```
+
+### Nutrition Analysis
+```
+User: "Analyze the nutrition in chicken curry 100g"
+Bot: [Provides detailed nutritional breakdown with calories, macros, and micronutrients]
+```
+
+### Budget Meal Planning
+```
+User: "Create a budget meal plan for 200 rupees per day"
+Bot: [Suggests cost-effective meal plans with shopping lists and cost breakdowns]
+```
+
+### Regional Cuisine
+```
+User: "I want Mediterranean dishes for dinner"
+Bot: [Recommends authentic Mediterranean recipes with health adaptations]
+```
+
+### Advanced Meal Planning
+```
+User: "Suggest a 7-day meal plan for 2000 calories, vegetarian"
+Bot: [Creates comprehensive weekly meal plan with shopping lists and prep tips]
+```
+
 ## 🎨 **Screenshots**
 
 ### Dashboard
@@ -181,6 +262,13 @@ major-project-redo/
 - Active challenges with progress tracking
 - Achievement system with points
 - User statistics dashboard
+
+### AI Chatbot Interface
+- Intelligent conversation with context awareness
+- Beautiful markdown rendering for rich responses
+- Service status indicators
+- Quick suggestion buttons for common queries
+- Multi-agent support with automatic routing
 
 ## 🤝 **Contributing**
 
