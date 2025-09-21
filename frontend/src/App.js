@@ -186,6 +186,27 @@ function App() {
   });
   const [showNutrientAnalysis, setShowNutrientAnalysis] = useState(false);
 
+  // AdvancedMealPlanner state
+  const [advancedMealPlan, setAdvancedMealPlan] = useState(null);
+  const [isGeneratingAdvancedPlan, setIsGeneratingAdvancedPlan] = useState(false);
+  const [advancedPlanForm, setAdvancedPlanForm] = useState({
+    target_calories: 2000,
+    meals_per_day: 3,
+    food_preferences: [],
+    budget_per_day: 50.0,
+    work_hours_per_day: 8,
+    dietary_restrictions: [],
+    equipment: ['stove'],
+    time_per_meal_min: 30,
+    region_or_cuisine: '',
+    user_notes: ''
+  });
+  const [advancedPlanAdaptationForm, setAdvancedPlanAdaptationForm] = useState({
+    current_plan: '',
+    feedback: '',
+    new_requirements: {}
+  });
+
   // Goals state
   const [goals, setGoals] = useState([]);
   const [goalForm, setGoalForm] = useState({
@@ -1036,6 +1057,106 @@ function App() {
       setError('Failed to connect to server');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // AdvancedMealPlanner functions
+  const generateAdvancedMealPlan = async () => {
+    if (!advancedPlanForm.target_calories || advancedPlanForm.target_calories < 100) {
+      setError('Please enter a valid target calories (minimum 100)');
+      return;
+    }
+
+    setIsGeneratingAdvancedPlan(true);
+    setError('');
+
+    try {
+      const token = localStorage.getItem('token');
+      const headers = {
+        'Authorization': `Bearer ${token}`
+      };
+
+      const response = await fetch(`${API_BASE_URL}/advanced-meal-planner/generate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...headers
+        },
+        body: JSON.stringify(advancedPlanForm)
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.data) {
+          setAdvancedMealPlan(data.data);
+          alert('Advanced meal plan generated successfully!');
+        } else {
+          setError('Failed to generate advanced meal plan');
+        }
+      } else {
+        const errorData = await response.json();
+        const errorMessage = typeof errorData.detail === 'string'
+          ? errorData.detail
+          : JSON.stringify(errorData.detail) || 'Failed to generate advanced meal plan';
+        setError(errorMessage);
+      }
+    } catch (error) {
+      console.error('Error generating advanced meal plan:', error);
+      setError('Failed to connect to server');
+    } finally {
+      setIsGeneratingAdvancedPlan(false);
+    }
+  };
+
+  const adaptAdvancedMealPlan = async () => {
+    if (!advancedPlanAdaptationForm.feedback.trim()) {
+      setError('Please provide feedback on the current plan');
+      return;
+    }
+
+    setIsGeneratingAdvancedPlan(true);
+    setError('');
+
+    try {
+      const token = localStorage.getItem('token');
+      const headers = {
+        'Authorization': `Bearer ${token}`
+      };
+
+      const response = await fetch(`${API_BASE_URL}/advanced-meal-planner/adapt`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...headers
+        },
+        body: JSON.stringify(advancedPlanAdaptationForm)
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.data) {
+          setAdvancedMealPlan(data.data);
+          setAdvancedPlanAdaptationForm({
+            current_plan: '',
+            feedback: '',
+            new_requirements: {}
+          });
+          alert('Advanced meal plan adapted successfully!');
+        } else {
+          setError('Failed to adapt advanced meal plan');
+        }
+      } else {
+        const errorData = await response.json();
+        const errorMessage = typeof errorData.detail === 'string'
+          ? errorData.detail
+          : JSON.stringify(errorData.detail) || 'Failed to adapt advanced meal plan';
+        setError(errorMessage);
+      }
+    } catch (error) {
+      console.error('Error adapting advanced meal plan:', error);
+      setError('Failed to connect to server');
+    } finally {
+      setIsGeneratingAdvancedPlan(false);
     }
   };
 
@@ -4199,7 +4320,336 @@ function App() {
                 <div className="font-medium">CulinaryExplorer</div>
               </div>
             </button>
+            <button 
+              className="card hover:shadow-lg transition-shadow cursor-pointer"
+              onClick={() => setActiveView('advancedmealplanner')}
+            >
+              <div className="text-center">
+                <Calendar className="mx-auto mb-2" size={32} />
+                <div className="font-medium">Advanced Planner</div>
+              </div>
+            </button>
           </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderAdvancedMealPlanner = () => (
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <header className="bg-white shadow">
+        <div className="container mx-auto px-4 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center">
+              <button
+                onClick={() => setActiveView('dashboard')}
+                className="mr-4 flex items-center text-gray-600 hover:text-gray-900"
+              >
+                <ArrowLeft size={20} className="mr-2" />
+                Back to Dashboard
+              </button>
+              <h1 className="text-2xl font-bold text-gray-900">Advanced Meal Planner</h1>
+            </div>
+            <div className="flex items-center gap-4">
+              <span className="text-gray-700">Welcome, {user?.full_name || user?.username}</span>
+              <button
+                onClick={handleLogout}
+                className="btn btn-secondary"
+              >
+                Logout
+              </button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <div className="container mx-auto px-4 py-8">
+        <div className="max-w-6xl mx-auto">
+          
+          {/* Advanced Meal Planner Form */}
+          <div className="card mb-8">
+            <h2 className="text-xl font-bold mb-6 flex items-center">
+              <Calendar className="mr-2" size={24} />
+              Create Your 7-Day Meal Plan
+            </h2>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <div>
+                <label className="form-label">Target Calories (Daily) *</label>
+                <input
+                  type="number"
+                  className="form-input"
+                  value={advancedPlanForm.target_calories}
+                  onChange={(e) => setAdvancedPlanForm({...advancedPlanForm, target_calories: parseInt(e.target.value) || 0})}
+                  min="100"
+                  max="5000"
+                />
+              </div>
+              
+              <div>
+                <label className="form-label">Meals Per Day *</label>
+                <select
+                  className="form-input"
+                  value={advancedPlanForm.meals_per_day}
+                  onChange={(e) => setAdvancedPlanForm({...advancedPlanForm, meals_per_day: parseInt(e.target.value)})}
+                >
+                  <option value={3}>3 meals</option>
+                  <option value={4}>4 meals</option>
+                  <option value={5}>5 meals</option>
+                  <option value={6}>6 meals</option>
+                </select>
+              </div>
+              
+              <div>
+                <label className="form-label">Budget Per Day ($)</label>
+                <input
+                  type="number"
+                  className="form-input"
+                  value={advancedPlanForm.budget_per_day}
+                  onChange={(e) => setAdvancedPlanForm({...advancedPlanForm, budget_per_day: parseFloat(e.target.value) || 0})}
+                  min="0"
+                  step="0.01"
+                />
+              </div>
+              
+              <div>
+                <label className="form-label">Work Hours Per Day</label>
+                <input
+                  type="number"
+                  className="form-input"
+                  value={advancedPlanForm.work_hours_per_day}
+                  onChange={(e) => setAdvancedPlanForm({...advancedPlanForm, work_hours_per_day: parseInt(e.target.value) || 8})}
+                  min="0"
+                  max="24"
+                />
+              </div>
+              
+              <div>
+                <label className="form-label">Time Per Meal (minutes)</label>
+                <input
+                  type="number"
+                  className="form-input"
+                  value={advancedPlanForm.time_per_meal_min}
+                  onChange={(e) => setAdvancedPlanForm({...advancedPlanForm, time_per_meal_min: parseInt(e.target.value) || 30})}
+                  min="5"
+                  max="120"
+                />
+              </div>
+              
+              <div>
+                <label className="form-label">Cuisine/Region</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g., Indian, Mediterranean, Asian"
+                  value={advancedPlanForm.region_or_cuisine}
+                  onChange={(e) => setAdvancedPlanForm({...advancedPlanForm, region_or_cuisine: e.target.value})}
+                />
+              </div>
+              
+              <div className="md:col-span-2 lg:col-span-3">
+                <label className="form-label">Food Preferences (comma-separated)</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g., chicken, rice, vegetables, spicy"
+                  value={advancedPlanForm.food_preferences.join(', ')}
+                  onChange={(e) => setAdvancedPlanForm({...advancedPlanForm, food_preferences: e.target.value.split(',').map(s => s.trim()).filter(s => s)})}
+                />
+              </div>
+              
+              <div className="md:col-span-2 lg:col-span-3">
+                <label className="form-label">Dietary Restrictions (comma-separated)</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g., gluten-free, dairy-free, vegetarian"
+                  value={advancedPlanForm.dietary_restrictions.join(', ')}
+                  onChange={(e) => setAdvancedPlanForm({...advancedPlanForm, dietary_restrictions: e.target.value.split(',').map(s => s.trim()).filter(s => s)})}
+                />
+              </div>
+              
+              <div className="md:col-span-2 lg:col-span-3">
+                <label className="form-label">Kitchen Equipment (comma-separated)</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g., stove, oven, microwave, blender"
+                  value={advancedPlanForm.equipment.join(', ')}
+                  onChange={(e) => setAdvancedPlanForm({...advancedPlanForm, equipment: e.target.value.split(',').map(s => s.trim()).filter(s => s)})}
+                />
+              </div>
+              
+              <div className="md:col-span-2 lg:col-span-3">
+                <label className="form-label">Additional Notes</label>
+                <textarea
+                  className="form-input"
+                  rows={3}
+                  placeholder="Any specific requirements, allergies, or preferences..."
+                  value={advancedPlanForm.user_notes}
+                  onChange={(e) => setAdvancedPlanForm({...advancedPlanForm, user_notes: e.target.value})}
+                />
+              </div>
+            </div>
+            
+            <div className="mt-6">
+              <button
+                onClick={generateAdvancedMealPlan}
+                disabled={isGeneratingAdvancedPlan || !advancedPlanForm.target_calories}
+                className="btn btn-primary w-full"
+              >
+                {isGeneratingAdvancedPlan ? 'Generating Plan...' : 'Generate 7-Day Meal Plan'}
+              </button>
+            </div>
+            
+            {error && (
+              <div className="mt-4 text-red-600 text-sm text-center">{error}</div>
+            )}
+          </div>
+
+          {/* Advanced Meal Plan Results */}
+          {advancedMealPlan && (
+            <div className="card mb-8">
+              <h2 className="text-xl font-bold mb-6 flex items-center">
+                <Calendar className="mr-2" size={24} />
+                Your 7-Day Advanced Meal Plan
+              </h2>
+              
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 mb-6">
+                <h3 className="text-lg font-bold mb-4">Plan Summary</h3>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-blue-600">
+                      {advancedMealPlan.meta?.total_daily_calories || 'N/A'}
+                    </div>
+                    <div className="text-sm text-gray-600">Daily Calories</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-green-600">
+                      {advancedMealPlan.meta?.meals_per_day || 'N/A'}
+                    </div>
+                    <div className="text-sm text-gray-600">Meals Per Day</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-purple-600">
+                      ${advancedMealPlan.summary?.avg_daily_cost || 'N/A'}
+                    </div>
+                    <div className="text-sm text-gray-600">Avg Daily Cost</div>
+                  </div>
+                </div>
+                
+                {advancedMealPlan.meta?.assumptions && (
+                  <div className="bg-yellow-50 border border-yellow-200 rounded p-3 mb-4">
+                    <h4 className="font-semibold text-yellow-800 mb-2">Assumptions Made:</h4>
+                    <p className="text-yellow-700 text-sm">{advancedMealPlan.meta.assumptions}</p>
+                  </div>
+                )}
+              </div>
+              
+              {/* Weekly Plan */}
+              <div className="space-y-6">
+                {Object.entries(advancedMealPlan.plan || {}).map(([day, meals]) => (
+                  <div key={day} className="border border-gray-200 rounded-lg p-4">
+                    <h3 className="text-lg font-bold mb-4 capitalize">{day.replace('_', ' ')}</h3>
+                    <div className="space-y-4">
+                      {Array.isArray(meals) && meals.map((meal, index) => (
+                        <div key={index} className="bg-gray-50 rounded-lg p-4">
+                          <div className="flex justify-between items-start mb-2">
+                            <h4 className="font-semibold text-lg">{meal.recipe_name}</h4>
+                            <span className="text-sm text-gray-600">{meal.meal_label}</span>
+                          </div>
+                          
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-3">
+                            <div className="text-center">
+                              <div className="font-bold text-blue-600">{meal.target_calories}</div>
+                              <div className="text-xs text-gray-600">Calories</div>
+                            </div>
+                            <div className="text-center">
+                              <div className="font-bold text-green-600">{meal.macros?.protein_g || 0}g</div>
+                              <div className="text-xs text-gray-600">Protein</div>
+                            </div>
+                            <div className="text-center">
+                              <div className="font-bold text-orange-600">{meal.macros?.carbs_g || 0}g</div>
+                              <div className="text-xs text-gray-600">Carbs</div>
+                            </div>
+                            <div className="text-center">
+                              <div className="font-bold text-purple-600">{meal.macros?.fat_g || 0}g</div>
+                              <div className="text-xs text-gray-600">Fat</div>
+                            </div>
+                          </div>
+                          
+                          <div className="flex justify-between items-center text-sm text-gray-600 mb-2">
+                            <span>Prep Time: {meal.prep_time_min} min</span>
+                            <span>Make Ahead: {meal.make_ahead}</span>
+                          </div>
+                          
+                          {meal.ingredients && meal.ingredients.length > 0 && (
+                            <div className="mb-2">
+                              <h5 className="font-semibold text-sm mb-1">Ingredients:</h5>
+                              <div className="flex flex-wrap gap-2">
+                                {meal.ingredients.map((ingredient, idx) => (
+                                  <span key={idx} className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded">
+                                    {ingredient.name} ({ingredient.qty})
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          
+                          {meal.notes && (
+                            <div className="text-sm text-gray-600">
+                              <strong>Notes:</strong> {meal.notes}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              
+              {/* Shopping List */}
+              {advancedMealPlan.summary?.weekly_shopping_list && (
+                <div className="mt-6 bg-green-50 border border-green-200 rounded-lg p-4">
+                  <h3 className="text-lg font-bold mb-4">Weekly Shopping List</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                    {advancedMealPlan.summary.weekly_shopping_list.map((item, index) => (
+                      <div key={index} className="flex justify-between items-center bg-white rounded p-2">
+                        <span className="text-sm">{item.name}</span>
+                        <span className="text-sm font-semibold">{item.qty_est}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
+              {/* Adaptation Section */}
+              <div className="mt-6 border-t pt-6">
+                <h3 className="text-lg font-bold mb-4">Adapt Your Plan</h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="form-label">Feedback on Current Plan</label>
+                    <textarea
+                      className="form-input"
+                      rows={3}
+                      placeholder="What would you like to change about this meal plan?"
+                      value={advancedPlanAdaptationForm.feedback}
+                      onChange={(e) => setAdvancedPlanAdaptationForm({...advancedPlanAdaptationForm, feedback: e.target.value})}
+                    />
+                  </div>
+                  
+                  <button
+                    onClick={adaptAdvancedMealPlan}
+                    disabled={isGeneratingAdvancedPlan || !advancedPlanAdaptationForm.feedback.trim()}
+                    className="btn btn-secondary"
+                  >
+                    {isGeneratingAdvancedPlan ? 'Adapting Plan...' : 'Adapt This Plan'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -4231,6 +4681,8 @@ function App() {
       return renderBudgetChef();
     } else if (activeView === 'culinaryexplorer') {
       return renderCulinaryExplorer();
+    } else if (activeView === 'advancedmealplanner') {
+      return renderAdvancedMealPlanner();
     } else {
       return renderDashboard();
     }
