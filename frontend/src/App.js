@@ -98,6 +98,24 @@ function App() {
     time_constraint: 60,
     meal_type: 'dinner'
   });
+
+  // FitMentor state
+  const [fitmentorPlan, setFitmentorPlan] = useState(null);
+  const [isGeneratingFitmentor, setIsGeneratingFitmentor] = useState(false);
+  const [fitmentorForm, setFitmentorForm] = useState({
+    activity_level: 'beginner',
+    fitness_goal: 'general_fitness',
+    time_per_day: 30,
+    equipment: 'none',
+    constraints: [],
+    age: null,
+    weight: null
+  });
+  const [adaptationForm, setAdaptationForm] = useState({
+    current_plan: '',
+    feedback: '',
+    progress_notes: ''
+  });
   
   // Ingredient search states
   const [ingredientSearchQuery, setIngredientSearchQuery] = useState('');
@@ -235,6 +253,10 @@ function App() {
     // Fetch AI recipes when ai-recipes view is active
     if (activeView === 'ai-recipes') {
       fetchAIRecipes();
+    }
+    // Fetch FitMentor data when fitmentor view is active
+    if (activeView === 'fitmentor') {
+      // FitMentor doesn't need to fetch existing data, it generates on demand
     }
   }, [activeView]);
 
@@ -471,6 +493,102 @@ function App() {
       ...chefgeniusForm,
       ingredients: chefgeniusForm.ingredients.filter((_, i) => i !== index)
     });
+  };
+
+  // FitMentor functions
+  const generateFitmentorPlan = async () => {
+    if (!fitmentorForm.activity_level || !fitmentorForm.fitness_goal) {
+      setError('Please fill in all required fields');
+      return;
+    }
+
+    setIsGeneratingFitmentor(true);
+    setError('');
+
+    try {
+      const token = localStorage.getItem('token');
+      const headers = {
+        'Authorization': `Bearer ${token}`
+      };
+
+      const response = await fetch(`${API_BASE_URL}/fitness/generate-workout-plan`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...headers
+        },
+        body: JSON.stringify(fitmentorForm)
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.data) {
+          setFitmentorPlan(data.data);
+          alert('FitMentor Workout Plan generated successfully!');
+        } else {
+          setError('Failed to generate workout plan');
+        }
+      } else {
+        const errorData = await response.json();
+        const errorMessage = typeof errorData.detail === 'string'
+          ? errorData.detail
+          : JSON.stringify(errorData.detail) || 'Failed to generate workout plan';
+        setError(errorMessage);
+      }
+    } catch (error) {
+      console.error('Error generating FitMentor plan:', error);
+      setError('Failed to connect to server');
+    } finally {
+      setIsGeneratingFitmentor(false);
+    }
+  };
+
+  const adaptFitmentorPlan = async () => {
+    if (!adaptationForm.current_plan || !adaptationForm.feedback) {
+      setError('Please provide current plan and feedback');
+      return;
+    }
+
+    setIsGeneratingFitmentor(true);
+    setError('');
+
+    try {
+      const token = localStorage.getItem('token');
+      const headers = {
+        'Authorization': `Bearer ${token}`
+      };
+
+      const response = await fetch(`${API_BASE_URL}/fitness/adapt-workout-plan`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...headers
+        },
+        body: JSON.stringify(adaptationForm)
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.data) {
+          setFitmentorPlan(data.data);
+          setAdaptationForm({ current_plan: '', feedback: '', progress_notes: '' });
+          alert('Workout plan adapted successfully!');
+        } else {
+          setError('Failed to adapt workout plan');
+        }
+      } else {
+        const errorData = await response.json();
+        const errorMessage = typeof errorData.detail === 'string'
+          ? errorData.detail
+          : JSON.stringify(errorData.detail) || 'Failed to adapt workout plan';
+        setError(errorMessage);
+      }
+    } catch (error) {
+      console.error('Error adapting FitMentor plan:', error);
+      setError('Failed to connect to server');
+    } finally {
+      setIsGeneratingFitmentor(false);
+    }
   };
 
   const handleLogMeal = async (e) => {
@@ -2492,6 +2610,279 @@ function App() {
     </div>
   );
 
+  const renderFitMentor = () => (
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <header className="bg-white shadow">
+        <div className="container mx-auto px-4 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center">
+              <button
+                onClick={() => setActiveView('dashboard')}
+                className="mr-4 flex items-center text-gray-600 hover:text-gray-900"
+              >
+                <ArrowLeft size={20} className="mr-2" />
+                Back to Dashboard
+              </button>
+              <h1 className="text-2xl font-bold text-gray-900">FitMentor - AI Workout Planner</h1>
+            </div>
+            <div className="flex items-center gap-4">
+              <span className="text-gray-700">Welcome, {user?.full_name || user?.username}</span>
+              <button
+                onClick={handleLogout}
+                className="btn btn-secondary"
+              >
+                Logout
+              </button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <div className="container mx-auto px-4 py-8">
+        <div className="max-w-6xl mx-auto">
+
+          {/* FitMentor Workout Planner */}
+          <div className="card mb-8">
+            <h2 className="text-xl font-bold mb-6 flex items-center">
+              <Target className="mr-2" size={24} />
+              Create Your Personalized Workout Plan
+            </h2>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Activity Level *
+                </label>
+                <select
+                  value={fitmentorForm.activity_level}
+                  onChange={(e) => setFitmentorForm({...fitmentorForm, activity_level: e.target.value})}
+                  className="form-input"
+                >
+                  <option value="beginner">Beginner</option>
+                  <option value="intermediate">Intermediate</option>
+                  <option value="advanced">Advanced</option>
+                </select>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Fitness Goal *
+                </label>
+                <select
+                  value={fitmentorForm.fitness_goal}
+                  onChange={(e) => setFitmentorForm({...fitmentorForm, fitness_goal: e.target.value})}
+                  className="form-input"
+                >
+                  <option value="weight_loss">Weight Loss</option>
+                  <option value="muscle_gain">Muscle Gain</option>
+                  <option value="endurance">Endurance</option>
+                  <option value="flexibility">Flexibility</option>
+                  <option value="general_fitness">General Fitness</option>
+                </select>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Time per Day (minutes) *
+                </label>
+                <input
+                  type="number"
+                  min="15"
+                  max="180"
+                  value={fitmentorForm.time_per_day}
+                  onChange={(e) => setFitmentorForm({...fitmentorForm, time_per_day: parseInt(e.target.value)})}
+                  className="form-input"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Equipment Available *
+                </label>
+                <select
+                  value={fitmentorForm.equipment}
+                  onChange={(e) => setFitmentorForm({...fitmentorForm, equipment: e.target.value})}
+                  className="form-input"
+                >
+                  <option value="none">No Equipment</option>
+                  <option value="home">Home Equipment</option>
+                  <option value="gym">Full Gym Access</option>
+                </select>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Age (optional)
+                </label>
+                <input
+                  type="number"
+                  min="13"
+                  max="100"
+                  value={fitmentorForm.age || ''}
+                  onChange={(e) => setFitmentorForm({...fitmentorForm, age: e.target.value ? parseInt(e.target.value) : null})}
+                  className="form-input"
+                  placeholder="Enter your age"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Weight (kg, optional)
+                </label>
+                <input
+                  type="number"
+                  min="30"
+                  max="300"
+                  step="0.1"
+                  value={fitmentorForm.weight || ''}
+                  onChange={(e) => setFitmentorForm({...fitmentorForm, weight: e.target.value ? parseFloat(e.target.value) : null})}
+                  className="form-input"
+                  placeholder="Enter your weight"
+                />
+              </div>
+            </div>
+            
+            <div className="mt-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Constraints (optional)
+              </label>
+              <div className="space-y-2">
+                {['knee_injury', 'back_problems', 'shoulder_issues', 'asthma', 'diabetes', 'pregnancy'].map((constraint) => (
+                  <label key={constraint} className="flex items-center">
+                    <input
+                      type="checkbox"
+                      checked={fitmentorForm.constraints.includes(constraint)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setFitmentorForm({
+                            ...fitmentorForm,
+                            constraints: [...fitmentorForm.constraints, constraint]
+                          });
+                        } else {
+                          setFitmentorForm({
+                            ...fitmentorForm,
+                            constraints: fitmentorForm.constraints.filter(c => c !== constraint)
+                          });
+                        }
+                      }}
+                      className="mr-2"
+                    />
+                    <span className="text-sm text-gray-700 capitalize">{constraint.replace('_', ' ')}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            
+            <div className="mt-6">
+              <button
+                onClick={generateFitmentorPlan}
+                className="btn btn-primary"
+                disabled={isGeneratingFitmentor}
+              >
+                {isGeneratingFitmentor ? 'Generating Plan...' : 'Generate Workout Plan'}
+              </button>
+            </div>
+          </div>
+
+          {/* FitMentor Generated Plan */}
+          {fitmentorPlan && (
+            <div className="card mb-8">
+              <h2 className="text-xl font-bold mb-6 flex items-center">
+                <Target className="mr-2" size={24} />
+                Your FitMentor Workout Plan
+              </h2>
+              
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 mb-6">
+                <div className="prose max-w-none" dangerouslySetInnerHTML={{ __html: fitmentorPlan.workout_plan.replace(/\n/g, '<br>') }} />
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <h4 className="text-lg font-bold mb-4">Plan Details</h4>
+                  <div className="space-y-2">
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Activity Level:</span>
+                      <span className="font-medium capitalize">{fitmentorPlan.activity_level}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Fitness Goal:</span>
+                      <span className="font-medium capitalize">{fitmentorPlan.fitness_goal.replace('_', ' ')}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Time per Day:</span>
+                      <span className="font-medium">{fitmentorPlan.time_per_day} minutes</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Equipment:</span>
+                      <span className="font-medium capitalize">{fitmentorPlan.equipment}</span>
+                    </div>
+                    {fitmentorPlan.constraints.length > 0 && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Constraints:</span>
+                        <span className="font-medium">{fitmentorPlan.constraints.join(', ')}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                
+                <div>
+                  <h4 className="text-lg font-bold mb-4">Adapt Your Plan</h4>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Current Plan
+                      </label>
+                      <textarea
+                        value={adaptationForm.current_plan}
+                        onChange={(e) => setAdaptationForm({...adaptationForm, current_plan: e.target.value})}
+                        className="form-input"
+                        rows="3"
+                        placeholder="Paste your current workout plan here..."
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Feedback
+                      </label>
+                      <textarea
+                        value={adaptationForm.feedback}
+                        onChange={(e) => setAdaptationForm({...adaptationForm, feedback: e.target.value})}
+                        className="form-input"
+                        rows="3"
+                        placeholder="What would you like to change? What's working/not working?"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Progress Notes (optional)
+                      </label>
+                      <textarea
+                        value={adaptationForm.progress_notes}
+                        onChange={(e) => setAdaptationForm({...adaptationForm, progress_notes: e.target.value})}
+                        className="form-input"
+                        rows="2"
+                        placeholder="Any progress notes or observations..."
+                      />
+                    </div>
+                    <button
+                      onClick={adaptFitmentorPlan}
+                      className="btn btn-secondary"
+                      disabled={isGeneratingFitmentor || !adaptationForm.current_plan || !adaptationForm.feedback}
+                    >
+                      {isGeneratingFitmentor ? 'Adapting Plan...' : 'Adapt Workout Plan'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+        </div>
+      </div>
+    </div>
+  );
+
   const renderDashboard = () => (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -2674,6 +3065,15 @@ function App() {
                 <div className="font-medium">AI Recipe Generator</div>
               </div>
             </button>
+            <button 
+              className="card hover:shadow-lg transition-shadow cursor-pointer"
+              onClick={() => setActiveView('fitmentor')}
+            >
+              <div className="text-center">
+                <Target className="mx-auto mb-2" size={32} />
+                <div className="font-medium">FitMentor</div>
+              </div>
+            </button>
           </div>
         </div>
       </div>
@@ -2700,6 +3100,8 @@ function App() {
       return renderAdvancedPlanning();
     } else if (activeView === 'ai-recipes') {
       return renderAIRecipes();
+    } else if (activeView === 'fitmentor') {
+      return renderFitMentor();
     } else {
       return renderDashboard();
     }
