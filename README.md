@@ -83,6 +83,11 @@ A comprehensive full-stack nutrition tracking and meal planning application with
 - **Context Management** - Conversation memory and user preference learning
 - **Fallback Mechanisms** - Graceful handling of API rate limits and failures
 - **Smart Routing** - Intelligent agent selection based on user queries
+- **Rule-Based ML Algorithms** - Advanced personalization and recommendation systems
+- **UserPreferenceLearner** - Adaptive learning from user behavior patterns
+- **IntelligentRecommendationEngine** - Multi-algorithm recommendation system
+- **AdvancedUserProfiler** - Comprehensive user profiling and analysis
+- **DataDrivenChallengeGenerator** - Personalized challenge creation based on user data
 
 ## 🚀 **Quick Start**
 
@@ -241,6 +246,12 @@ health-nutrition-app-final/
 - `POST /api/recipe-interactions/track` - Track recipe interactions
 - `POST /api/social-cooking/create-profile` - Create social cooking profile
 
+### ML & Recommendation Engine
+- `GET /api/ml/preferences` - Get learned user preferences
+- `GET /api/ml/recommendations` - Get personalized recommendations
+- `GET /api/enhanced-ml/profile` - Get comprehensive user profile
+- `GET /api/enhanced-ml/insights` - Get behavioral insights and analytics
+
 ## 🤖 **AI Chatbot Usage Examples**
 
 ### Recipe Generation
@@ -335,6 +346,57 @@ Bot: [Creates comprehensive weekly meal plan with shopping lists
 - **Error Handling** - Comprehensive error handling and logging
 - **API Documentation** - Automatic OpenAPI/Swagger documentation
 - **Health Checks** - Service health monitoring endpoints
+
+## 🧠 **Advanced ML & Personalization Features**
+
+### **Rule-Based ML Algorithms**
+- **UserPreferenceLearner** - Learns and adapts to user eating patterns over time
+  - Analyzes cuisine preferences from meal history
+  - Tracks macro patterns (protein, carbs, fat ratios)
+  - Identifies meal timing preferences
+  - Learns calorie consumption patterns
+  - Detects food category preferences
+  - Measures adherence to goals and consistency
+
+### **IntelligentRecommendationEngine** 
+- **Multi-Algorithm Scoring System** - Combines multiple ML approaches:
+  - **Collaborative Filtering** - User-based and item-based recommendations
+  - **Content-Based Filtering** - Nutritional content analysis and matching
+  - **Hybrid Recommendation System** - Ensemble methods for optimal accuracy
+  - **Behavioral Pattern Analysis** - Clustering and trend analysis
+
+### **AdvancedUserProfiler**
+- **Multi-Dimensional Analysis** - Comprehensive user profiling:
+  - **Cooking Pattern Analysis** - Skill level, equipment, time preferences
+  - **Nutrition Goal Tracking** - Current vs. target analysis
+  - **Food Preference Learning** - Adaptive preference scoring
+  - **Social Cooking Insights** - Family size, dietary restrictions
+  - **Seasonal Preference Analysis** - Time-based preference adaptation
+  - **Chatbot Interaction Learning** - Conversation pattern analysis
+
+### **DataDrivenChallengeGenerator**
+- **Personalized Challenge Creation** - ML-driven challenge generation:
+  - **Behavioral Gap Analysis** - Identifies areas for improvement
+  - **Goal Alignment Scoring** - Challenges aligned with user objectives
+  - **Difficulty Progression** - Adaptive difficulty based on performance
+  - **Success Pattern Recognition** - Learns from successful completions
+
+### **Enhanced Scoring Algorithms**
+- **Cuisine Preference Alignment** (25% weight) - Matches user's cuisine preferences
+- **Nutritional Alignment** (20% weight) - Aligns with nutritional goals
+- **Cooking Profile Match** (15% weight) - Matches cooking skill and equipment
+- **Behavioral Pattern Alignment** (15% weight) - Considers historical patterns
+- **Seasonal Appropriateness** (10% weight) - Time and season considerations
+- **Social Cooking Alignment** (10% weight) - Family and social preferences
+- **Meal Type Appropriateness** (5% weight) - Context-aware meal suggestions
+
+### **Context-Aware Intelligence**
+- **Temporal Context** - Time-based recommendations (breakfast, lunch, dinner)
+- **Seasonal Adaptation** - Weather and seasonal food preferences
+- **Mood and Situation Awareness** - Context-sensitive suggestions
+- **Budget Integration** - Cost-aware meal planning
+- **Health Condition Adaptation** - Medical condition considerations
+- **Equipment and Skill Matching** - Practical cooking recommendations
 
 ## 🧪 **Testing**
 
