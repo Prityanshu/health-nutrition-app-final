@@ -4,9 +4,10 @@ Enhanced challenges API with data-driven personalization
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, desc
+from sqlalchemy import and_, desc, func
 from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
+from pydantic import BaseModel
 import logging
 
 from app.database import get_db, User
@@ -19,6 +20,15 @@ from app.models.enhanced_challenge_models import (
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+# Pydantic models for requests
+class UpdateProgressRequest(BaseModel):
+    challenge_id: int
+    daily_value: float
+    progress_date: Optional[datetime] = None
+    nutrition_data: Optional[Dict[str, Any]] = None
+    workout_data: Optional[Dict[str, Any]] = None
+    mood_data: Optional[Dict[str, Any]] = None
 
 @router.get("/generate-weekly-challenges")
 async def generate_weekly_challenges(
@@ -112,33 +122,30 @@ async def get_active_challenges(
 
 @router.post("/update-challenge-progress")
 async def update_challenge_progress(
-    challenge_id: int,
-    daily_value: float,
-    progress_date: Optional[datetime] = None,
-    nutrition_data: Optional[Dict[str, Any]] = None,
-    workout_data: Optional[Dict[str, Any]] = None,
-    mood_data: Optional[Dict[str, Any]] = None,
+    request: UpdateProgressRequest,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     """Update progress for a specific challenge"""
     
     try:
+        logger.info(f"Updating progress for challenge {request.challenge_id} with value {request.daily_value}")
+        
         # Get the challenge
         challenge = db.query(PersonalizedChallenge).filter(
             and_(
-                PersonalizedChallenge.id == challenge_id,
+                PersonalizedChallenge.id == request.challenge_id,
                 PersonalizedChallenge.user_id == current_user.id,
                 PersonalizedChallenge.is_active == True
             )
         ).first()
         
         if not challenge:
+            logger.error(f"Challenge {request.challenge_id} not found for user {current_user.id}")
             raise HTTPException(status_code=404, detail="Challenge not found")
         
         # Use current date if not provided
-        if not progress_date:
-            progress_date = datetime.utcnow()
+        progress_date = request.progress_date or datetime.now()
         
         # Calculate daily target
         daily_target = challenge.target_value / 7  # Assuming 7-day challenges
@@ -146,56 +153,60 @@ async def update_challenge_progress(
         # Check if progress already exists for this date
         existing_progress = db.query(UserChallengeProgress).filter(
             and_(
-                UserChallengeProgress.challenge_id == challenge_id,
-                UserChallengeProgress.progress_date.date() == progress_date.date()
+                UserChallengeProgress.challenge_id == request.challenge_id,
+                func.date(UserChallengeProgress.progress_date) == progress_date.date()
             )
         ).first()
         
         if existing_progress:
             # Update existing progress
-            existing_progress.daily_value = daily_value
-            existing_progress.completion_percentage = (daily_value / daily_target) * 100 if daily_target > 0 else 0
-            existing_progress.nutrition_data = nutrition_data or {}
-            existing_progress.workout_data = workout_data or {}
-            existing_progress.mood_data = mood_data or {}
+            existing_progress.daily_value = request.daily_value
+            existing_progress.completion_percentage = (request.daily_value / daily_target) * 100 if daily_target > 0 else 0
+            existing_progress.nutrition_data = request.nutrition_data or {}
+            existing_progress.workout_data = request.workout_data or {}
+            existing_progress.mood_data = request.mood_data or {}
+            logger.info(f"Updated existing progress entry")
         else:
             # Create new progress entry
             progress = UserChallengeProgress(
                 user_id=current_user.id,
-                challenge_id=challenge_id,
+                challenge_id=request.challenge_id,
                 progress_date=progress_date,
-                daily_value=daily_value,
+                daily_value=request.daily_value,
                 daily_target=daily_target,
-                completion_percentage=(daily_value / daily_target) * 100 if daily_target > 0 else 0,
-                nutrition_data=nutrition_data or {},
-                workout_data=workout_data or {},
-                mood_data=mood_data or {}
+                completion_percentage=(request.daily_value / daily_target) * 100 if daily_target > 0 else 0,
+                nutrition_data=request.nutrition_data or {},
+                workout_data=request.workout_data or {},
+                mood_data=request.mood_data or {}
             )
             db.add(progress)
+            logger.info(f"Created new progress entry")
         
         # Update challenge progress
-        challenge.current_value += daily_value
+        challenge.current_value += request.daily_value
         challenge.completion_percentage = (challenge.current_value / challenge.target_value) * 100 if challenge.target_value > 0 else 0
         
         # Check if challenge is completed
         if challenge.completion_percentage >= 100:
             challenge.is_active = False
-            # Award points and badge
-            # This would integrate with your points/badge system
+            logger.info(f"Challenge {request.challenge_id} completed!")
         
         db.commit()
+        logger.info(f"Successfully updated challenge {request.challenge_id}")
         
         return {
             "success": True,
             "message": "Challenge progress updated",
-            "challenge_id": challenge_id,
-            "daily_value": daily_value,
+            "challenge_id": request.challenge_id,
+            "daily_value": request.daily_value,
             "completion_percentage": challenge.completion_percentage,
             "is_completed": challenge.completion_percentage >= 100
         }
     
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error updating challenge progress: {e}")
+        logger.error(f"Error updating challenge progress: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to update progress: {str(e)}")
 
 @router.get("/challenge-recommendations")

@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import './index.css';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8001/api';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8002/api';
 
 function App() {
   const [currentView, setCurrentView] = useState('dashboard');
@@ -380,8 +380,11 @@ function App() {
 
       if (response.ok) {
         const data = await response.json();
-        // Refresh challenges
-        fetchActiveChallenges();
+        // Refresh challenges to show updated progress
+        await fetchActiveChallenges();
+        setError(''); // Clear any previous errors
+        // Show success message
+        alert(`Progress updated! You've completed ${data.completion_percentage.toFixed(1)}% of your challenge.`);
         return data;
       } else {
         const errorData = await response.json();
