@@ -438,10 +438,6 @@ function App() {
     progressSummary: null
   });
 
-  // Challenges state
-  const [challenges, setChallenges] = useState([]);
-  const [userAchievements, setUserAchievements] = useState([]);
-  const [userStats, setUserStats] = useState(null);
 
   const fetchUserData = async () => {
     try {
@@ -472,6 +468,8 @@ function App() {
     if (token) {
       // Verify token and get user data
       fetchUserData();
+      // Load dashboard data including Smart Challenges
+      loadDashboardData();
     }
   }, []);
 
@@ -514,12 +512,6 @@ function App() {
     }
   }, [activeView]);
 
-  useEffect(() => {
-    // Fetch challenges data when challenges view is active
-    if (activeView === 'challenges') {
-      fetchChallengesData();
-    }
-  }, [activeView]);
 
   useEffect(() => {
     // Fetch ML recommendations when ml-recommendations view is active
@@ -574,11 +566,11 @@ function App() {
         setDashboardData(prev => ({ ...prev, recentMeals: meals }));
       }
 
-      // Fetch challenges
-      const challengesResponse = await fetch(`${API_BASE_URL}/gamification/challenges`, { headers });
+      // Fetch Smart Challenges
+      const challengesResponse = await fetch(`${API_BASE_URL}/enhanced-challenges/active-challenges`, { headers });
       if (challengesResponse.ok) {
         const challenges = await challengesResponse.json();
-        setDashboardData(prev => ({ ...prev, challenges: challenges }));
+        setEnhancedChallenges(challenges);
       }
 
     } catch (error) {
@@ -1520,40 +1512,6 @@ function App() {
     }
   };
 
-  const fetchChallengesData = async () => {
-    try {
-      const token = localStorage.getItem('token');
-      const headers = {
-        'Authorization': `Bearer ${token}`
-      };
-
-      // Fetch challenges
-      const challengesResponse = await fetch(`${API_BASE_URL}/gamification/challenges`, { headers });
-      
-      // Fetch user achievements
-      const achievementsResponse = await fetch(`${API_BASE_URL}/gamification/achievements`, { headers });
-      
-      // Fetch user stats
-      const statsResponse = await fetch(`${API_BASE_URL}/gamification/stats`, { headers });
-
-      if (challengesResponse.ok) {
-        const challengesData = await challengesResponse.json();
-        setChallenges(challengesData);
-      }
-
-      if (achievementsResponse.ok) {
-        const achievementsData = await achievementsResponse.json();
-        setUserAchievements(achievementsData);
-      }
-
-      if (statsResponse.ok) {
-        const statsData = await statsResponse.json();
-        setUserStats(statsData);
-      }
-    } catch (error) {
-      console.error('Error fetching challenges data:', error);
-    }
-  };
 
   const fetchMLRecommendations = async () => {
     try {
@@ -2506,170 +2464,6 @@ function App() {
     </div>
   );
 
-  const renderChallenges = () => (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white shadow">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center">
-              <button
-                onClick={() => setActiveView('dashboard')}
-                className="mr-4 flex items-center text-gray-600 hover:text-gray-900"
-              >
-                <ArrowLeft size={20} className="mr-2" />
-                Back to Dashboard
-              </button>
-              <h1 className="text-2xl font-bold text-gray-900">Challenges & Achievements</h1>
-            </div>
-            <div className="flex items-center gap-4">
-              <span className="text-gray-700">Welcome, {user?.full_name || user?.username}</span>
-              <button
-                onClick={handleLogout}
-                className="btn btn-secondary"
-              >
-                Logout
-              </button>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      <div className="container mx-auto px-4 py-8">
-        <div className="max-w-6xl mx-auto">
-          
-          {/* User Stats Summary */}
-          {userStats && (
-            <div className="mb-8">
-              <h2 className="text-2xl font-bold mb-6">Your Stats</h2>
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <div className="card text-center">
-                  <div className="text-3xl font-bold text-blue-600">
-                    {userStats.total_points || 0}
-                  </div>
-                  <div className="text-sm text-gray-600">Total Points</div>
-                </div>
-                <div className="card text-center">
-                  <div className="text-3xl font-bold text-green-600">
-                    {userStats.current_streak || 0}
-                  </div>
-                  <div className="text-sm text-gray-600">Current Streak</div>
-                </div>
-                <div className="card text-center">
-                  <div className="text-3xl font-bold text-purple-600">
-                    {userStats.achievements?.length || 0}
-                  </div>
-                  <div className="text-sm text-gray-600">Achievements</div>
-                </div>
-                <div className="card text-center">
-                  <div className="text-3xl font-bold text-orange-600">
-                    {challenges.filter(c => c.is_active).length}
-                  </div>
-                  <div className="text-sm text-gray-600">Active Challenges</div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Active Challenges */}
-          <div className="mb-8">
-            <h2 className="text-2xl font-bold mb-6">Active Challenges</h2>
-            {challenges.length > 0 ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {challenges.map((challenge) => (
-                  <div key={challenge.id} className="card">
-                    <div className="flex justify-between items-start mb-4">
-                      <h3 className="text-lg font-bold">{challenge.name}</h3>
-                      <div className="flex items-center">
-                        <Award className="text-yellow-500 mr-1" size={20} />
-                        <span className="text-sm font-bold text-yellow-600">
-                          {challenge.reward_points} pts
-                        </span>
-                      </div>
-                    </div>
-                    
-                    <p className="text-gray-600 mb-4">{challenge.description}</p>
-                    
-                    {challenge.rules && Object.keys(challenge.rules).length > 0 && (
-                      <div className="mb-4">
-                        <h4 className="text-sm font-bold text-gray-700 mb-2">Requirements:</h4>
-                        <ul className="text-sm text-gray-600 space-y-1">
-                          {Object.entries(challenge.rules).map(([key, value]) => (
-                            <li key={key} className="flex justify-between">
-                              <span className="capitalize">{key.replace('_', ' ')}:</span>
-                              <span className="font-medium">{value}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                    
-                    <div className="flex justify-between items-center text-xs text-gray-500">
-                      <span>
-                        Active: {challenge.active_from ? new Date(challenge.active_from).toLocaleDateString() : 'Always'}
-                      </span>
-                      {challenge.active_to && (
-                        <span>
-                          Until: {new Date(challenge.active_to).toLocaleDateString()}
-                        </span>
-                      )}
-                    </div>
-                    
-                    <div className="mt-4">
-                      <div className="w-full bg-gray-200 rounded-full h-2">
-                        <div className="bg-blue-600 h-2 rounded-full" style={{width: '0%'}}></div>
-                      </div>
-                      <p className="text-xs text-gray-500 mt-1">Progress: 0%</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="card text-center">
-                <p className="text-gray-500">No challenges available at the moment.</p>
-              </div>
-            )}
-          </div>
-
-          {/* User Achievements */}
-          {userAchievements.length > 0 && (
-            <div className="mb-8">
-              <h2 className="text-2xl font-bold mb-6">Your Achievements</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {userAchievements.map((achievement) => (
-                  <div key={achievement.id} className="card">
-                    <div className="flex items-center mb-3">
-                      <Award className="text-yellow-500 mr-3" size={24} />
-                      <div>
-                        <h3 className="font-bold">{achievement.name}</h3>
-                        <p className="text-sm text-gray-600">
-                          {new Date(achievement.earned_at).toLocaleDateString()}
-                        </p>
-                      </div>
-                    </div>
-                    <p className="text-sm text-gray-700">{achievement.description}</p>
-                    <div className="mt-3 text-sm">
-                      <span className="font-bold text-green-600">+{achievement.points_earned} points</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Refresh Button */}
-          <div className="text-center">
-            <button
-              onClick={fetchChallengesData}
-              className="btn btn-primary"
-            >
-              Refresh Challenges Data
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
 
   const renderMLRecommendations = () => (
     <div className="min-h-screen bg-gray-50">
@@ -4174,24 +3968,72 @@ function App() {
             )}
           </div>
 
-          {/* Challenges */}
+          {/* Smart Challenges */}
           <div className="card">
-            <h3 className="text-lg font-bold mb-4 flex items-center">
-              <Award className="mr-2" />
-              Active Challenges
-            </h3>
-            {dashboardData.challenges.length > 0 ? (
-              <div className="space-y-2">
-                {dashboardData.challenges.slice(0, 3).map((challenge, index) => (
-                  <div key={index} className="text-sm">
-                    <div className="font-medium">{challenge.name}</div>
-                    <div className="text-gray-500">{challenge.description}</div>
-                    <div className="text-green-600 font-bold">{challenge.reward_points} points</div>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold flex items-center">
+                <Award className="mr-2" />
+                Smart Challenges
+              </h3>
+              <button
+                onClick={generateWeeklyChallenges}
+                disabled={isGeneratingChallenges}
+                className="text-xs bg-blue-500 text-white px-2 py-1 rounded hover:bg-blue-600 disabled:opacity-50"
+              >
+                {isGeneratingChallenges ? 'Generating...' : 'Generate'}
+              </button>
+            </div>
+            {enhancedChallenges && enhancedChallenges.length > 0 ? (
+              <div className="space-y-3">
+                {enhancedChallenges.slice(0, 3).map((challenge) => (
+                  <div key={challenge.challenge_id} className="border rounded-lg p-3 bg-gray-50">
+                    <div className="flex justify-between items-start mb-2">
+                      <div>
+                        <div className="font-medium text-sm">{challenge.title}</div>
+                        <div className="text-xs text-gray-500">{challenge.description}</div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-xs font-bold text-blue-600">
+                          {(challenge.progress_percentage || 0).toFixed(0)}%
+                        </div>
+                        <div className="text-xs text-gray-500">Complete</div>
+                      </div>
+                    </div>
+                    <div className="w-full bg-gray-200 rounded-full h-1.5 mb-2">
+                      <div
+                        className="bg-blue-500 h-1.5 rounded-full transition-all duration-300"
+                        style={{ width: `${Math.min(100, challenge.progress_percentage || 0)}%` }}
+                      ></div>
+                    </div>
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="text-gray-600">
+                        {(challenge.current_value || 0).toFixed(1)} / {challenge.target_value || 0} {challenge.unit || ''}
+                      </span>
+                      <span className="text-green-600 font-bold">{challenge.points_reward || 0} pts</span>
+                    </div>
                   </div>
                 ))}
+                {enhancedChallenges.length > 3 && (
+                  <button
+                    onClick={() => setActiveView('enhanced-challenges')}
+                    className="w-full text-xs text-blue-600 hover:text-blue-800 font-medium"
+                  >
+                    View All Challenges ({enhancedChallenges.length})
+                  </button>
+                )}
               </div>
             ) : (
-              <p className="text-gray-500">No active challenges</p>
+              <div className="text-center py-4">
+                <Award className="mx-auto mb-2 text-gray-400" size={24} />
+                <p className="text-gray-500 text-sm mb-2">No active challenges</p>
+                <button
+                  onClick={generateWeeklyChallenges}
+                  disabled={isGeneratingChallenges}
+                  className="text-xs bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 disabled:opacity-50"
+                >
+                  {isGeneratingChallenges ? 'Generating...' : 'Generate Challenges'}
+                </button>
+              </div>
             )}
           </div>
         </div>
@@ -4225,15 +4067,6 @@ function App() {
               <div className="text-center">
                 <TrendingUp className="mx-auto mb-2" size={32} />
                 <div className="font-medium">View Progress</div>
-              </div>
-            </button>
-            <button 
-              className="card hover:shadow-lg transition-shadow cursor-pointer"
-              onClick={() => setActiveView('challenges')}
-            >
-              <div className="text-center">
-                <Award className="mx-auto mb-2" size={32} />
-                <div className="font-medium">Challenges</div>
               </div>
             </button>
             <button 
@@ -5083,8 +4916,6 @@ function App() {
       return renderSetGoals();
     } else if (activeView === 'view-progress') {
       return renderViewProgress();
-    } else if (activeView === 'challenges') {
-      return renderChallenges();
     } else if (activeView === 'ml-recommendations') {
       return renderMLRecommendations();
     } else if (activeView === 'ai-recipes') {
