@@ -55,7 +55,7 @@ async def generate_weekly_challenges(
             raise HTTPException(status_code=400, detail=result["error"])
     
     except Exception as e:
-        logger.error(f"Error generating weekly challenges: {e}")
+        logger.error(f"Error generating weekly challenges: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to generate challenges: {str(e)}")
 
 @router.get("/active-challenges")

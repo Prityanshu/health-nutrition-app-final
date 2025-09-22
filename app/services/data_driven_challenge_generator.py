@@ -31,6 +31,23 @@ class DataDrivenChallengeGenerator:
             # Analyze user data
             user_analysis = self._analyze_user_data(user_id)
             
+            # Check if we have enough data for personalized challenges
+            has_sufficient_data = self._has_sufficient_data(user_analysis)
+            
+            if not has_sufficient_data:
+                # Generate default challenges for new users
+                recommendations = self._generate_default_challenges()
+                active_challenges = self._create_active_challenges(user_id, recommendations)
+                
+                return {
+                    "success": True,
+                    "user_analysis": user_analysis,
+                    "recommendations": recommendations,
+                    "active_challenges": active_challenges,
+                    "generated_at": datetime.utcnow().isoformat(),
+                    "message": "Generated default challenges - start logging meals and workouts for personalized challenges!"
+                }
+            
             # Generate challenge recommendations
             recommendations = self._generate_challenge_recommendations(user_id, user_analysis)
             
@@ -46,8 +63,76 @@ class DataDrivenChallengeGenerator:
             }
             
         except Exception as e:
-            logger.error(f"Error generating weekly challenges: {e}")
+            logger.error(f"Error generating weekly challenges: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
+    
+    def _has_sufficient_data(self, user_analysis: Dict) -> bool:
+        """Check if user has enough data for personalized challenges"""
+        
+        # Check if user has logged meals in the last 7 days
+        recent_meals = user_analysis.get("nutrition", {}).get("recent_meals", 0)
+        
+        # Check if user has any workout data
+        workout_data = user_analysis.get("workout", {})
+        has_workout_data = workout_data.get("total_workouts", 0) > 0
+        
+        # Check if user has logged meals consistently
+        consistency = user_analysis.get("consistency", {})
+        daily_consistency = consistency.get("daily_consistency", 0)
+        
+        # Need at least 3 days of meal logging or some workout data
+        return recent_meals >= 3 or has_workout_data or daily_consistency > 0.3
+    
+    def _generate_default_challenges(self) -> List[Dict[str, Any]]:
+        """Generate default challenges for new users with insufficient data"""
+        
+        return [
+            {
+                "title": "Start Your Journey - Log 3 Meals",
+                "description": "Log at least 3 meals today to begin tracking your nutrition",
+                "challenge_type": "NUTRITION",
+                "difficulty": "EASY",
+                "target_value": 3,
+                "unit": "meals",
+                "duration_days": 1,
+                "points_reward": 50,
+                "badge_reward": "First Steps",
+                "baseline_data": {"current_meals": 0},
+                "target_improvement": 100,
+                "personalization_factors": {"based_on": "new_user", "level": "beginner"},
+                "motivational_messages": ["You're taking the first step towards better health!", "Every meal logged is progress!"]
+            },
+            {
+                "title": "Consistency Builder - 5 Day Streak",
+                "description": "Log at least one meal for 5 consecutive days",
+                "challenge_type": "CONSISTENCY",
+                "difficulty": "MEDIUM",
+                "target_value": 5,
+                "unit": "days",
+                "duration_days": 7,
+                "points_reward": 100,
+                "badge_reward": "Consistent Logger",
+                "baseline_data": {"current_streak": 0},
+                "target_improvement": 100,
+                "personalization_factors": {"based_on": "new_user", "level": "beginner"},
+                "motivational_messages": ["Consistency is key to success!", "You're building a healthy habit!"]
+            },
+            {
+                "title": "Nutrition Explorer - Try New Foods",
+                "description": "Log 5 different food items you haven't tried before",
+                "challenge_type": "VARIETY",
+                "difficulty": "EASY",
+                "target_value": 5,
+                "unit": "foods",
+                "duration_days": 7,
+                "points_reward": 75,
+                "badge_reward": "Food Explorer",
+                "baseline_data": {"current_foods": 0},
+                "target_improvement": 100,
+                "personalization_factors": {"based_on": "new_user", "level": "beginner"},
+                "motivational_messages": ["Explore new flavors and nutrients!", "Variety is the spice of healthy eating!"]
+            }
+        ]
     
     def _analyze_user_data(self, user_id: int) -> Dict[str, Any]:
         """Comprehensive analysis of user's nutrition and workout data"""
@@ -126,9 +211,18 @@ class DataDrivenChallengeGenerator:
             'meal_count': statistics.mean([d['meal_count'] for d in nutrition_values])
         }
         
-        # Calculate consistency
-        calorie_consistency = 1 - (statistics.stdev([d['calories'] for d in nutrition_values]) / avg_daily['calories'])
-        meal_consistency = 1 - (statistics.stdev([d['meal_count'] for d in nutrition_values]) / avg_daily['meal_count'])
+        # Calculate consistency (with data validation)
+        calorie_values = [d['calories'] for d in nutrition_values]
+        meal_count_values = [d['meal_count'] for d in nutrition_values]
+        
+        calorie_consistency = 0
+        meal_consistency = 0
+        
+        if len(calorie_values) >= 2 and avg_daily['calories'] > 0:
+            calorie_consistency = 1 - (statistics.stdev(calorie_values) / avg_daily['calories'])
+        
+        if len(meal_count_values) >= 2 and avg_daily['meal_count'] > 0:
+            meal_consistency = 1 - (statistics.stdev(meal_count_values) / avg_daily['meal_count'])
         
         # Analyze trends
         calorie_trend = self._calculate_trend([d['calories'] for d in nutrition_values])
@@ -218,9 +312,9 @@ class DataDrivenChallengeGenerator:
         dinner_times = [h for h in meal_times if 17 <= h <= 21]
         
         timing_consistency = {
-            "breakfast": 1 - (statistics.stdev(breakfast_times) / 24) if breakfast_times else 0,
-            "lunch": 1 - (statistics.stdev(lunch_times) / 24) if lunch_times else 0,
-            "dinner": 1 - (statistics.stdev(dinner_times) / 24) if dinner_times else 0
+            "breakfast": 1 - (statistics.stdev(breakfast_times) / 24) if len(breakfast_times) >= 2 else 0,
+            "lunch": 1 - (statistics.stdev(lunch_times) / 24) if len(lunch_times) >= 2 else 0,
+            "dinner": 1 - (statistics.stdev(dinner_times) / 24) if len(dinner_times) >= 2 else 0
         }
         
         return {
