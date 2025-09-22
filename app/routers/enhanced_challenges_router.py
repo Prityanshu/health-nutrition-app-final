@@ -448,7 +448,7 @@ async def get_challenge_analytics(
         total_points = sum(c.points_reward for c in all_challenges if c.completion_percentage >= 100)
         
         # Calculate badges earned
-        badges_earned = len(set(a.badge_earned for a in all_challenges if a.badge_reward))
+        badges_earned = len(set(a.badge_reward for a in all_challenges if a.badge_reward))
         
         return {
             "success": True,
