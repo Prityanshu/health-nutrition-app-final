@@ -30,17 +30,32 @@ class ChatbotManager:
         
         # Intent detection keywords
         self.intent_keywords = {
-            "chefgenius": ["recipe", "cook", "ingredients", "cooking", "dish", "meal", "food"],
-            "culinaryexplorer": ["regional", "cuisine", "kerala", "punjab", "gujarat", "tamil", "rajasthan", "mediterranean", "japanese", "mexican", "italian", "chinese", "thai"],
+            "chefgenius": ["ingredients", "cooking", "food"],
+            "culinaryexplorer": ["recipe", "cook", "dish", "meal", "regional", "cuisine", "kerala", "punjab", "gujarat", "tamil", "rajasthan", "mediterranean", "japanese", "mexican", "italian", "chinese", "thai", "dosa", "masala", "indian", "south indian", "north indian", "curry", "biryani", "dal", "roti", "naan", "samosa", "vada", "idli", "sambar", "chutney", "how to make", "how to cook"],
             "budgetchef": ["budget", "cheap", "cost", "money", "affordable", "economical", "price"],
-            "fitmentor": ["workout", "exercise", "fitness", "gym", "training", "muscle", "weight", "cardio"],
+            "fitmentor": ["workout", "exercise", "fitness", "gym", "training", "muscle", "weight", "cardio", "burn", "lose", "kg", "pounds", "active"],
             "advanced_meal_planner": ["meal plan", "weekly plan", "7-day", "diet plan", "nutrition plan", "meal planning"],
             "nutrient_analyzer": ["nutrition", "calories", "protein", "carbs", "fat", "analyze", "nutrient", "macro"]
         }
 
-    def detect_agent(self, query: str) -> str:
-        """Detect which agent should handle the query based on keywords"""
+    def detect_agent(self, query: str, conversation_history: list = None) -> str:
+        """Detect which agent should handle the query based on keywords and conversation context"""
         query_lower = query.lower()
+        
+        # Check conversation context first
+        if conversation_history:
+            # Look at last few messages to understand context
+            recent_messages = conversation_history[-3:] if len(conversation_history) >= 3 else conversation_history
+            context_text = " ".join([msg.get("user", "") + " " + msg.get("bot", "") for msg in recent_messages]).lower()
+            
+            # If recent context suggests a specific agent, prioritize it
+            if any(word in context_text for word in ["workout", "exercise", "fitness", "gym", "training", "muscle", "weight", "cardio"]):
+                if any(word in query_lower for word in ["active", "activity", "level", "intensity", "workout", "exercise"]):
+                    return "fitmentor"
+            
+            if any(word in context_text for word in ["recipe", "cook", "ingredients", "cooking", "dish", "meal", "food"]):
+                if any(word in query_lower for word in ["more", "another", "different", "ingredient", "cook", "recipe"]):
+                    return "chefgenius"
         
         # Score each agent based on keyword matches
         scores = {}
@@ -49,7 +64,18 @@ class ChatbotManager:
             if score > 0:
                 scores[agent] = score
         
-        if not scores:
+        # If no clear match, check for context clues
+        if not scores or max(scores.values()) == 0:
+            # Check for follow-up indicators
+            if any(word in query_lower for word in ["more", "another", "different", "also", "and", "then"]):
+                # Return the same agent as the last conversation
+                if conversation_history:
+                    last_response = conversation_history[-1].get("bot", "").lower()
+                    if "workout" in last_response or "exercise" in last_response:
+                        return "fitmentor"
+                    elif "recipe" in last_response or "cook" in last_response:
+                        return "chefgenius"
+            
             return "chefgenius"  # Default fallback
         
         return max(scores, key=scores.get)
@@ -336,7 +362,7 @@ class ChatbotManager:
             conversation_history = self.get_conversation_context(user_id)
             
             # Detect which agent to use
-            agent_name = self.detect_agent(user_query)
+            agent_name = self.detect_agent(user_query, conversation_history)
             logger.info(f"Routing query to {agent_name} agent")
             
             # Get user context
@@ -381,14 +407,40 @@ class ChatbotManager:
                 )
             
             elif agent_name == "culinaryexplorer":
-                result = await agent_service.generate_regional_meal_plan(
-                    cuisine_region=context_info.get("cuisine_region", user_context.get("cuisine_pref", "indian")),
-                    meal_type=context_info.get("meal_type", "lunch"),
-                    dietary_restrictions=context_info.get("dietary_restrictions", user_context.get("dietary_preferences", [])),
-                    time_constraint=context_info.get("time_constraint", 30),
-                    cooking_skill=context_info.get("cooking_skill", "intermediate"),
-                    available_ingredients=context_info.get("ingredients", [])
-                )
+                # Check if user is asking for a specific recipe or dish
+                query_lower = user_query.lower()
+                specific_dish_keywords = ["recipe", "how to make", "how to cook", "dosa", "curry", "biryani", "dal", "roti", "naan", "samosa", "vada", "idli", "sambar", "chutney"]
+                
+                if any(keyword in query_lower for keyword in specific_dish_keywords):
+                    # Extract dish name from query
+                    dish_name = None
+                    if "masala dosa" in query_lower:
+                        dish_name = "masala dosa"
+                    elif "dosa" in query_lower:
+                        dish_name = "dosa"
+                    elif "curry" in query_lower:
+                        dish_name = "curry"
+                    elif "biryani" in query_lower:
+                        dish_name = "biryani"
+                    
+                    result = await agent_service.generate_regional_recipe(
+                        cuisine_region=context_info.get("cuisine_region", user_context.get("cuisine_pref", "indian")),
+                        dish_name=dish_name,
+                        dietary_restrictions=context_info.get("dietary_restrictions", user_context.get("dietary_preferences", [])),
+                        time_constraint=context_info.get("time_constraint", 60),
+                        cooking_skill=context_info.get("cooking_skill", "intermediate"),
+                        available_ingredients=context_info.get("ingredients", [])
+                    )
+                else:
+                    # Default to meal plan generation
+                    result = await agent_service.generate_regional_meal_plan(
+                        cuisine_region=context_info.get("cuisine_region", user_context.get("cuisine_pref", "indian")),
+                        meal_type=context_info.get("meal_type", "lunch"),
+                        dietary_restrictions=context_info.get("dietary_restrictions", user_context.get("dietary_preferences", [])),
+                        time_constraint=context_info.get("time_constraint", 30),
+                        cooking_skill=context_info.get("cooking_skill", "intermediate"),
+                        available_ingredients=context_info.get("ingredients", [])
+                    )
             
             elif agent_name == "budgetchef":
                 result = await agent_service.generate_budget_meal_plan(
@@ -442,7 +494,11 @@ class ChatbotManager:
                     if agent_name == "fitmentor":
                         fallback_response += "For muscle gain workouts, focus on:\n• Compound exercises (squats, deadlifts, bench press)\n• Progressive overload\n• 6-12 reps per set\n• 3-4 sets per exercise\n• 48-72 hours rest between muscle groups\n\n**Sample Workout:**\n- Push-ups: 3 sets of 12 reps\n- Squats: 3 sets of 15 reps\n- Planks: 3 sets of 60 seconds\n- Lunges: 3 sets of 12 reps per leg"
                     elif agent_name == "chefgenius":
-                        fallback_response += "For recipe suggestions, consider:\n• Using fresh, seasonal ingredients\n• Balancing macronutrients\n• Proper cooking techniques\n• Dietary restrictions and preferences\n\n**Sample Recipe:**\n- Kerala Chicken Curry: Marinate chicken with turmeric, chili powder, and salt. Cook with onions, tomatoes, and coconut milk. Serve with rice."
+                        # Check if the query is about dosa or South Indian food
+                        if any(keyword in user_query.lower() for keyword in ["dosa", "masala", "south indian", "kerala", "tamil"]):
+                            fallback_response += "**Traditional Masala Dosa Recipe 🥞**\n\n**For Dosa Batter:**\n- 2 cups rice (preferably parboiled rice)\n- 1/2 cup urad dal (black gram dal)\n- 1/4 tsp fenugreek seeds\n- Salt to taste\n\n**For Masala Filling:**\n- 3-4 medium potatoes, boiled and mashed\n- 1 large onion, finely chopped\n- 2-3 green chilies, chopped\n- 1 tsp mustard seeds\n- 1 tsp turmeric powder\n- 2 tbsp oil\n- Curry leaves\n- Salt to taste\n\n**Instructions:**\n1. **Prepare Batter:** Soak rice and dal separately for 4-6 hours. Grind to smooth paste. Ferment overnight.\n2. **Make Masala:** Heat oil, add mustard seeds, curry leaves. Add onions, chilies. Add mashed potatoes, turmeric, salt. Mix well.\n3. **Cook Dosa:** Heat tawa, pour batter, spread thin. Cook until golden, flip, add masala, fold.\n\n**Serving:** Serve hot with coconut chutney and sambar."
+                        else:
+                            fallback_response += "For recipe suggestions, consider:\n• Using fresh, seasonal ingredients\n• Balancing macronutrients\n• Proper cooking techniques\n• Dietary restrictions and preferences\n\n**Sample Recipe:**\n- Kerala Chicken Curry: Marinate chicken with turmeric, chili powder, and salt. Cook with onions, tomatoes, and coconut milk. Serve with rice."
                     elif agent_name == "nutrient_analyzer":
                         fallback_response += "For nutrition analysis, I can help you understand:\n• Macronutrient breakdown (protein, carbs, fats)\n• Micronutrient content\n• Calorie density\n• Health benefits and considerations\n\n**Sample Analysis:**\n- Chicken Curry (100g): ~150 calories, 20g protein, 8g carbs, 6g fat"
                     elif agent_name == "culinaryexplorer":

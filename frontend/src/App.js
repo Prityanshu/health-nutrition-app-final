@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import './index.css';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8002/api';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8001/api';
 
 function App() {
   const [currentView, setCurrentView] = useState('dashboard');
@@ -569,8 +569,8 @@ function App() {
       // Fetch Smart Challenges
       const challengesResponse = await fetch(`${API_BASE_URL}/enhanced-challenges/active-challenges`, { headers });
       if (challengesResponse.ok) {
-        const challenges = await challengesResponse.json();
-        setEnhancedChallenges(challenges);
+        const challengesData = await challengesResponse.json();
+        setEnhancedChallenges(challengesData.active_challenges || []);
       }
 
     } catch (error) {

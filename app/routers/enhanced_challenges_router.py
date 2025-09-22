@@ -45,7 +45,7 @@ async def generate_weekly_challenges(
         if result["success"]:
             return {
                 "success": True,
-                "message": "Weekly challenges generated successfully",
+                "message": result.get("message", "Weekly challenges generated successfully"),
                 "user_analysis": result["user_analysis"],
                 "recommendations": result["recommendations"],
                 "active_challenges": result["active_challenges"],

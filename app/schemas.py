@@ -7,6 +7,8 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 from enum import Enum
 
+# Enhanced Personalization Schemas
+
 # Enums
 class MealType(str, Enum):
     BREAKFAST = "breakfast"
@@ -316,6 +318,61 @@ class Token(BaseModel):
 
 class TokenData(BaseModel):
     username: Optional[str] = None
+
+# Enhanced Personalization Schemas
+
+# Food Rating Schemas
+class FoodRatingRequest(BaseModel):
+    """Request schema for rating a food item"""
+    food_id: int = Field(..., description="ID of the food item to rate")
+    rating: float = Field(..., ge=1.0, le=5.0, description="Rating from 1.0 to 5.0")
+    review: Optional[str] = Field(None, description="Optional review text")
+
+class FoodRatingResponse(BaseModel):
+    """Response schema for food rating"""
+    success: bool
+    message: str
+    rating: float
+    food_name: str
+
+class FoodRecommendation(BaseModel):
+    """Schema for food recommendation"""
+    food_id: int
+    name: str
+    cuisine_type: Optional[str]
+    calories: Optional[float]
+    reason: str
+
+# Recipe Interaction Schemas
+class RecipeInteractionRequest(BaseModel):
+    """Request schema for tracking recipe interaction"""
+    recipe_id: int = Field(..., description="ID of the recipe")
+    interaction_type: str = Field(..., description="Type of interaction: viewed, cooked, rated, saved, shared, favorited")
+    interaction_data: Optional[Dict[str, Any]] = Field(None, description="Additional interaction data")
+
+class RecipeRecommendation(BaseModel):
+    """Schema for recipe recommendation"""
+    recipe_id: int
+    title: str
+    reason: str
+
+# Social Cooking Schemas
+class SocialCookingProfileRequest(BaseModel):
+    """Request schema for updating social cooking profile"""
+    family_size: Optional[int] = Field(None, ge=1, le=20, description="Number of family members")
+    cooking_for_others: Optional[bool] = Field(None, description="Whether user cooks for others")
+    family_dietary_restrictions: Optional[List[str]] = Field(None, description="Family dietary restrictions")
+    social_meal_preferences: Optional[Dict[str, Any]] = Field(None, description="Social meal preferences")
+
+class SocialCookingProfile(BaseModel):
+    """Schema for social cooking profile"""
+    user_id: int
+    cooking_for_others: bool
+    family_size: int
+    dietary_restrictions_family: List[str]
+    social_meal_preferences: Dict[str, Any]
+    shared_recipe_preferences: Dict[str, Any]
+    last_updated: datetime
 
 # Error schemas
 class ErrorResponse(BaseModel):

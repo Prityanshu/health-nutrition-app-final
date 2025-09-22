@@ -23,6 +23,9 @@ from app.models.enhanced_models import (
     MealPlanAdherence, UserNutritionGoals, FoodPreferenceLearning,
     ChatbotInteraction, SeasonalPreference, SocialCookingData
 )
+from app.services.food_rating_service import FoodRatingService
+from app.services.recipe_interaction_service import RecipeInteractionService
+from app.services.social_cooking_service import SocialCookingService
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +34,9 @@ class AdvancedUserProfiler:
     
     def __init__(self, db: Session):
         self.db = db
+        self.food_rating_service = FoodRatingService(db)
+        self.recipe_interaction_service = RecipeInteractionService(db)
+        self.social_cooking_service = SocialCookingService(db)
     
     def create_comprehensive_profile(self, user_id: int) -> Dict[str, Any]:
         """Create a comprehensive user profile from all available data"""
@@ -43,6 +49,9 @@ class AdvancedUserProfiler:
             'social_preferences': self._analyze_social_preferences(user_id),
             'seasonal_patterns': self._analyze_seasonal_patterns(user_id),
             'interaction_history': self._analyze_interaction_history(user_id),
+            'food_rating_insights': self._analyze_food_rating_insights(user_id),
+            'recipe_interaction_insights': self._analyze_recipe_interaction_insights(user_id),
+            'social_cooking_insights': self._analyze_social_cooking_insights(user_id),
             'preference_confidence': self._calculate_preference_confidence(user_id)
         }
         
@@ -443,6 +452,162 @@ class AdvancedUserProfiler:
             'seasonal_preferences': {},
             'current_recommendations': []
         }
+    
+    def _analyze_food_rating_insights(self, user_id: int) -> Dict[str, Any]:
+        """Analyze user's food rating patterns for better recommendations"""
+        try:
+            # Get user's food ratings
+            user_ratings = self.food_rating_service.get_user_food_ratings(user_id, 100)
+            
+            if not user_ratings:
+                return {
+                    "rating_pattern": "no_ratings",
+                    "average_rating": 0.0,
+                    "rating_consistency": 0.0,
+                    "preferred_food_types": [],
+                    "rating_confidence": 0.0
+                }
+            
+            # Analyze rating patterns
+            ratings = [rating["rating"] for rating in user_ratings]
+            avg_rating = sum(ratings) / len(ratings)
+            
+            # Calculate rating consistency (lower standard deviation = more consistent)
+            rating_std = math.sqrt(sum((r - avg_rating) ** 2 for r in ratings) / len(ratings))
+            rating_consistency = max(0, 1 - (rating_std / 2.0))  # Normalize to 0-1
+            
+            # Analyze preferred food types based on high ratings (4.0+)
+            high_rated_foods = [r for r in user_ratings if r["rating"] >= 4.0]
+            
+            # Get food details for high-rated foods
+            preferred_food_types = []
+            for rating in high_rated_foods[:10]:  # Top 10 high-rated foods
+                food_item = self.db.query(FoodItem).filter(FoodItem.id == rating["food_id"]).first()
+                if food_item and food_item.cuisine_type:
+                    preferred_food_types.append(food_item.cuisine_type)
+            
+            # Calculate rating confidence based on number of ratings
+            rating_confidence = min(1.0, len(user_ratings) / 20.0)  # Max confidence at 20+ ratings
+            
+            return {
+                "rating_pattern": "consistent" if rating_consistency > 0.7 else "variable",
+                "average_rating": round(avg_rating, 2),
+                "rating_consistency": round(rating_consistency, 2),
+                "preferred_food_types": list(set(preferred_food_types)),
+                "rating_confidence": round(rating_confidence, 2),
+                "total_ratings": len(user_ratings),
+                "high_rated_count": len(high_rated_foods)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error analyzing food rating insights: {e}")
+            return {"error": str(e)}
+    
+    def _analyze_recipe_interaction_insights(self, user_id: int) -> Dict[str, Any]:
+        """Analyze user's recipe interaction patterns"""
+        try:
+            # Get user's recipe interactions
+            interactions = self.recipe_interaction_service.get_user_recipe_interactions(user_id, 100)
+            
+            if not interactions:
+                return {
+                    "interaction_pattern": "no_interactions",
+                    "engagement_level": "low",
+                    "cooking_frequency": "unknown",
+                    "preferred_interaction_types": [],
+                    "engagement_score": 0.0
+                }
+            
+            # Analyze interaction patterns
+            interaction_types = [interaction["interaction_type"] for interaction in interactions]
+            interaction_counts = Counter(interaction_types)
+            
+            # Determine engagement level
+            total_interactions = len(interactions)
+            if total_interactions > 50:
+                engagement_level = "high"
+            elif total_interactions > 20:
+                engagement_level = "medium"
+            else:
+                engagement_level = "low"
+            
+            # Analyze cooking frequency based on "cooked" interactions
+            cooked_count = interaction_counts.get("cooked", 0)
+            if cooked_count > 15:
+                cooking_frequency = "frequent"
+            elif cooked_count > 8:
+                cooking_frequency = "moderate"
+            elif cooked_count > 3:
+                cooking_frequency = "occasional"
+            else:
+                cooking_frequency = "rare"
+            
+            # Get cooking behavior insights
+            behavior_insights = self.recipe_interaction_service.get_cooking_behavior_insights(user_id)
+            
+            return {
+                "interaction_pattern": "active" if engagement_level in ["high", "medium"] else "passive",
+                "engagement_level": engagement_level,
+                "cooking_frequency": cooking_frequency,
+                "preferred_interaction_types": [item[0] for item in interaction_counts.most_common(3)],
+                "engagement_score": behavior_insights.get("engagement_score", 0.0),
+                "total_interactions": total_interactions,
+                "cooking_trends": behavior_insights.get("cooking_trends", {}),
+                "skill_level": behavior_insights.get("skill_level", "unknown")
+            }
+            
+        except Exception as e:
+            logger.error(f"Error analyzing recipe interaction insights: {e}")
+            return {"error": str(e)}
+    
+    def _analyze_social_cooking_insights(self, user_id: int) -> Dict[str, Any]:
+        """Analyze user's social cooking patterns and family preferences"""
+        try:
+            # Get social cooking profile
+            profile_result = self.social_cooking_service.get_social_cooking_profile(user_id)
+            
+            if not profile_result["success"]:
+                return {
+                    "social_cooking": False,
+                    "family_size": 1,
+                    "cooking_context": "individual",
+                    "family_dietary_needs": [],
+                    "social_preferences": {}
+                }
+            
+            profile = profile_result["profile"]
+            
+            # Get family eating patterns
+            family_patterns = self.social_cooking_service.analyze_family_eating_patterns(user_id)
+            
+            # Determine cooking context
+            if profile.get("cooking_for_others", False):
+                family_size = profile.get("family_size", 1)
+                if family_size > 4:
+                    cooking_context = "large_family"
+                elif family_size > 2:
+                    cooking_context = "family"
+                else:
+                    cooking_context = "couple"
+            else:
+                cooking_context = "individual"
+            
+            # Analyze family dietary needs
+            family_dietary_needs = profile.get("dietary_restrictions_family", [])
+            
+            return {
+                "social_cooking": profile.get("cooking_for_others", False),
+                "family_size": profile.get("family_size", 1),
+                "cooking_context": cooking_context,
+                "family_dietary_needs": family_dietary_needs,
+                "social_preferences": profile.get("social_meal_preferences", {}),
+                "family_patterns": family_patterns,
+                "portion_considerations": family_size if profile.get("cooking_for_others", False) else 1
+            }
+            
+        except Exception as e:
+            logger.error(f"Error analyzing social cooking insights: {e}")
+            return {"error": str(e)}
 
 
 class IntelligentRecommendationEngine:

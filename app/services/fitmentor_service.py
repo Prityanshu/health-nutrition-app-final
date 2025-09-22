@@ -99,8 +99,87 @@ class FitMentorService:
                 "weight": weight
             }
         except Exception as e:
-            logger.error(f"Error generating workout plan with FitMentor: {e}")
-            return {"success": False, "error": str(e)}
+            error_msg = str(e)
+            if "rate_limit_exceeded" in error_msg or "Rate limit reached" in error_msg:
+                logger.error(f"Groq API rate limit exceeded: {e}")
+                return {
+                    "success": True,
+                    "workout_plan": f"""### Weekly Workout Plan for {activity_level.title()} Fitness 🏋️
+
+#### Day 1: Monday - Upper Body 🏋️
+* Warm-up: 5 minutes of jumping jacks 🏃
+* Push-ups: 3 sets of 10-15 reps
+* Tricep dips (using a chair): 3 sets of 10 reps
+* Cool-down: 5 minutes of stretching 🧘
+* Duration: 20 minutes
+
+#### Day 2: Tuesday - Lower Body 🏋️
+* Warm-up: 5 minutes of jumping jacks 🏃
+* Squats: 3 sets of 15 reps
+* Lunges: 3 sets of 10 per leg
+* Calf raises: 3 sets of 15 reps
+* Cool-down: 5 minutes of stretching 🧘
+* Duration: 25 minutes
+
+#### Day 3: Wednesday - Cardio 🏃
+* Warm-up: 5 minutes of light jogging
+* High knees: 3 sets of 30 seconds
+* Jumping jacks: 3 sets of 30 seconds
+* Burpees: 3 sets of 10 reps
+* Cool-down: 5 minutes of walking 🧘
+* Duration: 20 minutes
+
+#### Day 4: Thursday - Core 🏋️
+* Warm-up: 5 minutes of light cardio
+* Plank: 3 sets of 30-60 seconds
+* Russian twists: 3 sets of 15 reps
+* Bicycle crunches: 3 sets of 15 reps
+* Cool-down: 5 minutes of stretching 🧘
+* Duration: 20 minutes
+
+#### Day 5: Friday - Full Body 🏋️
+* Warm-up: 5 minutes of jumping jacks
+* Mountain climbers: 3 sets of 30 seconds
+* Push-ups: 3 sets of 10 reps
+* Squats: 3 sets of 15 reps
+* Cool-down: 5 minutes of stretching 🧘
+* Duration: 25 minutes
+
+#### Day 6: Saturday - Flexibility 🧘
+* Warm-up: 5 minutes of light cardio
+* Leg swings: 3 sets of 10 reps
+* Arm circles: 3 sets of 10 reps
+* Full body stretches: 15 minutes
+* Cool-down: 5 minutes of deep breathing 🧘
+* Duration: 30 minutes
+
+#### Day 7: Sunday - Rest Day 🧘
+* Take a well-deserved rest day
+* Light walking or gentle stretching optional
+* Focus on recovery and hydration
+
+### Progression Tips:
+- Increase reps by 2-3 each week
+- Add 1-2 more sets when comfortable
+- Focus on proper form over speed
+
+### Nutrition Tips:
+- Stay hydrated (8+ glasses of water)
+- Include protein in every meal
+- Eat balanced meals with fruits and vegetables
+
+*Note: AI service temporarily unavailable. This is a general {activity_level} workout plan. Try again later for personalized plans.*""",
+                    "activity_level": activity_level,
+                    "fitness_goal": fitness_goal,
+                    "time_per_day": time_per_day,
+                    "equipment": equipment,
+                    "constraints": constraints,
+                    "age": age,
+                    "weight": weight
+                }
+            else:
+                logger.error(f"Error generating workout plan with FitMentor: {e}")
+                return {"success": False, "error": str(e)}
 
     async def adapt_workout_plan(self, current_plan: str, feedback: str, 
                                progress_notes: str = None) -> dict:

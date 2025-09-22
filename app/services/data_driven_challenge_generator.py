@@ -28,6 +28,37 @@ class DataDrivenChallengeGenerator:
         """Generate personalized challenges for the coming week"""
         
         try:
+            # Check if user already has active challenges
+            existing_challenges = self.db.query(PersonalizedChallenge).filter(
+                PersonalizedChallenge.user_id == user_id,
+                PersonalizedChallenge.is_active == True
+            ).all()
+            
+            if existing_challenges:
+                logger.info(f"User {user_id} already has {len(existing_challenges)} active challenges, returning existing ones")
+                # Return existing challenges instead of generating new ones
+                active_challenges = []
+                for challenge in existing_challenges:
+                    active_challenges.append({
+                        "challenge_id": challenge.id,
+                        "title": challenge.title,
+                        "description": challenge.description,
+                        "target_value": challenge.target_value,
+                        "unit": challenge.unit,
+                        "end_date": challenge.end_date.isoformat(),
+                        "points_reward": challenge.points_reward,
+                        "badge_reward": challenge.badge_reward
+                    })
+                
+                return {
+                    "success": True,
+                    "user_analysis": {},
+                    "recommendations": [],
+                    "active_challenges": active_challenges,
+                    "generated_at": datetime.utcnow().isoformat(),
+                    "message": f"User already has {len(existing_challenges)} active challenges"
+                }
+            
             # Analyze user data
             user_analysis = self._analyze_user_data(user_id)
             
@@ -626,6 +657,28 @@ class DataDrivenChallengeGenerator:
         active_challenges = []
         
         for rec in recommendations[:3]:  # Limit to 3 active challenges
+            # Check if a similar challenge already exists for this user
+            existing_challenge = self.db.query(PersonalizedChallenge).filter(
+                PersonalizedChallenge.user_id == user_id,
+                PersonalizedChallenge.title == rec["title"],
+                PersonalizedChallenge.is_active == True
+            ).first()
+            
+            if existing_challenge:
+                logger.info(f"Skipping duplicate challenge creation: {rec['title']}")
+                # Return existing challenge info
+                active_challenges.append({
+                    "challenge_id": existing_challenge.id,
+                    "title": existing_challenge.title,
+                    "description": existing_challenge.description,
+                    "target_value": existing_challenge.target_value,
+                    "unit": existing_challenge.unit,
+                    "end_date": existing_challenge.end_date.isoformat(),
+                    "points_reward": existing_challenge.points_reward,
+                    "badge_reward": existing_challenge.badge_reward
+                })
+                continue
+            
             # Create personalized challenge
             challenge = PersonalizedChallenge(
                 user_id=user_id,

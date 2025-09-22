@@ -138,15 +138,36 @@ class AdvancedMealPlannerService:
             try:
                 parsed = json.loads(agent_text)
             except json.JSONDecodeError:
-                # attempt to recover: extract first JSON object occurrence
-                match = re.search(r'(\{.*\})', agent_text, re.DOTALL)
-                if not match:
+                # attempt to recover: extract first complete JSON object occurrence
+                # Use a more precise approach to find the JSON boundaries
+                json_start = agent_text.find('{')
+                if json_start == -1:
                     return {
                         "success": False,
                         "error": "Agent did not return valid JSON."
                     }
+                
+                # Find the matching closing brace by counting braces
+                brace_count = 0
+                json_end = -1
+                for i in range(json_start, len(agent_text)):
+                    if agent_text[i] == '{':
+                        brace_count += 1
+                    elif agent_text[i] == '}':
+                        brace_count -= 1
+                        if brace_count == 0:
+                            json_end = i + 1
+                            break
+                
+                if json_end == -1:
+                    return {
+                        "success": False,
+                        "error": "Agent did not return complete JSON."
+                    }
+                
+                json_text = agent_text[json_start:json_end]
                 try:
-                    parsed = json.loads(match.group(1))
+                    parsed = json.loads(json_text)
                 except json.JSONDecodeError as e:
                     return {
                         "success": False,
@@ -204,14 +225,35 @@ class AdvancedMealPlannerService:
             try:
                 parsed = json.loads(agent_text)
             except json.JSONDecodeError:
-                match = re.search(r'(\{.*\})', agent_text, re.DOTALL)
-                if not match:
+                # Use the same improved JSON extraction logic
+                json_start = agent_text.find('{')
+                if json_start == -1:
                     return {
                         "success": False,
                         "error": "Agent did not return valid JSON for adaptation."
                     }
+                
+                # Find the matching closing brace by counting braces
+                brace_count = 0
+                json_end = -1
+                for i in range(json_start, len(agent_text)):
+                    if agent_text[i] == '{':
+                        brace_count += 1
+                    elif agent_text[i] == '}':
+                        brace_count -= 1
+                        if brace_count == 0:
+                            json_end = i + 1
+                            break
+                
+                if json_end == -1:
+                    return {
+                        "success": False,
+                        "error": "Agent did not return complete JSON for adaptation."
+                    }
+                
+                json_text = agent_text[json_start:json_end]
                 try:
-                    parsed = json.loads(match.group(1))
+                    parsed = json.loads(json_text)
                 except json.JSONDecodeError as e:
                     return {
                         "success": False,
