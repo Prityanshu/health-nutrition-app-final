@@ -4898,7 +4898,7 @@ function App() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-gray-600">Completion Rate</p>
-                    <p className="text-2xl font-bold">{challengeAnalytics.completion_rate.toFixed(1)}%</p>
+                    <p className="text-2xl font-bold">{(challengeAnalytics.completion_rate || 0).toFixed(1)}%</p>
                   </div>
                   <TrendingUp className="text-purple-500" size={24} />
                 </div>
@@ -4923,11 +4923,11 @@ function App() {
                 Active Challenges
               </h2>
               <span className="text-sm text-gray-600">
-                {enhancedChallenges.length} active challenge{enhancedChallenges.length !== 1 ? 's' : ''}
+                {enhancedChallenges?.length || 0} active challenge{(enhancedChallenges?.length || 0) !== 1 ? 's' : ''}
               </span>
             </div>
 
-            {enhancedChallenges.length === 0 ? (
+                 {(!enhancedChallenges || enhancedChallenges.length === 0) ? (
               <div className="text-center py-12">
                 <Award className="mx-auto mb-4 text-gray-400" size={48} />
                 <h3 className="text-lg font-semibold text-gray-600 mb-2">No Active Challenges</h3>
@@ -4941,8 +4941,8 @@ function App() {
                 </button>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {enhancedChallenges.map((challenge) => (
+                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                     {(enhancedChallenges || []).map((challenge) => (
                   <div key={challenge.challenge_id} className="border rounded-lg p-6 hover:shadow-md transition-shadow">
                     <div className="flex items-start justify-between mb-4">
                       <div>
@@ -4956,7 +4956,7 @@ function App() {
                       </div>
                       <div className="text-right">
                         <div className="text-2xl font-bold text-blue-600">
-                          {challenge.progress_percentage.toFixed(0)}%
+                          {(challenge.progress_percentage || 0).toFixed(0)}%
                         </div>
                         <div className="text-sm text-gray-500">Complete</div>
                       </div>
@@ -4966,12 +4966,12 @@ function App() {
                     <div className="mb-4">
                       <div className="flex justify-between text-sm text-gray-600 mb-1">
                         <span>Progress</span>
-                        <span>{challenge.current_value.toFixed(1)} / {challenge.target_value} {challenge.unit}</span>
+                        <span>{(challenge.current_value || 0).toFixed(1)} / {challenge.target_value || 0} {challenge.unit || ''}</span>
                       </div>
                       <div className="w-full bg-gray-200 rounded-full h-2">
                         <div
                           className="bg-blue-500 h-2 rounded-full transition-all duration-300"
-                          style={{ width: `${Math.min(100, challenge.progress_percentage)}%` }}
+                          style={{ width: `${Math.min(100, challenge.progress_percentage || 0)}%` }}
                         ></div>
                       </div>
                     </div>
@@ -4991,7 +4991,7 @@ function App() {
                               }`}
                             >
                               <div className="font-semibold">Day {target.day}</div>
-                              <div>{target.value.toFixed(1)}</div>
+                              <div>{(target.value || 0).toFixed(1)}</div>
                             </div>
                           ))}
                         </div>
@@ -5039,15 +5039,15 @@ function App() {
             )}
           </div>
 
-          {/* Challenge Recommendations */}
-          {challengeRecommendations.length > 0 && (
+               {/* Challenge Recommendations */}
+               {challengeRecommendations && challengeRecommendations.length > 0 && (
             <div className="card">
               <h2 className="text-xl font-bold mb-6 flex items-center">
                 <Lightbulb className="mr-2" size={20} />
                 Recommended Challenges
               </h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {challengeRecommendations.map((rec, index) => (
+                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                     {(challengeRecommendations || []).map((rec, index) => (
                   <div key={index} className="border rounded-lg p-4 hover:shadow-md transition-shadow">
                     <h3 className="font-semibold mb-2">{rec.title}</h3>
                     <p className="text-sm text-gray-600 mb-3">{rec.description}</p>
