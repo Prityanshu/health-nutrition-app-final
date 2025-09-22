@@ -1,6 +1,6 @@
 import logging
 from agno.agent import Agent
-from agno.models.groq import Groq
+from app.models.groq_with_fallback import GroqWithFallback
 from agno.tools.exa import ExaTools
 from dotenv import load_dotenv
 from textwrap import dedent
@@ -15,7 +15,7 @@ class AdvancedMealPlannerService:
         self.advanced_meal_agent = Agent(
             name="AdvancedMealPlanner",
             tools=[ExaTools()],  # lets the model search & validate food items if needed
-            model=Groq(id="llama-3.3-70b-versatile"),
+            model=GroqWithFallback(id="llama-3.3-70b-versatile"),
             description=dedent("""\
                 You are AdvancedMealPlanner, a clinically-minded nutritionist & meal planner.
                 Your job: produce a practical, healthy 7-day meal plan tailored to the user's

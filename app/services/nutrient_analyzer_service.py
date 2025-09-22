@@ -1,6 +1,6 @@
 import logging
 from agno.agent import Agent
-from agno.models.groq import Groq
+from app.models.groq_with_fallback import GroqWithFallback
 from agno.tools.exa import ExaTools
 from dotenv import load_dotenv
 from textwrap import dedent
@@ -18,7 +18,7 @@ class NutrientAnalyzerService:
         self.nutrient_agent = Agent(
             name="NutrientAnalyzer",
             tools=[],  # Removed ExaTools due to potential API errors
-            model=Groq(id="llama-3.3-70b-versatile"),
+            model=GroqWithFallback(id="llama-3.3-70b-versatile"),
             description=dedent("""\
                 You are NutrientAnalyzer, a health-focused nutrition expert. 🥦📊
 

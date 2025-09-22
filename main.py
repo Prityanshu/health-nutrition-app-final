@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import engine, Base
-from app.routers import auth, users, planner, meals, tracking, goals, recipes, gamification, ml_recommendations, fitness, budget, culinary, nutrient_analyzer, advanced_meal_planner, chatbot, enhanced_ml_router, onboarding_router, enhanced_challenges_router
+from app.routers import auth, users, planner, meals, tracking, goals, recipes, gamification, ml_recommendations, fitness, budget, culinary, nutrient_analyzer, advanced_meal_planner, chatbot, enhanced_ml_router, onboarding_router, enhanced_challenges_router, api_status_router
 from app.routers.ai_recipe_router import router as ai_recipe_router
 
 # Create database tables
@@ -42,6 +42,7 @@ app.include_router(ml_recommendations.router, prefix="/api/ml", tags=["ml-recomm
 app.include_router(enhanced_ml_router.router, prefix="/api/enhanced-ml", tags=["enhanced-ml"])
 app.include_router(onboarding_router.router, prefix="/api/onboarding", tags=["onboarding"])
 app.include_router(enhanced_challenges_router.router, prefix="/api/enhanced-challenges", tags=["enhanced-challenges"])
+app.include_router(api_status_router.router, prefix="/api", tags=["api-status"])
 
 @app.get("/")
 async def root():
