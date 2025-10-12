@@ -1955,15 +1955,15 @@ Nutrition Added:
             <div className="flex items-center">
               <button
                 onClick={() => setActiveView('dashboard')}
-                className="mr-4 flex items-center text-gray-600 hover:text-gray-900"
+                className="btn btn-secondary mr-4"
               >
                 <ArrowLeft size={20} className="mr-2" />
                 Back to Dashboard
               </button>
-              <h1 className="text-2xl font-bold text-gray-900">AI-Powered Meal Logging</h1>
+              <h1 className="text-2xl font-bold font-display text-primary">AI-Powered Meal Logging</h1>
             </div>
             <div className="flex items-center gap-4">
-              <span className="text-gray-700">Welcome, {user?.full_name || user?.username}</span>
+              <span className="welcome-text">Welcome, {user?.full_name || user?.username}</span>
               <button
                 onClick={handleLogout}
                 className="btn btn-secondary"
@@ -2176,15 +2176,15 @@ Nutrition Added:
             <div className="flex items-center">
               <button
                 onClick={() => setActiveView('dashboard')}
-                className="mr-4 flex items-center text-gray-600 hover:text-gray-900"
+                className="btn btn-secondary mr-4"
               >
                 <ArrowLeft size={20} className="mr-2" />
                 Back to Dashboard
               </button>
-              <h1 className="text-2xl font-bold text-gray-900">Set Goals</h1>
+              <h1 className="text-2xl font-bold font-display text-primary">Set Goals</h1>
             </div>
             <div className="flex items-center gap-4">
-              <span className="text-gray-700">Welcome, {user?.full_name || user?.username}</span>
+              <span className="welcome-text">Welcome, {user?.full_name || user?.username}</span>
               <button
                 onClick={handleLogout}
                 className="btn btn-secondary"
@@ -2379,7 +2379,7 @@ Nutrition Added:
             <div className="flex items-center">
               <button
                 onClick={() => setActiveView('dashboard')}
-                className="mr-4 flex items-center text-gray-600 hover:text-gray-900"
+                className="btn btn-secondary mr-4"
               >
                 <ArrowLeft size={20} className="mr-2" />
                 Back to Dashboard
@@ -2387,7 +2387,7 @@ Nutrition Added:
               <h1 className="text-2xl font-bold text-gray-900">View Progress</h1>
             </div>
             <div className="flex items-center gap-4">
-              <span className="text-gray-700">Welcome, {user?.full_name || user?.username}</span>
+              <span className="welcome-text">Welcome, {user?.full_name || user?.username}</span>
               <button
                 onClick={handleLogout}
                 className="btn btn-secondary"
@@ -2605,15 +2605,15 @@ Nutrition Added:
             <div className="flex items-center">
               <button
                 onClick={() => setActiveView('dashboard')}
-                className="mr-4 flex items-center text-gray-600 hover:text-gray-900"
+                className="btn btn-secondary mr-4"
               >
                 <ArrowLeft size={20} className="mr-2" />
                 Back to Dashboard
               </button>
-              <h1 className="text-2xl font-bold text-gray-900">AI Recommendations</h1>
+              <h1 className="text-2xl font-bold font-display text-primary">AI Recommendations</h1>
             </div>
             <div className="flex items-center gap-4">
-              <span className="text-gray-700">Welcome, {user?.full_name || user?.username}</span>
+              <span className="welcome-text">Welcome, {user?.full_name || user?.username}</span>
               <button
                 onClick={handleLogout}
                 className="btn btn-secondary"
@@ -2866,7 +2866,7 @@ Nutrition Added:
             <div className="flex items-center">
               <button
                 onClick={() => setActiveView('dashboard')}
-                className="mr-4 flex items-center text-gray-600 hover:text-gray-900"
+                className="btn btn-secondary mr-4"
               >
                 <ArrowLeft size={20} className="mr-2" />
                 Back to Dashboard
@@ -2874,7 +2874,7 @@ Nutrition Added:
               <h1 className="text-2xl font-bold text-gray-900">AI Recipe Generator</h1>
             </div>
             <div className="flex items-center gap-4">
-              <span className="text-gray-700">Welcome, {user?.full_name || user?.username}</span>
+              <span className="welcome-text">Welcome, {user?.full_name || user?.username}</span>
               <button
                 onClick={handleLogout}
                 className="btn btn-secondary"
@@ -3237,7 +3237,7 @@ Nutrition Added:
             <div className="flex items-center">
               <button
                 onClick={() => setActiveView('dashboard')}
-                className="mr-4 flex items-center text-gray-600 hover:text-gray-900"
+                className="btn btn-secondary mr-4"
               >
                 <ArrowLeft size={20} className="mr-2" />
                 Back to Dashboard
@@ -3245,7 +3245,7 @@ Nutrition Added:
               <h1 className="text-2xl font-bold text-gray-900">FitMentor - AI Workout Planner</h1>
             </div>
             <div className="flex items-center gap-4">
-              <span className="text-gray-700">Welcome, {user?.full_name || user?.username}</span>
+              <span className="welcome-text">Welcome, {user?.full_name || user?.username}</span>
               <button
                 onClick={handleLogout}
                 className="btn btn-secondary"
@@ -3510,7 +3510,7 @@ Nutrition Added:
             <div className="flex items-center">
               <button
                 onClick={() => setActiveView('dashboard')}
-                className="mr-4 flex items-center text-gray-600 hover:text-gray-900"
+                className="btn btn-secondary mr-4"
               >
                 <ArrowLeft size={20} className="mr-2" />
                 Back to Dashboard
@@ -3518,7 +3518,7 @@ Nutrition Added:
               <h1 className="text-2xl font-bold text-gray-900">BudgetChef - AI Budget Meal Planner</h1>
             </div>
             <div className="flex items-center gap-4">
-              <span className="text-gray-700">Welcome, {user?.full_name || user?.username}</span>
+              <span className="welcome-text">Welcome, {user?.full_name || user?.username}</span>
               <button
                 onClick={handleLogout}
                 className="btn btn-secondary"
@@ -3840,7 +3840,7 @@ Nutrition Added:
             <div className="flex items-center">
               <button
                 onClick={() => setActiveView('dashboard')}
-                className="mr-4 flex items-center text-gray-600 hover:text-gray-900"
+                className="btn btn-secondary mr-4"
               >
                 <ArrowLeft size={20} className="mr-2" />
                 Back to Dashboard
@@ -3848,7 +3848,7 @@ Nutrition Added:
               <h1 className="text-2xl font-bold text-gray-900">CulinaryExplorer - Regional Cuisine Planner</h1>
             </div>
             <div className="flex items-center gap-4">
-              <span className="text-gray-700">Welcome, {user?.full_name || user?.username}</span>
+              <span className="welcome-text">Welcome, {user?.full_name || user?.username}</span>
               <button
                 onClick={handleLogout}
                 className="btn btn-secondary"
@@ -4231,14 +4231,14 @@ Nutrition Added:
           {/* Smart Challenges */}
           <div className="card">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-bold flex items-center">
+              <h3 className="text-lg font-bold font-display text-primary flex items-center">
                 <Award className="mr-2" />
                 Smart Challenges
               </h3>
               <button
                 onClick={generateWeeklyChallenges}
                 disabled={isGeneratingChallenges}
-                className="text-xs bg-blue-500 text-white px-2 py-1 rounded hover:bg-blue-600 disabled:opacity-50"
+                className="btn btn-success btn-sm"
               >
                 {isGeneratingChallenges ? 'Generating...' : 'Generate'}
               </button>
@@ -4289,7 +4289,7 @@ Nutrition Added:
                 <button
                   onClick={generateWeeklyChallenges}
                   disabled={isGeneratingChallenges}
-                  className="text-xs bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 disabled:opacity-50"
+                  className="btn btn-success btn-sm"
                 >
                   {isGeneratingChallenges ? 'Generating...' : 'Generate Challenges'}
                 </button>
@@ -4583,7 +4583,7 @@ Nutrition Added:
             <div className="flex items-center">
               <button
                 onClick={() => setActiveView('dashboard')}
-                className="mr-4 flex items-center text-gray-600 hover:text-gray-900"
+                className="btn btn-secondary mr-4"
               >
                 <ArrowLeft size={20} className="mr-2" />
                 Back to Dashboard
@@ -4591,7 +4591,7 @@ Nutrition Added:
               <h1 className="text-2xl font-bold text-gray-900">Advanced Meal Planner</h1>
             </div>
             <div className="flex items-center gap-4">
-              <span className="text-gray-700">Welcome, {user?.full_name || user?.username}</span>
+              <span className="welcome-text">Welcome, {user?.full_name || user?.username}</span>
               <button
                 onClick={handleLogout}
                 className="btn btn-secondary"
@@ -4914,17 +4914,17 @@ Nutrition Added:
                 <ArrowLeft size={20} />
               </button>
               <div>
-                <h1 className="text-2xl font-bold flex items-center">
+                <h1 className="text-2xl font-bold font-display text-primary flex items-center">
                   <Award className="mr-2" size={24} />
                   Smart Challenges
                 </h1>
-                <p className="text-gray-600">Data-driven personalized challenges based on your nutrition and workout patterns</p>
+                <p className="text-secondary">Data-driven personalized challenges based on your nutrition and workout patterns</p>
               </div>
             </div>
             <button
               onClick={generateWeeklyChallenges}
               disabled={isGeneratingChallenges}
-              className="btn-primary flex items-center"
+              className="btn btn-primary flex items-center"
             >
               {isGeneratingChallenges ? (
                 <>
@@ -5006,7 +5006,7 @@ Nutrition Added:
                 <button
                   onClick={generateWeeklyChallenges}
                   disabled={isGeneratingChallenges}
-                  className="btn-primary"
+                  className="btn btn-primary"
                 >
                   Generate Challenges
                 </button>
