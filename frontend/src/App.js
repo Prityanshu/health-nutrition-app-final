@@ -216,6 +216,7 @@ function App() {
   const [challengeRecommendations, setChallengeRecommendations] = useState([]);
   const [challengeAnalytics, setChallengeAnalytics] = useState(null);
   const [isGeneratingChallenges, setIsGeneratingChallenges] = useState(false);
+  const [challengesLastUpdated, setChallengesLastUpdated] = useState(null);
 
   // Chatbot functions
   const fetchAvailableAgents = async () => {
@@ -332,7 +333,11 @@ function App() {
 
       if (response.ok) {
         const data = await response.json();
-        setEnhancedChallenges(data.active_challenges || []);
+        // Only update challenges if we got valid data
+        if (data.active_challenges && data.active_challenges.length > 0) {
+          setEnhancedChallenges(data.active_challenges);
+          setChallengesLastUpdated(Date.now()); // Update timestamp when generating new challenges
+        }
         setChallengeRecommendations(data.recommendations || []);
         setError('');
       } else {
@@ -360,7 +365,11 @@ function App() {
 
       if (response.ok) {
         const data = await response.json();
-        setEnhancedChallenges(data.active_challenges || []);
+        // Only update challenges if we got valid data
+        if (data.active_challenges && data.active_challenges.length > 0) {
+          setEnhancedChallenges(data.active_challenges);
+          setChallengesLastUpdated(Date.now()); // Update timestamp when fetching challenges
+        }
       } else {
         const errorData = await response.json();
         setError(errorData.detail || 'Failed to fetch challenges');
@@ -388,8 +397,20 @@ function App() {
 
       if (response.ok) {
         const data = await response.json();
-        // Refresh challenges to show updated progress
-        await fetchActiveChallenges();
+        // Update the local challenge state instead of refetching
+        setEnhancedChallenges(prevChallenges => 
+          prevChallenges.map(challenge => 
+            challenge.challenge_id === challengeId 
+              ? { 
+                  ...challenge, 
+                  current_value: challenge.current_value + dailyValue,
+                  progress_percentage: data.completion_percentage,
+                  is_completed: data.is_completed
+                }
+              : challenge
+          )
+        );
+        setChallengesLastUpdated(Date.now()); // Update timestamp to prevent refetching
         setError(''); // Clear any previous errors
         // Show success message
         alert(`Progress updated! You've completed ${data.completion_percentage.toFixed(1)}% of your challenge.`);
@@ -480,6 +501,14 @@ function App() {
       loadDashboardData();
     }
   }, []);
+  
+  // Clear user data when user changes or logs out
+  useEffect(() => {
+    if (!user) {
+      // User logged out, ensure all data is cleared
+      clearUserData();
+    }
+  }, [user?.id]);
 
   useEffect(() => {
     // Fetch food items when log-meal view is active
@@ -541,9 +570,11 @@ function App() {
     if (activeView === 'chatbot') {
       fetchAvailableAgents();
     }
-    // Fetch enhanced challenges when enhanced-challenges view is active
+    // Fetch enhanced challenges when enhanced-challenges view is active (only if not recently loaded)
     if (activeView === 'enhanced-challenges') {
-      fetchActiveChallenges();
+      if (enhancedChallenges.length === 0 || !challengesLastUpdated || Date.now() - challengesLastUpdated > 300000) { // 5 minutes
+        fetchActiveChallenges();
+      }
       fetchChallengeAnalytics();
     }
     // Fetch BudgetChef data when budgetchef view is active
@@ -552,7 +583,55 @@ function App() {
     }
   }, [activeView]);
 
-  const loadDashboardData = async () => {
+  // Helper function to clear all user-specific state
+  const clearUserData = () => {
+    // Clear challenge-related state
+    setEnhancedChallenges([]);
+    setChallengeRecommendations([]);
+    setChallengeAnalytics(null);
+    setChallengesLastUpdated(null);
+    
+    // Clear food and meal-related state
+    setFoodItems([]);
+    setAiRecipes([]);
+    setGeneratedRecipe(null);
+    setChefgeniusRecipe(null);
+    setFitmentorPlan(null);
+    setBudgetchefPlan(null);
+    setCulinaryexplorerPlan(null);
+    setAdvancedMealPlan(null);
+    setNutrientAnalysis(null);
+    
+    // Clear goals and progress
+    setGoals([]);
+    setProgressData({
+      dates: [],
+      calories: [],
+      protein: [],
+      carbs: [],
+      fat: []
+    });
+    
+    // Clear ML recommendations
+    setMlRecommendations({
+      foodRecommendations: [],
+      cuisineRecommendations: [],
+      varietyTips: []
+    });
+    
+    // Clear chatbot state
+    setChatbotMessages([]);
+    
+    // Clear dashboard data
+    setDashboardData({
+      dailyStats: null,
+      recentMeals: [],
+      challenges: [],
+      goals: []
+    });
+  };
+
+  const loadDashboardData = async (skipChallenges = false) => {
     try {
       const token = localStorage.getItem('token');
       const headers = {
@@ -574,11 +653,17 @@ function App() {
         setDashboardData(prev => ({ ...prev, recentMeals: meals }));
       }
 
-      // Fetch Smart Challenges
-      const challengesResponse = await fetch(`${API_BASE_URL}/enhanced-challenges/active-challenges`, { headers });
-      if (challengesResponse.ok) {
-        const challengesData = await challengesResponse.json();
-        setEnhancedChallenges(challengesData.active_challenges || []);
+      // Fetch Smart Challenges only if not skipped and not recently updated (to avoid overwriting recently updated challenges)
+      if (!skipChallenges && (!challengesLastUpdated || Date.now() - challengesLastUpdated > 30000)) { // 30 seconds
+        const challengesResponse = await fetch(`${API_BASE_URL}/enhanced-challenges/active-challenges`, { headers });
+        if (challengesResponse.ok) {
+          const challengesData = await challengesResponse.json();
+          // Only update challenges if we got valid data
+          if (challengesData.active_challenges && challengesData.active_challenges.length > 0) {
+            setEnhancedChallenges(challengesData.active_challenges);
+            setChallengesLastUpdated(Date.now());
+          }
+        }
       }
 
     } catch (error) {
@@ -604,6 +689,10 @@ function App() {
       if (response.ok) {
         const data = await response.json();
         localStorage.setItem('token', data.access_token);
+        
+        // Clear any previous user's data before loading new user data
+        clearUserData();
+        
         await fetchUserData();
       } else {
         const errorData = await response.json();
@@ -655,13 +744,10 @@ function App() {
     localStorage.removeItem('token');
     setUser(null);
     setCurrentView('login');
-    setDashboardData({
-      dailyStats: null,
-      recentMeals: [],
-      challenges: [],
-      goals: []
-    });
     setActiveView('dashboard');
+    
+    // Clear all user-specific state to prevent data leakage between users
+    clearUserData();
   };
 
   const fetchFoodItems = async () => {
@@ -1133,8 +1219,8 @@ function App() {
           quantity: 1.0
         });
         alert('Meal logged successfully!');
-        // Refresh dashboard data
-        loadDashboardData();
+        // Refresh dashboard data but skip challenges to avoid overwriting them
+        loadDashboardData(true);
       } else {
         const errorData = await response.json();
         const errorMessage = typeof errorData.detail === 'string' 
@@ -1246,8 +1332,8 @@ function App() {
           setNutrientForm({ food_name: '', serving_size: '', meal_type: 'lunch' });
           setShowNutrientAnalysis(false);
           alert('Meal logged with nutrition analysis successfully!');
-          // Refresh dashboard data
-          loadDashboardData();
+          // Refresh dashboard data but skip challenges to avoid overwriting them
+          loadDashboardData(true);
         } else {
           setError('Failed to log meal with analysis');
         }
@@ -1636,9 +1722,9 @@ Nutrition Added:
         
         alert(successMessage);
         
-        // Refresh dashboard data to show the new meal
+        // Refresh dashboard data to show the new meal but skip challenges to avoid overwriting them
         console.log('Refreshing dashboard data...');
-        await loadDashboardData();
+        await loadDashboardData(true);
         console.log('Dashboard refreshed!');
       } else {
         const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));

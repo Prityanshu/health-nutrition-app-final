@@ -36,18 +36,39 @@ class DataDrivenChallengeGenerator:
             
             if existing_challenges:
                 logger.info(f"User {user_id} already has {len(existing_challenges)} active challenges, returning existing ones")
-                # Return existing challenges instead of generating new ones
+                # Return existing challenges with complete data structure
                 active_challenges = []
                 for challenge in existing_challenges:
+                    # Get progress for this challenge
+                    progress = self.db.query(UserChallengeProgress).filter(
+                        UserChallengeProgress.challenge_id == challenge.id
+                    ).order_by(desc(UserChallengeProgress.progress_date)).all()
+                    
+                    # Calculate current progress
+                    total_progress = sum(p.daily_value for p in progress)
+                    progress_percentage = (total_progress / challenge.target_value) * 100 if challenge.target_value > 0 else 0
+                    
+                    # Calculate days remaining
+                    days_remaining = (challenge.end_date - datetime.utcnow()).days
+                    
                     active_challenges.append({
                         "challenge_id": challenge.id,
                         "title": challenge.title,
                         "description": challenge.description,
+                        "challenge_type": challenge.challenge_type.value,
+                        "difficulty": challenge.difficulty.value,
                         "target_value": challenge.target_value,
+                        "current_value": total_progress,
                         "unit": challenge.unit,
-                        "end_date": challenge.end_date.isoformat(),
+                        "progress_percentage": min(100, progress_percentage),
+                        "days_remaining": max(0, days_remaining),
                         "points_reward": challenge.points_reward,
-                        "badge_reward": challenge.badge_reward
+                        "badge_reward": challenge.badge_reward,
+                        "start_date": challenge.start_date.isoformat(),
+                        "end_date": challenge.end_date.isoformat(),
+                        "is_completed": progress_percentage >= 100,
+                        "daily_targets": challenge.daily_targets,
+                        "motivational_messages": challenge.motivational_messages
                     })
                 
                 return {
