@@ -19,8 +19,8 @@ import './index.css';
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8001/api';
 
 function App() {
-  const [currentView, setCurrentView] = useState('dashboard');
-  const [user, setUser] = useState({username: 'testuser', full_name: 'Test User'});
+  const [currentView, setCurrentView] = useState('login');
+  const [user, setUser] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
