@@ -616,7 +616,9 @@ function App() {
     setMlRecommendations({
       foodRecommendations: [],
       cuisineRecommendations: [],
-      varietyTips: []
+      varietySuggestions: [],
+      macroAdjustments: [],
+      mealTimingSuggestions: {}
     });
     
     // Clear chatbot state
