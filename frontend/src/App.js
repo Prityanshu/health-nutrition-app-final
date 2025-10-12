@@ -4138,7 +4138,7 @@ Nutrition Added:
   const renderDashboard = () => (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <header className="bg-white shadow">
+      <header className="app-header">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center">
@@ -4157,10 +4157,10 @@ Nutrition Added:
               >
                 {sidebarOpen ? <X size={24} /> : <Menu size={24} />}
               </button>
-              <h1 className="text-2xl font-bold text-gray-900">Nutrition App</h1>
+              <h1 className="header-title text-2xl font-bold">Nutrition App</h1>
             </div>
             <div className="flex items-center gap-4">
-              <span className="text-gray-700">Welcome, {user?.full_name || user?.username}</span>
+              <span className="welcome-text">Welcome, {user?.full_name || user?.username}</span>
               <button
                 onClick={handleLogout}
                 className="btn btn-secondary"
@@ -4410,7 +4410,7 @@ Nutrition Added:
   const renderChatbot = () => (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <header className="bg-white shadow">
+      <header className="app-header">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center">
@@ -4421,10 +4421,10 @@ Nutrition Added:
                 <ArrowLeft size={20} className="mr-2" />
                 Back to Dashboard
               </button>
-              <h1 className="text-2xl font-bold text-gray-900">AI Chatbot Assistant</h1>
+              <h1 className="header-title text-2xl font-bold">AI Chatbot Assistant</h1>
             </div>
             <div className="flex items-center gap-4">
-              <span className="text-gray-700">Welcome, {user?.full_name || user?.username}</span>
+              <span className="welcome-text">Welcome, {user?.full_name || user?.username}</span>
             </div>
           </div>
         </div>
