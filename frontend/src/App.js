@@ -166,6 +166,14 @@ function App() {
     quantity: 1.0
   });
 
+  // Quick Meal Log Modal (for ML Recommendations)
+  const [showQuickLogModal, setShowQuickLogModal] = useState(false);
+  const [selectedRecommendation, setSelectedRecommendation] = useState(null);
+  const [quickLogForm, setQuickLogForm] = useState({
+    meal_type: 'lunch',
+    quantity: 1.0
+  });
+
   // NutrientAnalyzer state
   const [nutrientAnalysis, setNutrientAnalysis] = useState(null);
   const [isAnalyzingNutrition, setIsAnalyzingNutrition] = useState(false);
@@ -1525,11 +1533,134 @@ function App() {
       
       if (recommendationsResponse.ok) {
         const data = await recommendationsResponse.json();
-        setMlRecommendations(data.recommendations);
+        const recommendations = data.recommendations;
+        
+        // Map snake_case API response to camelCase frontend state
+        setMlRecommendations({
+          foodRecommendations: recommendations.food_recommendations || [],
+          cuisineRecommendations: recommendations.cuisine_recommendations || [],
+          varietySuggestions: recommendations.variety_suggestions || [],
+          macroAdjustments: recommendations.macro_adjustments || [],
+          mealTimingSuggestions: recommendations.meal_timing_suggestions || {}
+        });
       }
     } catch (error) {
       console.error('Error fetching ML recommendations:', error);
     }
+  };
+
+  // Quick Log Modal Functions
+  const handleAddToPlan = (food) => {
+    setSelectedRecommendation(food);
+    
+    // Set meal type based on current time
+    const hour = new Date().getHours();
+    let mealType = 'lunch';
+    if (hour >= 6 && hour < 11) mealType = 'breakfast';
+    else if (hour >= 11 && hour < 16) mealType = 'lunch';
+    else if (hour >= 16 && hour < 22) mealType = 'dinner';
+    else mealType = 'snack';
+    
+    setQuickLogForm({
+      meal_type: mealType,
+      quantity: 1.0
+    });
+    
+    setShowQuickLogModal(true);
+  };
+
+  const handleQuickLogMeal = async () => {
+    if (!selectedRecommendation) {
+      console.error('No recommendation selected');
+      alert('⚠️ No food selected. Please try again.');
+      return;
+    }
+
+    console.log('=== Starting Quick Meal Log ===');
+    console.log('Selected food:', {
+      food_id: selectedRecommendation.food_id,
+      food_name: selectedRecommendation.name,
+      meal_type: quickLogForm.meal_type,
+      quantity: quickLogForm.quantity
+    });
+
+    setIsLoading(true);
+    setError('');
+
+    try {
+      const token = localStorage.getItem('token');
+      console.log('Token exists:', !!token);
+      
+      if (!token) {
+        setError('Not authenticated. Please log in again.');
+        setIsLoading(false);
+        return;
+      }
+
+      const requestBody = {
+        food_item_id: selectedRecommendation.food_id,
+        meal_type: quickLogForm.meal_type,
+        quantity: parseFloat(quickLogForm.quantity)
+      };
+
+      console.log('Making API call with body:', JSON.stringify(requestBody));
+      console.log('API URL:', `${API_BASE_URL}/meals/log`);
+
+      const response = await fetch(`${API_BASE_URL}/meals/log`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(requestBody)
+      });
+
+      console.log('Response received - Status:', response.status, response.statusText);
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log('✅ Meal logged successfully! Response data:', data);
+        
+        // Close modal and reset
+        setShowQuickLogModal(false);
+        setSelectedRecommendation(null);
+        setError('');
+        
+        // Show success message
+        const successMessage = `✅ Successfully logged ${selectedRecommendation.name} as ${quickLogForm.meal_type}!
+
+Nutrition Added:
+• Calories: ${(selectedRecommendation.calories * quickLogForm.quantity).toFixed(0)} cal
+• Protein: ${(selectedRecommendation.protein_g * quickLogForm.quantity).toFixed(1)}g
+• Carbs: ${(selectedRecommendation.carbs_g * quickLogForm.quantity).toFixed(1)}g`;
+        
+        alert(successMessage);
+        
+        // Refresh dashboard data to show the new meal
+        console.log('Refreshing dashboard data...');
+        await loadDashboardData();
+        console.log('Dashboard refreshed!');
+      } else {
+        const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
+        console.error('❌ Error response:', errorData);
+        setError(errorData.detail || `Failed to log meal (Status: ${response.status})`);
+        alert(`❌ Failed to log meal: ${errorData.detail || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('❌ Exception while logging meal:', error);
+      console.error('Error stack:', error.stack);
+      setError('Network error: ' + error.message);
+      alert(`❌ Error logging meal: ${error.message}\n\nCheck console for details.`);
+    } finally {
+      setIsLoading(false);
+      console.log('=== Quick Meal Log Complete ===');
+    }
+  };
+
+  const closeQuickLogModal = () => {
+    setShowQuickLogModal(false);
+    setSelectedRecommendation(null);
+    setError('');
   };
 
 
@@ -2518,8 +2649,11 @@ function App() {
                       <span className="text-sm font-medium">
                         Score: {(food.recommendation_score * 100).toFixed(0)}%
                       </span>
-                      <button className="btn btn-primary btn-sm">
-                        Add to Plan
+                      <button 
+                        onClick={() => handleAddToPlan(food)}
+                        className="btn btn-primary btn-sm"
+                      >
+                        Log This Meal
                       </button>
                     </div>
                   </div>
@@ -2594,6 +2728,132 @@ function App() {
           </div>
         </div>
       </div>
+
+      {/* Quick Log Modal */}
+      {showQuickLogModal && selectedRecommendation && (
+        <div 
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0,0,0,0.8)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 999999
+          }}
+        >
+          <div 
+            style={{
+              backgroundColor: 'white',
+              padding: '24px',
+              borderRadius: '8px',
+              maxWidth: '500px',
+              width: '90%',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+              position: 'relative',
+              zIndex: 1000000
+            }}
+          >
+            <h3 className="text-xl font-bold mb-4">Log Recommended Food</h3>
+            
+            {/* Food Info */}
+            <div className="bg-gray-50 p-4 rounded-lg mb-4">
+              <h4 className="font-bold text-lg mb-2">{selectedRecommendation.name}</h4>
+              <div className="grid grid-cols-2 gap-2 text-sm text-gray-600">
+                <div>
+                  <span className="font-medium">Cuisine:</span> {selectedRecommendation.cuisine_type}
+                </div>
+                <div>
+                  <span className="font-medium">Calories:</span> {selectedRecommendation.calories} cal
+                </div>
+                <div>
+                  <span className="font-medium">Protein:</span> {selectedRecommendation.protein_g}g
+                </div>
+                <div>
+                  <span className="font-medium">Carbs:</span> {selectedRecommendation.carbs_g}g
+                </div>
+              </div>
+            </div>
+
+            {/* Meal Type Selection */}
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Meal Type
+              </label>
+              <select
+                value={quickLogForm.meal_type}
+                onChange={(e) => setQuickLogForm({...quickLogForm, meal_type: e.target.value})}
+                className="w-full p-2 border border-gray-300 rounded-lg"
+              >
+                <option value="breakfast">Breakfast</option>
+                <option value="lunch">Lunch</option>
+                <option value="dinner">Dinner</option>
+                <option value="snack">Snack</option>
+              </select>
+            </div>
+
+            {/* Quantity */}
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Quantity (servings)
+              </label>
+              <input
+                type="number"
+                min="0.5"
+                max="10"
+                step="0.5"
+                value={quickLogForm.quantity}
+                onChange={(e) => setQuickLogForm({...quickLogForm, quantity: parseFloat(e.target.value)})}
+                className="w-full p-2 border border-gray-300 rounded-lg"
+              />
+            </div>
+
+            {/* Calculated Totals */}
+            <div className="bg-blue-50 p-3 rounded-lg mb-4 text-sm">
+              <div className="font-medium mb-1">Total Nutrition:</div>
+              <div className="grid grid-cols-3 gap-2 text-gray-700">
+                <div>
+                  {(selectedRecommendation.calories * quickLogForm.quantity).toFixed(0)} cal
+                </div>
+                <div>
+                  {(selectedRecommendation.protein_g * quickLogForm.quantity).toFixed(1)}g protein
+                </div>
+                <div>
+                  {(selectedRecommendation.carbs_g * quickLogForm.quantity).toFixed(1)}g carbs
+                </div>
+              </div>
+            </div>
+
+            {/* Error Message */}
+            {error && (
+              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
+                {error}
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div className="flex gap-3">
+              <button
+                onClick={handleQuickLogMeal}
+                disabled={isLoading}
+                className="btn btn-primary flex-1"
+              >
+                {isLoading ? 'Logging...' : 'Log Meal'}
+              </button>
+              <button
+                onClick={closeQuickLogModal}
+                disabled={isLoading}
+                className="btn btn-secondary"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 

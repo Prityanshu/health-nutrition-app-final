@@ -59,7 +59,7 @@ class ChefGeniusService:
         """Generate recipe using ChefGenius agent based on available ingredients"""
         try:
             # Build the prompt for the agent
-            ingredients_str = ", ".join(ingredients)
+            ingredients_str = ", ".join(ingredients) if ingredients else "chicken, vegetables, spices"
             
             # Handle dietary restrictions more intelligently
             dietary_guidance = ""

@@ -331,9 +331,13 @@ class IntelligentRecommendationEngine:
         if health_conditions.get('hypertension'):
             query = query.filter(FoodItem.hypertension_friendly == True)
         
-        # Filter by preferred cuisines
+        # Filter by preferred cuisines (only if user has preferences)
+        # For new users without preferences, show popular/healthy options from all cuisines
         if top_cuisines:
             query = query.filter(FoodItem.cuisine_type.in_(top_cuisines))
+        else:
+            # For new users, prefer mixed/indian cuisines as defaults
+            query = query.filter(FoodItem.cuisine_type.in_(['mixed', 'indian', 'mediterranean']))
         
         # Filter out very high calorie items for better recommendations
         query = query.filter(FoodItem.calories <= 1000)
@@ -568,14 +572,16 @@ class IntelligentRecommendationEngine:
         ).all()
         
         for goal in active_goals:
-            if goal.goal_type.value == 'muscle_gain' and current_protein < 25:
+            goal_type_str = goal.goal_type.value if hasattr(goal.goal_type, 'value') else str(goal.goal_type)
+            
+            if goal_type_str == 'muscle_gain' and current_protein < 25:
                 suggestions.append({
                     'macro': 'protein',
                     'current': current_protein,
                     'suggested': 30,
                     'reason': 'Increase protein for muscle gain goal'
                 })
-            elif goal.goal_type.value == 'weight_loss' and current_carbs > 40:
+            elif goal_type_str == 'weight_loss' and current_carbs > 40:
                 suggestions.append({
                     'macro': 'carbohydrates',
                     'current': current_carbs,

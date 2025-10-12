@@ -5,6 +5,8 @@ from sqlalchemy.orm import Session
 from app.database import get_db, User
 from app.auth import authenticate_user, create_access_token, get_password_hash, ACCESS_TOKEN_EXPIRE_MINUTES, get_current_active_user
 from pydantic import BaseModel, EmailStr
+from typing import Optional
+from datetime import datetime
 
 router = APIRouter()
 
@@ -24,14 +26,16 @@ class UserResponse(BaseModel):
     id: int
     email: str
     username: str
-    full_name: str
-    age: int
-    weight: float
-    height: float
-    activity_level: str
-    health_conditions: str
-    dietary_preferences: str
+    full_name: Optional[str] = None
+    age: Optional[int] = None
+    weight: Optional[float] = None
+    height: Optional[float] = None
+    activity_level: Optional[str] = None
+    health_conditions: Optional[str] = None
+    dietary_preferences: Optional[str] = None
+    cuisine_pref: Optional[str] = None
     is_active: bool
+    created_at: datetime
 
     class Config:
         from_attributes = True

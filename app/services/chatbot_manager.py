@@ -30,8 +30,8 @@ class ChatbotManager:
         
         # Intent detection keywords
         self.intent_keywords = {
-            "chefgenius": ["ingredients", "cooking", "food"],
-            "culinaryexplorer": ["recipe", "cook", "dish", "meal", "regional", "cuisine", "kerala", "punjab", "gujarat", "tamil", "rajasthan", "mediterranean", "japanese", "mexican", "italian", "chinese", "thai", "dosa", "masala", "indian", "south indian", "north indian", "curry", "biryani", "dal", "roti", "naan", "samosa", "vada", "idli", "sambar", "chutney", "how to make", "how to cook"],
+            "chefgenius": ["ingredients", "cooking", "food", "chicken", "beef", "pork", "fish", "seafood", "meat", "protein", "lunch", "dinner", "breakfast", "snack", "eat", "have", "want", "suggest"],
+            "culinaryexplorer": ["recipe", "cook", "dish", "meal", "regional", "cuisine", "kerala", "punjab", "gujarat", "tamil", "rajasthan", "mediterranean", "japanese", "mexican", "italian", "chinese", "thai", "dosa", "masala", "indian", "south indian", "north indian", "curry", "biryani", "dal", "roti", "naan", "samosa", "vada", "idli", "sambar", "chutney", "how to make", "how to cook", "tonight", "today"],
             "budgetchef": ["budget", "cheap", "cost", "money", "affordable", "economical", "price"],
             "fitmentor": ["workout", "exercise", "fitness", "gym", "training", "muscle", "weight", "cardio", "burn", "lose", "kg", "pounds", "active"],
             "advanced_meal_planner": ["meal plan", "weekly plan", "7-day", "diet plan", "nutrition plan", "meal planning"],
@@ -41,6 +41,24 @@ class ChatbotManager:
     def detect_agent(self, query: str, conversation_history: list = None) -> str:
         """Detect which agent should handle the query based on keywords and conversation context"""
         query_lower = query.lower()
+        
+        # Priority detection for specific requests
+        meal_keywords = ["lunch", "dinner", "breakfast", "snack", "eat", "have", "want", "suggest", "tonight", "today"]
+        protein_keywords = ["chicken", "beef", "pork", "fish", "seafood", "meat", "protein"]
+        recipe_keywords = ["recipe", "cook", "how to make", "how to cook"]
+        meal_plan_keywords = ["meal plan", "weekly plan", "7-day", "diet plan", "nutrition plan", "meal planning", "day meal plan"]
+        
+        # Highest priority: meal plan requests
+        if any(phrase in query_lower for phrase in meal_plan_keywords):
+            return "advanced_meal_planner"
+        
+        # If query contains meal + protein keywords, prioritize chefgenius
+        if any(word in query_lower for word in meal_keywords) and any(word in query_lower for word in protein_keywords):
+            return "chefgenius"
+        
+        # If query contains meal + recipe keywords, use culinaryexplorer
+        if any(word in query_lower for word in meal_keywords) and any(word in query_lower for word in recipe_keywords):
+            return "culinaryexplorer"
         
         # Check conversation context first
         if conversation_history:
@@ -75,6 +93,10 @@ class ChatbotManager:
                         return "fitmentor"
                     elif "recipe" in last_response or "cook" in last_response:
                         return "chefgenius"
+            
+            # Default to chefgenius for food-related queries
+            if any(word in query_lower for word in ["food", "eat", "meal", "lunch", "dinner", "breakfast", "snack"]):
+                return "chefgenius"
             
             return "chefgenius"  # Default fallback
         
@@ -126,8 +148,8 @@ class ChatbotManager:
             self.conversation_memory[user_id] = []
         
         self.conversation_memory[user_id].append({
-            "user": message,
-            "bot": response,
+            "user": message or "",
+            "bot": response or "",
             "timestamp": datetime.now()
         })
         
@@ -141,16 +163,32 @@ class ChatbotManager:
         query_lower = user_query.lower()
         
         # Combine all previous messages for context
-        all_text = user_query + " " + " ".join([msg["user"] + " " + msg["bot"] for msg in conversation_history])
+        all_text = user_query + " " + " ".join([msg.get("user", "") + " " + msg.get("bot", "") for msg in conversation_history])
         all_text_lower = all_text.lower()
         
-        # Extract dietary info
+        # Extract dietary info and protein preferences
         if any(word in all_text_lower for word in ["vegetarian", "vegan", "no meat"]):
             context_info["dietary_restrictions"] = ["vegetarian"]
         elif any(word in all_text_lower for word in ["gluten-free", "gluten free"]):
             context_info["dietary_restrictions"] = ["gluten-free"]
         elif any(word in all_text_lower for word in ["dairy-free", "dairy free"]):
             context_info["dietary_restrictions"] = ["dairy-free"]
+        
+        # Extract protein ingredients
+        protein_ingredients = []
+        if any(word in all_text_lower for word in ["chicken", "chicken breast", "chicken thigh"]):
+            protein_ingredients.append("chicken")
+        if any(word in all_text_lower for word in ["beef", "steak", "ground beef"]):
+            protein_ingredients.append("beef")
+        if any(word in all_text_lower for word in ["fish", "salmon", "tuna", "cod"]):
+            protein_ingredients.append("fish")
+        if any(word in all_text_lower for word in ["pork", "bacon", "ham"]):
+            protein_ingredients.append("pork")
+        if any(word in all_text_lower for word in ["eggs", "egg"]):
+            protein_ingredients.append("eggs")
+        
+        if protein_ingredients:
+            context_info["ingredients"] = protein_ingredients
         
         # Extract meal info
         if any(word in all_text_lower for word in ["breakfast", "morning"]):
@@ -287,7 +325,8 @@ class ChatbotManager:
             
             message = f"I need just a bit more info:\n\n"
             for field in missing_essential:
-                message += f"• {field_prompts.get(field, f'Please specify {field}')}\n"
+                if field:  # Safety check for None values
+                    message += f"• {field_prompts.get(field, f'Please specify {field}')}\n"
             
             return {"missing": True, "message": message, "missing_fields": missing_essential, "context_info": context_info}
         
@@ -298,9 +337,10 @@ class ChatbotManager:
         try:
             user = db.query(User).filter(User.id == user_id).first()
             if not user:
+                logger.warning(f"User {user_id} not found")
                 return {}
             
-            # Parse JSON fields
+            # Parse JSON fields with safety checks
             health_conditions = []
             dietary_preferences = []
             
@@ -308,32 +348,46 @@ class ChatbotManager:
                 try:
                     health_conditions = json.loads(user.health_conditions)
                 except:
-                    health_conditions = [user.health_conditions]
+                    health_conditions = [user.health_conditions] if user.health_conditions else []
             
             if user.dietary_preferences:
                 try:
                     dietary_preferences = json.loads(user.dietary_preferences)
                 except:
-                    dietary_preferences = [user.dietary_preferences]
+                    dietary_preferences = [user.dietary_preferences] if user.dietary_preferences else []
             
-            return {
+            context = {
                 "user_id": user.id,
-                "age": user.age,
-                "weight": user.weight,
-                "height": user.height,
-                "activity_level": user.activity_level,
+                "age": user.age or 25,
+                "weight": user.weight or 70,
+                "height": user.height or 170,
+                "activity_level": user.activity_level or "moderately_active",
                 "health_conditions": health_conditions,
                 "dietary_preferences": dietary_preferences,
-                "cuisine_pref": user.cuisine_pref,
-                "full_name": user.full_name
+                "cuisine_pref": user.cuisine_pref or "indian",
+                "full_name": user.full_name or "User"
             }
+            
+            logger.info(f"User context created for user {user_id}: {context}")
+            return context
+            
         except Exception as e:
             logger.error(f"Error fetching user context: {e}")
+            import traceback
+            traceback.print_exc()
             return {}
 
     def build_agent_prompt(self, agent_name: str, user_query: str, user_context: Dict[str, Any]) -> str:
         """Build appropriate prompt for each agent"""
-        context_str = f"User Context: {json.dumps(user_context, indent=2)}\n\n"
+        # Ensure user_context is never None
+        if user_context is None:
+            user_context = {}
+        
+        try:
+            context_str = f"User Context: {json.dumps(user_context, indent=2)}\n\n"
+        except Exception as e:
+            logger.warning(f"Failed to serialize user context: {e}")
+            context_str = f"User Context: {str(user_context)}\n\n"
         
         if agent_name == "chefgenius":
             return f"{context_str}User Query: {user_query}\n\nPlease generate a recipe based on the user's preferences and available context."
@@ -354,6 +408,64 @@ class ChatbotManager:
             return f"{context_str}User Query: {user_query}\n\nPlease analyze the nutritional content and provide detailed nutrition information."
         
         return f"{context_str}User Query: {user_query}"
+    
+    def _format_meal_plan_response(self, result: Dict[str, Any]) -> str:
+        """Format meal plan response for chat interface"""
+        try:
+            if not result.get("success") or "meal_plan" not in result:
+                return str(result)
+            
+            meal_plan = result["meal_plan"]
+            meta = meal_plan.get("meta", {})
+            plan = meal_plan.get("plan", {})
+            summary = meal_plan.get("summary", {})
+            
+            # Build formatted response
+            response = "🍽️ **7-Day Meal Plan Generated Successfully!**\n\n"
+            
+            # Meta information
+            response += f"📊 **Plan Overview:**\n"
+            response += f"• Daily Calories: {meta.get('total_daily_calories', 'N/A')}\n"
+            response += f"• Meals per Day: {meta.get('meals_per_day', 'N/A')}\n"
+            response += f"• Budget: ₹{meta.get('budget_per_day', 'N/A')} per day\n"
+            if meta.get('assumptions'):
+                response += f"• Assumptions: {meta['assumptions']}\n"
+            response += "\n"
+            
+            # Daily meal summaries (compact format)
+            response += "📅 **Daily Meal Summary:**\n"
+            for day_key in sorted(plan.keys()):
+                day_num = day_key.split('_')[1]  # Extract day number
+                day_meals = plan[day_key]
+                
+                response += f"\n**Day {day_num}:**\n"
+                for meal in day_meals:
+                    meal_name = meal.get('recipe_name', 'Unknown')
+                    calories = meal.get('macros', {}).get('calories', 'N/A')
+                    response += f"  • {meal.get('meal_label', 'Meal')}: {meal_name} ({calories} cal)\n"
+            
+            # Summary information
+            if summary:
+                response += f"\n💰 **Weekly Summary:**\n"
+                response += f"• Average Daily Cost: ₹{summary.get('avg_daily_cost', 'N/A')}\n"
+                response += f"• Average Daily Calories: {summary.get('avg_daily_calories', 'N/A')}\n"
+                
+                if summary.get('weekly_shopping_list'):
+                    response += f"\n🛒 **Key Shopping Items:**\n"
+                    for item in summary['weekly_shopping_list'][:8]:  # Show first 8 items
+                        response += f"  • {item.get('name', 'Item')} ({item.get('qty_est', 'N/A')}) - ₹{item.get('est_cost', 'N/A')}\n"
+                    if len(summary['weekly_shopping_list']) > 8:
+                        response += f"  ... and {len(summary['weekly_shopping_list']) - 8} more items\n"
+            
+            response += f"\n💡 **Tip:** {summary.get('progression_tip', 'Enjoy your healthy meals!')}\n\n"
+            response += "📝 **Note:** For detailed recipes and preparation instructions, check the full meal plan in your dashboard!"
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error formatting meal plan response: {e}")
+            # Fallback to original format if formatting fails
+            return str(result)
 
     async def handle_query(self, user_id: int, user_query: str, db: Session) -> Dict[str, Any]:
         """Main method to handle user queries and route to appropriate agent"""
@@ -518,7 +630,7 @@ class ChatbotManager:
                         "fallback": True
                     }
             
-            # Extract response text for memory
+            # Extract response text for memory with safety checks
             response_text = result
             if isinstance(result, dict):
                 if "data" in result:
@@ -527,11 +639,23 @@ class ChatbotManager:
                     response_text = result["message"]
                 elif "recipe" in result:
                     response_text = result["recipe"]
+                elif agent_name == "advanced_meal_planner":
+                    # Format meal plan response nicely for chat
+                    logger.info(f"Formatting meal plan response for agent: {agent_name}")
+                    if isinstance(result, dict) and result.get("success") and "meal_plan" in result:
+                        response_text = self._format_meal_plan_response(result)
+                    else:
+                        logger.warning(f"Meal plan response format unexpected: {type(result)}, keys: {list(result.keys()) if isinstance(result, dict) else 'Not a dict'}")
+                        response_text = str(result)
                 else:
                     response_text = str(result)
             
+            # Ensure response_text is never None
+            if response_text is None:
+                response_text = "No response available"
+            
             # Add to memory
-            self.add_to_memory(user_id, user_query, response_text)
+            self.add_to_memory(user_id, user_query, str(response_text))
             
             return {
                 "success": True,

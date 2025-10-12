@@ -1,7 +1,7 @@
 import logging
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Union
 from sqlalchemy.orm import Session
 
 from app.database import get_db, User
@@ -20,7 +20,7 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     success: bool
-    response: Dict[str, Any]
+    response: Union[str, Dict[str, Any]]
     agent_used: str
     user_context: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
@@ -44,33 +44,21 @@ async def chat(
     - Context from previous interactions
     """
     try:
-        # Use authenticated user's ID
-        user_id = current_user.id
+        # Use the actual chatbot manager
+        result = await chatbot_manager.handle_query(current_user.id, request.query, db)
         
-        # Handle the query
-        result = await chatbot_manager.handle_query(
-            user_id=user_id,
-            user_query=request.query,
-            db=db
+        return ChatResponse(
+            success=result.get("success", True),
+            response=result.get("response", "I'm here to help with your nutrition and fitness goals!"),
+            agent_used=result.get("agent_used", "general"),
+            user_context=result.get("user_context"),
+            error=result.get("error")
         )
-        
-        if result["success"]:
-            return ChatResponse(
-                success=True,
-                response=result["response"],
-                agent_used=result["agent_used"],
-                user_context=result.get("user_context")
-            )
-        else:
-            return ChatResponse(
-                success=False,
-                response={},
-                agent_used=result.get("agent_used", "unknown"),
-                error=result.get("error", "Unknown error occurred")
-            )
             
     except Exception as e:
         logger.error(f"Error in chat endpoint: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Chatbot error: {str(e)}")
 
 @router.get("/agents", response_model=list[AgentInfo])
