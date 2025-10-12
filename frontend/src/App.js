@@ -4136,7 +4136,7 @@ Nutrition Added:
   );
 
   const renderDashboard = () => (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gradient-premium">
       {/* Header */}
       <header className="app-header">
         <div className="container mx-auto px-4 py-4">
@@ -4145,7 +4145,7 @@ Nutrition Added:
               {activeView !== 'dashboard' && (
                 <button
                   onClick={() => setActiveView('dashboard')}
-                  className="mr-4 flex items-center text-gray-600 hover:text-gray-900"
+                  className="btn btn-secondary mr-4"
                 >
                   <ArrowLeft size={20} className="mr-2" />
                   Back to Dashboard
@@ -4157,7 +4157,7 @@ Nutrition Added:
               >
                 {sidebarOpen ? <X size={24} /> : <Menu size={24} />}
               </button>
-              <h1 className="header-title text-2xl font-bold">Nutrition App</h1>
+              <h1 className="header-title text-2xl font-display">Nutrition App</h1>
             </div>
             <div className="flex items-center gap-4">
               <span className="welcome-text">Welcome, {user?.full_name || user?.username}</span>
@@ -4300,106 +4300,84 @@ Nutrition Added:
 
         {/* Quick Actions */}
         <div className="mt-8">
-          <h2 className="text-xl font-bold mb-4">Quick Actions</h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
+          <h2 className="text-xl font-bold mb-4 font-display text-primary">Quick Actions</h2>
+          <div className="quick-actions">
             <button 
-              className="card hover:shadow-lg transition-shadow cursor-pointer"
+              className="quick-action-item"
               onClick={() => setActiveView('log-meal')}
             >
-              <div className="text-center">
-                <Utensils className="mx-auto mb-2" size={32} />
-                <div className="font-medium">Log Meal</div>
-              </div>
+              <span className="icon">🍽️</span>
+              <span className="text">Log Meal</span>
             </button>
             <button 
-              className="card hover:shadow-lg transition-shadow cursor-pointer"
+              className="quick-action-item"
               onClick={() => setActiveView('set-goals')}
             >
-              <div className="text-center">
-                <Target className="mx-auto mb-2" size={32} />
-                <div className="font-medium">Set Goals</div>
-              </div>
+              <span className="icon">🎯</span>
+              <span className="text">Set Goals</span>
             </button>
             <button 
-              className="card hover:shadow-lg transition-shadow cursor-pointer"
+              className="quick-action-item"
               onClick={() => setActiveView('view-progress')}
             >
-              <div className="text-center">
-                <TrendingUp className="mx-auto mb-2" size={32} />
-                <div className="font-medium">View Progress</div>
-              </div>
+              <span className="icon">📊</span>
+              <span className="text">View Progress</span>
             </button>
             <button 
-              className="card hover:shadow-lg transition-shadow cursor-pointer"
+              className="quick-action-item"
               onClick={() => setActiveView('ml-recommendations')}
             >
-              <div className="text-center">
-                <Brain className="mx-auto mb-2" size={32} />
-                <div className="font-medium">AI Recommendations</div>
-              </div>
+              <span className="icon">🧠</span>
+              <span className="text">AI Recommendations</span>
             </button>
             <button 
-              className="card hover:shadow-lg transition-shadow cursor-pointer"
+              className="quick-action-item"
               onClick={() => setActiveView('ai-recipes')}
             >
-              <div className="text-center">
-                <ChefHat className="mx-auto mb-2" size={32} />
-                <div className="font-medium">AI Recipe Generator</div>
-              </div>
+              <span className="icon">👨‍🍳</span>
+              <span className="text">AI Recipe Generator</span>
             </button>
             <button 
-              className="card hover:shadow-lg transition-shadow cursor-pointer"
+              className="quick-action-item"
               onClick={() => setActiveView('fitmentor')}
             >
-              <div className="text-center">
-                <Target className="mx-auto mb-2" size={32} />
-                <div className="font-medium">FitMentor</div>
-              </div>
+              <span className="icon">💪</span>
+              <span className="text">FitMentor</span>
             </button>
             <button 
-              className="card hover:shadow-lg transition-shadow cursor-pointer"
+              className="quick-action-item"
               onClick={() => setActiveView('budgetchef')}
             >
-              <div className="text-center">
-                <Utensils className="mx-auto mb-2" size={32} />
-                <div className="font-medium">BudgetChef</div>
-          </div>
+              <span className="icon">💰</span>
+              <span className="text">BudgetChef</span>
             </button>
             <button 
-              className="card hover:shadow-lg transition-shadow cursor-pointer"
+              className="quick-action-item"
               onClick={() => setActiveView('culinaryexplorer')}
             >
-              <div className="text-center">
-                <Globe className="mx-auto mb-2" size={32} />
-                <div className="font-medium">CulinaryExplorer</div>
-        </div>
+              <span className="icon">🌍</span>
+              <span className="text">CulinaryExplorer</span>
             </button>
             <button 
-              className="card hover:shadow-lg transition-shadow cursor-pointer"
+              className="quick-action-item"
               onClick={() => setActiveView('advancedmealplanner')}
             >
-              <div className="text-center">
-                <Calendar className="mx-auto mb-2" size={32} />
-                <div className="font-medium">Advanced Planner</div>
-              </div>
+              <span className="icon">📅</span>
+              <span className="text">Advanced Planner</span>
             </button>
             <button 
-              className="card hover:shadow-lg transition-shadow cursor-pointer"
+              className="quick-action-item"
               onClick={() => setActiveView('chatbot')}
             >
-              <div className="text-center">
-                <Brain className="mx-auto mb-2" size={32} />
-                <div className="font-medium">AI Chatbot</div>
-              </div>
+              <span className="icon">🤖</span>
+              <span className="text">AI Chatbot</span>
             </button>
             <button 
-              className="card hover:shadow-lg transition-shadow cursor-pointer"
+              className="quick-action-item"
               onClick={() => setActiveView('enhanced-challenges')}
             >
-              <div className="text-center">
-                <Award className="mx-auto mb-2" size={32} />
-                <div className="font-medium">Smart Challenges</div>
-              </div>
+              <span className="icon">🏆</span>
+              <span className="text">Smart Challenges</span>
             </button>
           </div>
         </div>
@@ -4408,7 +4386,7 @@ Nutrition Added:
   );
 
   const renderChatbot = () => (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gradient-premium">
       {/* Header */}
       <header className="app-header">
         <div className="container mx-auto px-4 py-4">
@@ -4421,7 +4399,7 @@ Nutrition Added:
                 <ArrowLeft size={20} className="mr-2" />
                 Back to Dashboard
               </button>
-              <h1 className="header-title text-2xl font-bold">AI Chatbot Assistant</h1>
+              <h1 className="header-title text-2xl font-display">AI Chatbot Assistant</h1>
             </div>
             <div className="flex items-center gap-4">
               <span className="welcome-text">Welcome, {user?.full_name || user?.username}</span>
