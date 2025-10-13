@@ -2,11 +2,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from app.database import get_db, User, FoodItem, MealLog
 from app.auth import get_current_active_user
+from app.services.automatic_challenge_updater import automatic_challenge_updater
 from pydantic import BaseModel
 from datetime import datetime
 from typing import List, Optional
+import logging
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 class MealLogRequest(BaseModel):
     food_item_id: int
@@ -60,6 +63,20 @@ async def log_meal(
     db.add(meal_log_entry)
     db.commit()
     db.refresh(meal_log_entry)
+    
+    # Automatically update smart challenges
+    try:
+        challenge_update_result = await automatic_challenge_updater.update_challenges_on_meal_log(
+            user_id=current_user.id,
+            meal_log=meal_log_entry,
+            food_item=food_item,
+            db=db
+        )
+        if challenge_update_result.get('success'):
+            logger.info(f"Automatically updated {challenge_update_result.get('count', 0)} challenges")
+    except Exception as e:
+        logger.error(f"Error auto-updating challenges: {e}")
+        # Don't fail the meal logging if challenge update fails
     
     return MealLogResponse(
         id=meal_log_entry.id,

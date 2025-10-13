@@ -13,6 +13,13 @@ from app.database import FoodItem, MealLog
 load_dotenv()
 logger = logging.getLogger(__name__)
 
+# Import automatic challenge updater
+try:
+    from app.services.automatic_challenge_updater import automatic_challenge_updater
+except ImportError:
+    logger.warning("Could not import automatic_challenge_updater")
+    automatic_challenge_updater = None
+
 class NutrientAnalyzerService:
     def __init__(self):
         self.nutrient_agent = Agent(
@@ -364,6 +371,24 @@ class NutrientAnalyzerService:
             db.refresh(meal_log)
             
             logger.info(f"Logged meal: {food_name} for user {user_id}")
+            
+            # Automatically update smart challenges
+            if automatic_challenge_updater:
+                try:
+                    import asyncio
+                    challenge_update_result = asyncio.run(
+                        automatic_challenge_updater.update_challenges_on_meal_log(
+                            user_id=user_id,
+                            meal_log=meal_log,
+                            food_item=food_item,
+                            db=db
+                        )
+                    )
+                    if challenge_update_result.get('success'):
+                        logger.info(f"Automatically updated {challenge_update_result.get('count', 0)} challenges")
+                except Exception as e:
+                    logger.error(f"Error auto-updating challenges: {e}")
+                    # Don't fail the meal logging if challenge update fails
 
             # Return the logged meal data using actual database values
             meal_log_data = {
