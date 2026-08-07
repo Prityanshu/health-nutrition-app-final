@@ -15,6 +15,18 @@ import {
   Globe
 } from 'lucide-react';
 import './index.css';
+import AppShell from './components/AppShell';
+import Dashboard from './components/Dashboard';
+import GoalSetup from './components/GoalSetup';
+import WeightCheckIn from './components/WeightCheckIn';
+import Progress from './components/Progress';
+import ForYou from './components/ForYou';
+import ChefGenius from './components/ChefGenius';
+import FitMentor from './components/FitMentor';
+import BudgetChef from './components/BudgetChef';
+import Explorer from './components/Explorer';
+import MealPlanner from './components/MealPlanner';
+import renderMarkdown from './components/markdown';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8001/api';
 
@@ -40,7 +52,9 @@ function App() {
     age: 25,
     weight: 70,
     height: 170,
-    activity_level: 'moderately_active'
+    activity_level: 'moderately_active',
+    // Feeds the BMR calculation when goals are set later.
+    sex: ''
   });
 
   // Dashboard data
@@ -48,7 +62,8 @@ function App() {
     dailyStats: null,
     recentMeals: [],
     challenges: [],
-    goals: []
+    goals: [],
+    weight: null
   });
 
   // Navigation state
@@ -653,6 +668,21 @@ function App() {
       if (mealsResponse.ok) {
         const meals = await mealsResponse.json();
         setDashboardData(prev => ({ ...prev, recentMeals: meals }));
+      }
+
+      // Fetch the active goal. Without this the dashboard had no targets to
+      // compare against and silently fell back to generic placeholder numbers.
+      const goalsResponse = await fetch(`${API_BASE_URL}/goals/?active_only=true`, { headers });
+      if (goalsResponse.ok) {
+        const goals = await goalsResponse.json();
+        setDashboardData(prev => ({ ...prev, goals }));
+      }
+
+      // Weight history powers the trend and the progress-to-target bar.
+      const weightResponse = await fetch(`${API_BASE_URL}/goals/weight/history?days=180`, { headers });
+      if (weightResponse.ok) {
+        const weight = await weightResponse.json();
+        setDashboardData(prev => ({ ...prev, weight }));
       }
 
       // Fetch Smart Challenges only if not skipped and not recently updated (to avoid overwriting recently updated challenges)
@@ -2006,6 +2036,23 @@ Nutrition Added:
             </div>
           </div>
 
+          {/* Used by the Mifflin-St Jeor BMR equation when calculating goal
+              targets. Optional, but the estimate is more accurate with it. */}
+          <div>
+            <label className="block text-sm font-medium mb-1">
+              Sex <span style={{ color: '#888', fontWeight: 400 }}>(for calorie estimates)</span>
+            </label>
+            <select
+              className="form-input"
+              value={registerForm.sex}
+              onChange={(e) => setRegisterForm({...registerForm, sex: e.target.value})}
+            >
+              <option value="">Prefer not to say</option>
+              <option value="male">Male</option>
+              <option value="female">Female</option>
+            </select>
+          </div>
+
           {error && (
             <div className="text-red-600 text-sm text-center">{error}</div>
           )}
@@ -2945,38 +2992,19 @@ Nutrition Added:
     </div>
   );
 
-  const renderAIRecipes = () => (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white shadow">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center">
-              <button
-                onClick={() => setActiveView('dashboard')}
-                className="btn btn-secondary mr-4"
-              >
-                <ArrowLeft size={20} className="mr-2" />
-                Back to Dashboard
-              </button>
-              <h1 className="text-2xl font-bold text-gray-900">AI Recipe Generator</h1>
-            </div>
-            <div className="flex items-center gap-4">
-              <span className="welcome-text">Welcome, {user?.full_name || user?.username}</span>
-              <button
-                onClick={handleLogout}
-                className="btn btn-secondary"
-              >
-                Logout
-              </button>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      <div className="container mx-auto px-4 py-8">
-        <div className="max-w-6xl mx-auto">
-          
+  // ChefGenius - own view. Previously this UI was buried inside
+  // renderAIRecipes, which meant the specialist had no nav entry of its own
+  // while FitMentor / BudgetChef / Explorer each did.
+  const renderChefGenius = () => (
+    <div>
+      <div style={{ marginBottom: '1.5rem' }}>
+        <h1 style={{ fontSize: '1.75rem', fontWeight: 700, letterSpacing: '-0.02em' }}>
+          ChefGenius
+        </h1>
+        <p style={{ color: '#98A2B3', fontSize: '0.875rem', marginTop: 4 }}>
+          Tell it what you have and it builds a recipe around it.
+        </p>
+      </div>
           {/* ChefGenius Recipe Generator */}
           <div className="card mb-8">
             <h2 className="text-xl font-bold mb-6 flex items-center">
@@ -3126,6 +3154,87 @@ Nutrition Added:
                 </button>
             </div>
           </div>
+          {/* ChefGenius Generated Recipe */}
+          {chefgeniusRecipe && (
+            <div className="card mb-8">
+              <h2 className="text-xl font-bold mb-6 flex items-center">
+                <Brain className="mr-2" size={24} />
+                Your ChefGenius Recipe
+              </h2>
+              
+              <div className="bg-green-50 border border-green-200 rounded-lg p-6 mb-6">
+                <div className="prose max-w-none" dangerouslySetInnerHTML={{ __html: chefgeniusRecipe.recipe.replace(/\n/g, '<br>') }} />
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <h4 className="text-lg font-bold mb-4">Ingredients Used</h4>
+                  <div className="space-y-2">
+                    {chefgeniusRecipe.ingredients_used.map((ingredient, index) => (
+                      <div key={index} className="flex items-center py-2 border-b border-gray-100">
+                        <span className="text-gray-800">{ingredient}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                
+                <div>
+                  <h4 className="text-lg font-bold mb-4">Recipe Details</h4>
+                  <div className="space-y-2">
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Meal Type:</span>
+                      <span className="font-medium capitalize">{chefgeniusRecipe.meal_type}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Time Constraint:</span>
+                      <span className="font-medium">{chefgeniusRecipe.time_constraint} minutes</span>
+                    </div>
+                    {chefgeniusRecipe.dietary_restrictions.length > 0 && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Dietary Restrictions:</span>
+                        <span className="font-medium">{chefgeniusRecipe.dietary_restrictions.join(', ')}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+    </div>
+  );
+
+  const renderAIRecipes = () => (
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <header className="bg-white shadow">
+        <div className="container mx-auto px-4 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center">
+              <button
+                onClick={() => setActiveView('dashboard')}
+                className="btn btn-secondary mr-4"
+              >
+                <ArrowLeft size={20} className="mr-2" />
+                Back to Dashboard
+              </button>
+              <h1 className="text-2xl font-bold text-gray-900">AI Recipe Generator</h1>
+            </div>
+            <div className="flex items-center gap-4">
+              <span className="welcome-text">Welcome, {user?.full_name || user?.username}</span>
+              <button
+                onClick={handleLogout}
+                className="btn btn-secondary"
+              >
+                Logout
+              </button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <div className="container mx-auto px-4 py-8">
+        <div className="max-w-6xl mx-auto">
+          
 
           {/* Generated Recipe */}
           {generatedRecipe && (
@@ -3230,52 +3339,6 @@ Nutrition Added:
             </div>
           )}
 
-          {/* ChefGenius Generated Recipe */}
-          {chefgeniusRecipe && (
-            <div className="card mb-8">
-              <h2 className="text-xl font-bold mb-6 flex items-center">
-                <Brain className="mr-2" size={24} />
-                Your ChefGenius Recipe
-              </h2>
-              
-              <div className="bg-green-50 border border-green-200 rounded-lg p-6 mb-6">
-                <div className="prose max-w-none" dangerouslySetInnerHTML={{ __html: chefgeniusRecipe.recipe.replace(/\n/g, '<br>') }} />
-              </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <h4 className="text-lg font-bold mb-4">Ingredients Used</h4>
-                  <div className="space-y-2">
-                    {chefgeniusRecipe.ingredients_used.map((ingredient, index) => (
-                      <div key={index} className="flex items-center py-2 border-b border-gray-100">
-                        <span className="text-gray-800">{ingredient}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                
-                <div>
-                  <h4 className="text-lg font-bold mb-4">Recipe Details</h4>
-                  <div className="space-y-2">
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Meal Type:</span>
-                      <span className="font-medium capitalize">{chefgeniusRecipe.meal_type}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Time Constraint:</span>
-                      <span className="font-medium">{chefgeniusRecipe.time_constraint} minutes</span>
-                    </div>
-                    {chefgeniusRecipe.dietary_restrictions.length > 0 && (
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Dietary Restrictions:</span>
-                        <span className="font-medium">{chefgeniusRecipe.dietary_restrictions.join(', ')}</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
 
           {/* Recipe History */}
           {aiRecipes && aiRecipes.length > 0 && (
@@ -4551,9 +4614,9 @@ Nutrition Added:
             </div>
 
             {/* Messages */}
-            <div className="h-96 overflow-y-auto border border-gray-200 rounded-lg p-4 mb-4 bg-gray-50">
+            <div className="chat-window">
               {chatbotMessages.length === 0 ? (
-                <div className="text-center text-gray-500 py-8">
+                <div className="chat-empty">
                   <Brain size={48} className="mx-auto mb-4 text-gray-300" />
                   <p>Start a conversation with our AI assistant!</p>
                   <p className="text-sm mt-2">Try asking about recipes, meal plans, workouts, or nutrition advice.</p>
@@ -4563,38 +4626,20 @@ Nutrition Added:
                   {chatbotMessages.map((message) => (
                     <div
                       key={message.id}
-                      className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
+                      className={`chat-row ${message.type === 'user' ? 'chat-row-user' : 'chat-row-bot'}`}
                     >
                       <div
-                        className={`max-w-xs lg:max-w-2xl px-4 py-2 rounded-lg ${
-                          message.type === 'user'
-                            ? 'bg-blue-500 text-white'
-                            : 'bg-white border border-gray-200'
+                        className={`chat-bubble ${
+                          message.type === 'user' ? 'chat-bubble-user' : 'chat-bubble-bot'
                         }`}
                       >
-                        <div className={`text-sm ${message.type === 'bot' ? 'prose prose-sm max-w-none' : ''}`}>
-                          {message.type === 'bot' ? (
-                            <div 
-                              className="whitespace-pre-wrap"
-                              dangerouslySetInnerHTML={{
-                                __html: message.content
-                                  .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                                  .replace(/\*(.*?)\*/g, '<em>$1</em>')
-                                  .replace(/### (.*?)/g, '<h3 class="font-bold text-lg mt-4 mb-2">$1</h3>')
-                                  .replace(/## (.*?)/g, '<h2 class="font-bold text-xl mt-4 mb-2">$1</h2>')
-                                  .replace(/# (.*?)/g, '<h1 class="font-bold text-2xl mt-4 mb-2">$1</h1>')
-                                  .replace(/\n\n/g, '<br><br>')
-                                  .replace(/\n/g, '<br>')
-                                  .replace(/- (.*?)(?=\n|$)/g, '<li class="ml-4">$1</li>')
-                                  .replace(/(\d+)\. (.*?)(?=\n|$)/g, '<li class="ml-4">$1. $2</li>')
-                              }}
-                            />
-                          ) : (
-                            message.content
-                          )}
-                        </div>
-                        <div className={`text-xs mt-1 ${
-                          message.type === 'user' ? 'text-blue-100' : 'text-gray-500'
+                        {message.type === 'bot' ? (
+                          <div dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content) }} />
+                        ) : (
+                          <div style={{ whiteSpace: 'pre-wrap' }}>{message.content}</div>
+                        )}
+                        <div className={`chat-time ${
+                          message.type === 'user' ? 'chat-time-user' : 'chat-time-bot'
                         }`}>
                           {message.timestamp.toLocaleTimeString()}
                         </div>
@@ -4602,12 +4647,9 @@ Nutrition Added:
                     </div>
                   ))}
                   {isChatbotLoading && (
-                    <div className="flex justify-start">
-                      <div className="bg-white border border-gray-200 rounded-lg px-4 py-2">
-                        <div className="flex items-center space-x-2">
-                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
-                          <span className="text-sm text-gray-600">AI is thinking...</span>
-                        </div>
+                    <div className="chat-row chat-row-bot">
+                      <div className="chat-bubble chat-bubble-bot">
+                        <div className="chat-typing">AI is thinking...</div>
                       </div>
                     </div>
                   )}
@@ -4623,7 +4665,8 @@ Nutrition Added:
                 onChange={(e) => setChatbotInput(e.target.value)}
                 onKeyPress={(e) => e.key === 'Enter' && sendChatbotMessage()}
                 placeholder="Ask me anything about nutrition, recipes, workouts, or meal planning..."
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="form-input"
+                style={{ flex: 1 }}
                 disabled={isChatbotLoading}
               />
               <button
@@ -5232,35 +5275,76 @@ Nutrition Added:
 
   if (currentView === 'login') {
     return renderLogin();
-  } else if (currentView === 'register') {
+  }
+  if (currentView === 'register') {
     return renderRegister();
-  } else if (user) {
-    // Render different views based on activeView
-    if (activeView === 'log-meal') {
-      return renderLogMeal();
-    } else if (activeView === 'set-goals') {
-      return renderSetGoals();
-    } else if (activeView === 'view-progress') {
-      return renderViewProgress();
-    } else if (activeView === 'ml-recommendations') {
-      return renderMLRecommendations();
-    } else if (activeView === 'ai-recipes') {
-      return renderAIRecipes();
-    } else if (activeView === 'fitmentor') {
-      return renderFitMentor();
-    } else if (activeView === 'budgetchef') {
-      return renderBudgetChef();
-    } else if (activeView === 'culinaryexplorer') {
-      return renderCulinaryExplorer();
-    } else if (activeView === 'advancedmealplanner') {
-      return renderAdvancedMealPlanner();
-    } else if (activeView === 'chatbot') {
-      return renderChatbot();
-    } else if (activeView === 'enhanced-challenges') {
-      return renderEnhancedChallenges();
-    } else {
-      return renderDashboard();
-    }
+  }
+
+  if (user) {
+    // Views still using their original markup. These are rendered inside the
+    // new shell and will be converted one at a time; until then the dark-theme
+    // compatibility rules in index.css keep them legible.
+    // Goal setting is now derived, not hand-entered: the user picks an
+    // objective and the backend computes calories and macros. The old
+    // renderSetGoals form (which asked for target_protein etc.) is replaced.
+    const renderGoals = () => (
+      <div style={{ display: 'grid', gap: '1.25rem' }}>
+        <GoalSetup apiBase={API_BASE_URL} onGoalSaved={() => loadDashboardData()} />
+        <WeightCheckIn apiBase={API_BASE_URL} onLogged={() => loadDashboardData()} />
+      </div>
+    );
+
+    const renderProgress = () => (
+      <Progress
+        apiBase={API_BASE_URL}
+        dashboardData={dashboardData}
+        onNavigate={setActiveView}
+      />
+    );
+
+    const legacyViews = {
+      'log-meal': renderLogMeal,
+      'set-goals': renderGoals,
+      'view-progress': renderProgress,
+      'ml-recommendations': () => (
+        <ForYou apiBase={API_BASE_URL} onNavigate={setActiveView} />
+      ),
+      // 'ai-recipes' intentionally unrouted - the page had no working content.
+      chefgenius: () => (
+        <ChefGenius apiBase={API_BASE_URL} onNavigate={setActiveView} />
+      ),
+      fitmentor: () => <FitMentor apiBase={API_BASE_URL} onNavigate={setActiveView} />,
+      budgetchef: () => <BudgetChef apiBase={API_BASE_URL} onNavigate={setActiveView} />,
+      culinaryexplorer: () => <Explorer apiBase={API_BASE_URL} onNavigate={setActiveView} />,
+      advancedmealplanner: () => <MealPlanner apiBase={API_BASE_URL} onNavigate={setActiveView} />,
+      chatbot: renderChatbot,
+      'enhanced-challenges': renderEnhancedChallenges,
+    };
+
+    const body =
+      activeView === 'dashboard' || !legacyViews[activeView] ? (
+        <Dashboard
+          user={user}
+          dashboardData={dashboardData}
+          onNavigate={setActiveView}
+          isLoading={isLoading}
+        />
+      ) : (
+        legacyViews[activeView]()
+      );
+
+    return (
+      <AppShell
+        activeView={activeView}
+        onNavigate={setActiveView}
+        user={user}
+        onLogout={handleLogout}
+        sidebarOpen={sidebarOpen}
+        setSidebarOpen={setSidebarOpen}
+      >
+        {body}
+      </AppShell>
+    );
   }
 
   return null;

@@ -1,7 +1,7 @@
 import logging
+from typing import Dict
 from agno.agent import Agent
 from app.models.groq_with_fallback import GroqWithFallback
-from agno.tools.exa import ExaTools
 from dotenv import load_dotenv
 from textwrap import dedent
 import json
@@ -21,11 +21,16 @@ except ImportError:
     automatic_challenge_updater = None
 
 class NutrientAnalyzerService:
+    # Bounded in-memory cache of nutrition lookups. Modest size because a few
+    # hundred distinct foods covers ordinary use, and each entry is small.
+    _CACHE_MAX = 500
+
     def __init__(self):
+        self._cache: Dict[str, dict] = {}
         self.nutrient_agent = Agent(
             name="NutrientAnalyzer",
             tools=[],  # Removed ExaTools due to potential API errors
-            model=GroqWithFallback(id="llama-3.3-70b-versatile"),
+            model=GroqWithFallback(),
             description=dedent("""\
                 You are NutrientAnalyzer, a health-focused nutrition expert. 🥦📊
 
@@ -67,16 +72,36 @@ class NutrientAnalyzerService:
             markdown=True,
         )
 
+    @staticmethod
+    def _cache_key(food_name: str, serving_size: str) -> str:
+        """Normalised key so 'Paneer' / ' paneer ' / 'PANEER' share an entry."""
+        return f"{(food_name or '').strip().lower()}|{(serving_size or '').strip().lower()}"
+
     def analyze_food_nutrition(self, food_name: str, serving_size: str) -> dict:
-        """Analyze nutrition for a given food and serving size"""
+        """
+        Analyze nutrition for a given food and serving size.
+
+        Results are cached in memory. The nutritional content of a given food at
+        a given serving size does not change between requests, so re-asking the
+        model is pure waste - and this is the single most repeated query in the
+        app. The cache is per-process and bounded; it is not shared across
+        workers, which is fine because a miss just costs one normal call.
+        """
+        key = self._cache_key(food_name, serving_size)
+        cached = self._cache.get(key)
+        if cached is not None:
+            logger.info("NutrientAnalyzer cache HIT for %r", key)
+            # Copy so a caller mutating the result cannot corrupt the cache.
+            return dict(cached)
+
         try:
             prompt = f"""Analyze the nutritional content for:
             Food: {food_name}
             Serving Size: {serving_size}
-            
+
             Please provide a complete nutritional breakdown including calories, macronutrients, and key micronutrients.
             Format the response as a structured analysis that can be easily parsed."""
-            
+
             logger.info(f"NutrientAnalyzer prompt: {prompt}")
             response = self.nutrient_agent.run(prompt)
             logger.info(f"NutrientAnalyzer raw response: {response}")
@@ -87,13 +112,22 @@ class NutrientAnalyzerService:
             # Parse the response to extract structured data
             parsed_nutrients = self._parse_nutrient_response(analysis, food_name, serving_size)
             
-            return {
+            result = {
                 "success": True,
                 "food_name": food_name,
                 "serving_size": serving_size,
                 "raw_analysis": analysis,
                 "parsed_nutrients": parsed_nutrients
             }
+
+            # Only successful analyses are cached. Caching a rate-limit failure
+            # would keep returning it long after the quota recovered.
+            if len(self._cache) >= self._CACHE_MAX:
+                self._cache.pop(next(iter(self._cache)))  # drop oldest
+            self._cache[key] = dict(result)
+            logger.info("NutrientAnalyzer cached %r (%d entries)", key, len(self._cache))
+
+            return result
         except Exception as e:
             error_msg = str(e)
             if "rate_limit_exceeded" in error_msg or "Rate limit reached" in error_msg:

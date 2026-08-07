@@ -1,114 +1,182 @@
 """
-Custom Groq model with API key fallback support
+Groq model with automatic API-key fallback.
+
+WHY THIS IS A SUBCLASS (and not a wrapper):
+The previous implementation was a wrapper class that put its retry logic in a
+method called `run()`, and delegated everything else via `__getattr__`.
+But agno's Agent never calls `model.run()` - it calls `model.response()`,
+`model.aresponse()`, `model.response_stream()` and `model.aresponse_stream()`
+(see agno/agent/agent.py). Those calls fell straight through `__getattr__` to
+the underlying Groq client, so the retry/key-rotation code never executed and
+a rate-limited key would simply raise.
+
+Subclassing agno's Groq and overriding the four real entry points means the
+fallback fires on the path the Agent actually uses.
 """
 
 import logging
-from typing import Optional, Any, Dict
+from typing import Any, Dict, List
+
 from agno.models.groq import Groq
-from app.config.groq_config import groq_config, handle_groq_error, mark_groq_success
+
+from app.config.groq_config import (
+    get_model_id,
+    groq_config,
+    handle_groq_error,
+    mark_groq_success,
+)
 
 logger = logging.getLogger(__name__)
 
-class GroqWithFallback:
-    """Groq model wrapper with automatic API key fallback"""
-    
-    def __init__(self, id: str = "llama-3.3-70b-versatile", **kwargs):
-        self.model_id = id
-        self.kwargs = kwargs
-        self._current_model = None
-        self._initialize_model()
-    
-    def _initialize_model(self):
-        """Initialize the Groq model with the current API key"""
+# Error substrings that indicate "this key is exhausted, try the next one".
+# Anything not in this list is a genuine error and is raised immediately
+# rather than burning through every key for nothing.
+_RETRYABLE = (
+    "rate_limit_exceeded",
+    "rate limit",
+    "quota exceeded",
+    "too many requests",
+    "high usage",
+    "429",
+    "unauthorized",
+    "invalid api key",
+    "invalid_api_key",
+    "authentication",
+)
+
+
+def _is_retryable(error: Exception) -> bool:
+    msg = str(error).lower()
+    return any(phrase in msg for phrase in _RETRYABLE)
+
+
+class GroqWithFallback(Groq):
+    """Groq model that rotates through configured API keys on rate-limit errors."""
+
+    def __init__(self, id: str = None, **kwargs):
+        id = id or get_model_id()
         api_key = groq_config.get_current_api_key()
         if not api_key:
-            raise ValueError("No Groq API keys available")
-        
-        # Set the API key in environment for the Groq model
-        import os
-        os.environ['GROQ_API_KEY'] = api_key
-        
-        try:
-            self._current_model = Groq(id=self.model_id, **self.kwargs)
-            logger.info(f"Initialized Groq model with API key: {groq_config.api_keys[groq_config.current_key_index].name}")
-        except Exception as e:
-            logger.error(f"Failed to initialize Groq model: {e}")
-            handle_groq_error(e)
-            raise
-    
-    def _reinitialize_if_needed(self):
-        """Reinitialize the model if the API key has changed"""
-        current_api_key = groq_config.get_current_api_key()
-        if not current_api_key:
+            raise ValueError(
+                "No Groq API keys available. Set GROQ_API_KEY (and optionally "
+                "GROQ_API_KEY_2 / GROQ_API_KEY_3) in your environment."
+            )
+        super().__init__(id=id, api_key=api_key, **kwargs)
+
+    def _apply_current_key(self) -> bool:
+        """
+        Point this model at whatever key groq_config currently considers active.
+
+        Returns True if the key changed. Clearing `client` / `async_client` is
+        required because agno's Groq caches the constructed client and would
+        otherwise keep using the old key.
+        """
+        new_key = groq_config.get_current_api_key()
+        if not new_key:
             raise ValueError("No active Groq API keys available")
-        
-        # Check if we need to reinitialize
-        import os
-        if os.environ.get('GROQ_API_KEY') != current_api_key:
-            os.environ['GROQ_API_KEY'] = current_api_key
-            self._current_model = Groq(id=self.model_id, **self.kwargs)
-            logger.info(f"Reinitialized Groq model with new API key: {groq_config.api_keys[groq_config.current_key_index].name}")
-    
-    def run(self, *args, **kwargs) -> Any:
-        """Run the model with automatic fallback on errors"""
-        max_retries = len(groq_config.api_keys)  # Try each key once
+
+        if new_key != self.api_key:
+            self.api_key = new_key
+            self.client = None
+            self.async_client = None
+            logger.info("Rotated to Groq API key: %s", self._current_key_name())
+            return True
+        return False
+
+    def _current_key_name(self) -> str:
+        try:
+            return groq_config.api_keys[groq_config.current_key_index].name
+        except (IndexError, AttributeError):
+            return "unknown"
+
+    def _attempts(self) -> int:
+        return max(1, len(groq_config.api_keys))
+
+    # ---- sync paths -----------------------------------------------------
+
+    def response(self, *args, **kwargs):
         last_error = None
-        
-        for attempt in range(max_retries):
+        for attempt in range(self._attempts()):
             try:
-                # Ensure we're using the current API key
-                self._reinitialize_if_needed()
-                
-                # Run the model
-                result = self._current_model.run(*args, **kwargs)
-                
-                # Mark success if we get here
+                self._apply_current_key()
+                result = super().response(*args, **kwargs)
                 mark_groq_success()
                 return result
-                
             except Exception as e:
                 last_error = e
-                error_msg = str(e).lower()
-                
-                # Check if this is a rate limit or API key error
-                if any(phrase in error_msg for phrase in [
-                    "rate_limit_exceeded", 
-                    "rate limit", 
-                    "quota exceeded", 
-                    "too many requests",
-                    "high usage",
-                    "429",
-                    "unauthorized",
-                    "invalid api key",
-                    "api key"
-                ]):
-                    logger.warning(f"API error on attempt {attempt + 1}: {e}")
-                    handle_groq_error(e)
-                    
-                    # If we have more keys to try, continue
-                    if attempt < max_retries - 1:
-                        logger.info(f"Retrying with next API key...")
-                        continue
-                else:
-                    # For non-API errors, don't retry
-                    logger.error(f"Non-API error: {e}")
-                    raise e
-        
-        # If we get here, all keys failed
-        logger.error(f"All API keys failed. Last error: {last_error}")
+                if not _is_retryable(e):
+                    logger.error("Non-retryable Groq error: %s", e)
+                    raise
+                logger.warning(
+                    "Groq key '%s' failed (attempt %d/%d): %s",
+                    self._current_key_name(), attempt + 1, self._attempts(), e,
+                )
+                handle_groq_error(e)
+        logger.error("All Groq API keys exhausted. Last error: %s", last_error)
         raise last_error
-    
-    def __getattr__(self, name):
-        """Delegate other attributes to the underlying model"""
-        if self._current_model is None:
-            self._reinitialize_if_needed()
-        return getattr(self._current_model, name)
-    
+
+    def response_stream(self, *args, **kwargs):
+        last_error = None
+        for attempt in range(self._attempts()):
+            try:
+                self._apply_current_key()
+                # Materialise lazily but surface auth/rate errors on first chunk
+                yield from super().response_stream(*args, **kwargs)
+                mark_groq_success()
+                return
+            except Exception as e:
+                last_error = e
+                if not _is_retryable(e):
+                    raise
+                logger.warning("Groq stream key failure (attempt %d): %s", attempt + 1, e)
+                handle_groq_error(e)
+        raise last_error
+
+    # ---- async paths ----------------------------------------------------
+
+    async def aresponse(self, *args, **kwargs):
+        last_error = None
+        for attempt in range(self._attempts()):
+            try:
+                self._apply_current_key()
+                result = await super().aresponse(*args, **kwargs)
+                mark_groq_success()
+                return result
+            except Exception as e:
+                last_error = e
+                if not _is_retryable(e):
+                    logger.error("Non-retryable Groq error: %s", e)
+                    raise
+                logger.warning(
+                    "Groq key '%s' failed (attempt %d/%d): %s",
+                    self._current_key_name(), attempt + 1, self._attempts(), e,
+                )
+                handle_groq_error(e)
+        logger.error("All Groq API keys exhausted. Last error: %s", last_error)
+        raise last_error
+
+    async def aresponse_stream(self, *args, **kwargs):
+        last_error = None
+        for attempt in range(self._attempts()):
+            try:
+                self._apply_current_key()
+                async for chunk in super().aresponse_stream(*args, **kwargs):
+                    yield chunk
+                mark_groq_success()
+                return
+            except Exception as e:
+                last_error = e
+                if not _is_retryable(e):
+                    raise
+                logger.warning("Groq stream key failure (attempt %d): %s", attempt + 1, e)
+                handle_groq_error(e)
+        raise last_error
+
+    # ---- introspection helpers (kept from the previous API) -------------
+
     def get_status(self) -> Dict[str, Any]:
-        """Get the current status of API keys"""
         return groq_config.get_status()
-    
-    def reset_keys(self):
-        """Reset all API keys (useful for testing)"""
+
+    def reset_keys(self) -> None:
         groq_config.reset_all_keys()
-        self._initialize_model()
+        self._apply_current_key()

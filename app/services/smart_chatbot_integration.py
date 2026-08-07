@@ -10,7 +10,7 @@ import logging
 
 from app.database import User, FoodItem, MealLog
 from app.services.enhanced_ml_recommendations import AdvancedUserProfiler, IntelligentRecommendationEngine
-from app.services.chatbot_manager import ChatbotManager
+from app.services.conversation_manager import ConversationManager
 
 logger = logging.getLogger(__name__)
 
@@ -21,34 +21,73 @@ class SmartChatbotIntegration:
         self.db = db
         self.profiler = AdvancedUserProfiler(db)
         self.recommendation_engine = IntelligentRecommendationEngine(db)
-        self.chatbot_manager = ChatbotManager()
-    
-    def get_smart_chatbot_response(self, user_id: int, user_query: str, context: Dict = None) -> Dict[str, Any]:
-        """Get chatbot response enhanced with ML recommendations"""
-        
+        self.conversation_manager = ConversationManager()
+
+    async def get_smart_chatbot_response(self, user_id: int, user_query: str, context: Dict = None) -> Dict[str, Any]:
+        """
+        Get chatbot response enhanced with ML recommendations.
+
+        This method is async because ConversationManager.handle_query is async.
+        The previous version was sync and called handle_query without awaiting
+        it, so it passed an un-awaited coroutine into _enhance_response_with_ml_insights
+        and the chatbot never actually ran.
+        """
+
         # Get user profile
         user = self.db.query(User).filter(User.id == user_id).first()
         if not user:
             return {"error": "User not found"}
-        
+
         # Get comprehensive user profile
         user_profile = self.profiler.create_comprehensive_profile(user_id)
-        
+
         # Get ML recommendations
         ml_recommendations = self.recommendation_engine.get_personalized_recommendations(user, context)
-        
+
         # Enhance chatbot context with ML data
         enhanced_context = self._enhance_chatbot_context(user_profile, ml_recommendations, context)
-        
-        # Get chatbot response
-        chatbot_response = self.chatbot_manager.handle_query(user_id, user_query, self.db)
-        
+
+        # Get chatbot response. enhanced_context used to be built here and then
+        # silently discarded - it is now actually passed to the model.
+        chatbot_response = await self.conversation_manager.handle_query(
+            user_id,
+            user_query,
+            self.db,
+            extra_context=self._summarise_context_for_prompt(enhanced_context),
+        )
+
         # Enhance response with ML insights
         enhanced_response = self._enhance_response_with_ml_insights(
             chatbot_response, user_profile, ml_recommendations, user_query
         )
-        
+
         return enhanced_response
+
+    def _summarise_context_for_prompt(self, enhanced_context: Dict) -> str:
+        """Flatten the ML context dict into a few readable prompt lines."""
+        try:
+            lines = []
+            prefs = enhanced_context.get("user_preferences", {}) or {}
+            if prefs.get("cuisine_preferences"):
+                lines.append(f"- Preferred cuisines: {prefs['cuisine_preferences']}")
+            if prefs.get("nutritional_goals"):
+                lines.append(f"- Nutritional goals: {prefs['nutritional_goals']}")
+
+            recs = enhanced_context.get("ml_recommendations", {}) or {}
+            foods = recs.get("food_recommendations") or []
+            if foods:
+                names = [
+                    f.get("name", f) if isinstance(f, dict) else str(f)
+                    for f in foods[:5]
+                ]
+                lines.append(f"- Foods this user tends to enjoy: {', '.join(map(str, names))}")
+            if recs.get("nutritional_guidance"):
+                lines.append(f"- Nutritional guidance: {recs['nutritional_guidance']}")
+
+            return "\n".join(lines)
+        except Exception as e:
+            logger.warning(f"Could not summarise ML context: {e}")
+            return ""
     
     def _enhance_chatbot_context(self, user_profile: Dict, ml_recommendations: Dict, context: Dict = None) -> Dict:
         """Enhance chatbot context with ML insights"""

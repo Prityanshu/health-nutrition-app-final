@@ -82,7 +82,7 @@ async def get_smart_chatbot_response(
     try:
         smart_integration = SmartChatbotIntegration(db)
         
-        response = smart_integration.get_smart_chatbot_response(
+        response = await smart_integration.get_smart_chatbot_response(
             user_id=current_user.id,
             user_query=query,
             context={'current_time': datetime.now()}

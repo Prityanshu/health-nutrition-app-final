@@ -19,6 +19,9 @@ class UserCreate(BaseModel):
     weight: float
     height: float
     activity_level: str = "moderately_active"
+    # Used by the BMR calculation when setting goals. Optional so existing
+    # clients keep working; falls back to a sex-neutral constant.
+    sex: Optional[str] = None
     health_conditions: str = "[]"
     dietary_preferences: str = "[]"
 
@@ -31,6 +34,7 @@ class UserResponse(BaseModel):
     weight: Optional[float] = None
     height: Optional[float] = None
     activity_level: Optional[str] = None
+    sex: Optional[str] = None
     health_conditions: Optional[str] = None
     dietary_preferences: Optional[str] = None
     cuisine_pref: Optional[str] = None
@@ -71,6 +75,7 @@ async def register(user: UserCreate, db: Session = Depends(get_db)):
         weight=user.weight,
         height=user.height,
         activity_level=user.activity_level,
+        sex=user.sex,
         health_conditions=user.health_conditions,
         dietary_preferences=user.dietary_preferences
     )

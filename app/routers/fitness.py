@@ -120,13 +120,32 @@ async def adapt_workout_plan(request: WorkoutAdaptationRequest):
     - Specific requests for changes
     """
     try:
+        # Translate any injury mentioned in the feedback into concrete exercise
+        # exclusions before it reaches the generator. FitMentor does not reason
+        # about anatomy, so passing "my knee hurts" through unchanged produced
+        # adapted plans that still contained deep squats. Non-injury feedback is
+        # returned unmodified.
+        from app.services.contraindications import expand_feedback, summarise
+
+        expanded = expand_feedback(request.feedback)
+        detected = summarise(request.feedback)
+        if detected:
+            logger.info(
+                "Injury detected in feedback: %s",
+                [i["label"] for i in detected["injuries"]],
+            )
+
         result = await fitmentor_service.adapt_workout_plan(
             current_plan=request.current_plan,
-            feedback=request.feedback,
+            feedback=expanded,
             progress_notes=request.progress_notes
         )
 
         if result["success"]:
+            # Surface what was detected so the UI can show which exercises were
+            # removed, rather than the user having to trust it silently.
+            if detected:
+                result["contraindications"] = detected
             return JSONResponse(
                 status_code=200,
                 content={

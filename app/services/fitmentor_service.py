@@ -1,7 +1,6 @@
 import logging
 from agno.agent import Agent
 from app.models.groq_with_fallback import GroqWithFallback
-from agno.tools.exa import ExaTools
 from dotenv import load_dotenv
 from textwrap import dedent
 import json
@@ -13,8 +12,7 @@ class FitMentorService:
     def __init__(self):
         self.fitness_agent = Agent(
             name="FitMentor",
-            tools=[ExaTools()],
-            model=GroqWithFallback(id="llama-3.3-70b-versatile"),
+            model=GroqWithFallback(),
             description=dedent("""\
                 You are FitMentor, a knowledgeable and motivating personal fitness coach. 🏋️‍♂️
                 

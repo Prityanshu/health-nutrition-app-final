@@ -1,7 +1,6 @@
 import logging
 from agno.agent import Agent
 from app.models.groq_with_fallback import GroqWithFallback
-from agno.tools.exa import ExaTools
 from dotenv import load_dotenv
 from textwrap import dedent
 import json
@@ -10,12 +9,43 @@ import re
 load_dotenv()
 logger = logging.getLogger(__name__)
 
+def _strip_code_fences(text: str) -> str:
+    """
+    Remove a surrounding markdown code fence, if present.
+
+    The agent is instructed to emit bare JSON but often returns it wrapped as
+    ```json … ``` regardless. That makes json.loads fail at position 0, which
+    previously fell through to brace matching - a fallback meant for genuinely
+    malformed output, not for a wrapper we can strip deterministically.
+    """
+    if not text:
+        return text
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        # Drop the opening fence and any language tag on the same line.
+        newline = cleaned.find("\n")
+        cleaned = cleaned[newline + 1:] if newline != -1 else cleaned[3:]
+        # Drop the closing fence.
+        if cleaned.rstrip().endswith("```"):
+            cleaned = cleaned.rstrip()[:-3]
+    return cleaned.strip()
+
+
 class AdvancedMealPlannerService:
     def __init__(self):
         self.advanced_meal_agent = Agent(
             name="AdvancedMealPlanner",
-            tools=[ExaTools()],  # lets the model search & validate food items if needed
-            model=GroqWithFallback(id="llama-3.3-70b-versatile"),
+            # A seven-day plan is the largest output any agent here produces:
+            # ~12,200 characters (about 3,000 tokens) at 3 meals/day, more at 5.
+            # With no explicit limit the model used its own default and stopped
+            # mid-object, which surfaced as "Agent did not return complete JSON".
+            #
+            # 6000 rather than something larger because Groq bills
+            # input + max_tokens against the daily quota regardless of how much
+            # is actually generated - so an over-generous reserve is charged on
+            # every request. 6000 covers 5 meals/day with headroom while keeping
+            # roughly 12-13 plans per key per day.
+            model=GroqWithFallback(max_tokens=6000),
             description=dedent("""\
                 You are AdvancedMealPlanner, a clinically-minded nutritionist & meal planner.
                 Your job: produce a practical, healthy 7-day meal plan tailored to the user's
@@ -99,6 +129,29 @@ class AdvancedMealPlannerService:
         equipment = ", ".join(payload.get('equipment', [])) if payload.get('equipment') else "basic stove"
         region = payload.get('region_or_cuisine') or "no specific region"
 
+        # Budget is optional. Note that .get('budget_per_day', 50.0) returns
+        # None when the key is present with a null value - the default only
+        # applies to a missing key - so the prompt would otherwise read
+        # "budget_per_day: None".
+        #
+        # A stated budget competes with the nutrition targets: constrained
+        # spending pushes the plan toward cheap, carb-heavy filler and away from
+        # the protein target. When no budget is given, say so explicitly rather
+        # than leaving the model to invent one.
+        budget = payload.get('budget_per_day')
+        if budget:
+            budget_line = (
+                f"- budget_per_day: {budget} (INR). Respect this, but do not "
+                f"sacrifice the protein target to hit it - if the two conflict, "
+                f"prioritise nutrition and note the overage in meta.assumptions."
+            )
+        else:
+            budget_line = (
+                "- budget_per_day: NOT SPECIFIED. Do not optimise for cost. "
+                "Choose whatever best meets the nutrition targets, and still fill "
+                "in est_cost fields with realistic estimates for reference."
+            )
+
         query = dedent(f"""\
             Create a 7-day meal plan JSON for the following user inputs.
             Return ONLY a single JSON object exactly matching the schema in your instructions.
@@ -107,7 +160,7 @@ class AdvancedMealPlannerService:
             - target_calories: {payload.get('target_calories', 2000)}
             - meals_per_day: {payload.get('meals_per_day', 3)}
             - food_preferences: {prefs}
-            - budget_per_day: {payload.get('budget_per_day', 50.0)}
+            {budget_line}
             - work_hours_per_day: {payload.get('work_hours_per_day', 8)}
             - dietary_restrictions: {restrictions}
             - equipment: {equipment}
@@ -133,8 +186,12 @@ class AdvancedMealPlannerService:
             agent_text = response.content if hasattr(response, 'content') else str(response)
             logger.info(f"AdvancedMealPlanner extracted text: {agent_text}")
 
-            # attempt to parse JSON from agent output
-            # agent is instructed to output pure JSON — try to parse directly.
+            # The agent is told to return pure JSON but frequently wraps it in
+            # a ```json fence anyway. Strip that before parsing rather than
+            # relying on the brace-matching fallback below, which is a last
+            # resort and cannot cope with truncation.
+            agent_text = _strip_code_fences(agent_text)
+
             try:
                 parsed = json.loads(agent_text)
             except json.JSONDecodeError:
@@ -160,9 +217,19 @@ class AdvancedMealPlannerService:
                             break
                 
                 if json_end == -1:
+                    # The object opened but never closed: the model stopped
+                    # mid-generation. Say so plainly, with the one action that
+                    # reliably helps.
+                    logger.error(
+                        "Truncated plan: %d chars, unbalanced braces", len(agent_text)
+                    )
                     return {
                         "success": False,
-                        "error": "Agent did not return complete JSON."
+                        "error": (
+                            "The plan was cut off before it finished. This happens when the "
+                            "week is too large to generate in one go - try fewer meals per day, "
+                            "then add snacks separately."
+                        )
                     }
                 
                 json_text = agent_text[json_start:json_end]

@@ -3,6 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.database import engine, Base
 from app.routers import auth, users, planner, meals, tracking, goals, recipes, gamification, ml_recommendations, fitness, budget, culinary, nutrient_analyzer, advanced_meal_planner, chatbot, enhanced_ml_router, onboarding_router, enhanced_challenges_router, api_status_router, food_rating_router, recipe_interaction_router, social_cooking_router
 from app.routers.ai_recipe_router import router as ai_recipe_router
+from app.routers.metrics_router import router as metrics_router
+from app.routers.plans import router as plans_router
+from app.middleware.performance_tracker import PerformanceTrackerMiddleware
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -13,10 +16,17 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# Add performance tracking middleware (before CORS)
+app.add_middleware(PerformanceTrackerMiddleware)
+
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001", "http://localhost:3002", "http://127.0.0.1:3000", "http://127.0.0.1:3001", "http://127.0.0.1:3002"],
+    allow_origins=[
+    "http://localhost:3000", "http://localhost:3001", "http://localhost:3002",
+    "http://127.0.0.1:3000", "http://127.0.0.1:3001", "http://127.0.0.1:3002",
+    "https://health-nutrition-app-final.vercel.app",  # your actual Vercel domain
+],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -46,6 +56,8 @@ app.include_router(api_status_router.router, prefix="/api", tags=["api-status"])
 app.include_router(food_rating_router.router, prefix="/api", tags=["food-ratings"])
 app.include_router(recipe_interaction_router.router, prefix="/api", tags=["recipe-interactions"])
 app.include_router(social_cooking_router.router, prefix="/api", tags=["social-cooking"])
+app.include_router(metrics_router, prefix="/api", tags=["performance-metrics"])
+app.include_router(plans_router, prefix="/api/plans", tags=["saved-plans"])
 
 @app.get("/")
 async def root():

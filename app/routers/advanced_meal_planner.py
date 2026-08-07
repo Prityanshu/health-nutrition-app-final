@@ -47,10 +47,19 @@ async def generate_advanced_meal_plan(request: MealPlanRequest):
             error_msg = result.get("error", "Failed to generate meal plan")
             logger.error(f"Service failed: {error_msg}")
             raise HTTPException(status_code=500, detail=error_msg)
-            
+
+    except HTTPException:
+        # Re-raise untouched. Previously this fell into the generic handler
+        # below, which wrapped it in another message - losing the specific
+        # reason the service reported.
+        raise
     except Exception as e:
-        logger.error(f"Error in generate_advanced_meal_plan endpoint: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to generate meal plan: {str(e)}")
+        # Include the exception type. Some exceptions have an empty str(), and
+        # the old message ("Failed to generate meal plan: " with nothing after
+        # the colon) told neither the user nor the log anything at all.
+        detail = f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
+        logger.error("generate_advanced_meal_plan failed: %s", detail, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Meal planner error — {detail}")
 
 @router.post("/advanced-meal-planner/adapt", status_code=200)
 async def adapt_advanced_meal_plan(request: MealPlanAdaptationRequest):

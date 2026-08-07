@@ -1,7 +1,6 @@
 import logging
 from agno.agent import Agent
 from app.models.groq_with_fallback import GroqWithFallback
-from agno.tools.exa import ExaTools
 from dotenv import load_dotenv
 from textwrap import dedent
 import json
@@ -14,7 +13,7 @@ class CulinaryExplorerService:
         self.regional_food_agent = Agent(
             name="CulinaryExplorer",
             tools=[],  # Removed ExaTools due to potential API errors
-            model=GroqWithFallback(id="llama-3.3-70b-versatile"),
+            model=GroqWithFallback(),
             description=dedent("""\
                 You are CulinaryExplorer, a culturally aware and health-focused chef. 🌍🍴
 

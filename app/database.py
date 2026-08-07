@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Database URL - Using SQLite for local development
+# Database URL - falls back to SQLite for local development
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./nutrition_app.db")
 
 # Create engine
@@ -45,6 +45,10 @@ class User(Base):
     health_conditions = Column(Text)  # JSON string of health conditions
     dietary_preferences = Column(Text)  # JSON string of preferences
     cuisine_pref = Column(String, default="mixed")  # Preferred cuisine type
+    # Needed by the Mifflin-St Jeor BMR equation, which uses a different
+    # constant for men and women (a ~166 kcal/day difference). Nullable so
+    # existing accounts keep working; "other" falls back to the midpoint.
+    sex = Column(String, nullable=True)  # male, female, other
     created_at = Column(DateTime, default=datetime.utcnow)
     is_active = Column(Boolean, default=True)
     
@@ -115,6 +119,59 @@ class MealLog(Base):
     # Relationships
     user = relationship("User", back_populates="meal_logs")
     food_item = relationship("FoodItem")
+
+class SavedPlan(Base):
+    """
+    Persisted output from the specialist agents.
+
+    Generated plans previously lived only in React state, so closing the tab -
+    or backgrounding the app on a phone, which frequently unloads it - lost the
+    plan entirely. That is the opposite of what a workout plan is for: you
+    close the app between sets and come back to it.
+
+    Storing them here also means PDF export and sharing can work from the
+    server rather than depending on whatever is currently on screen.
+    """
+    __tablename__ = "saved_plans"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    # workout | budget_meal_plan | regional | weekly_meal_plan | recipe
+    plan_type = Column(String, nullable=False, index=True)
+    title = Column(String)
+    # Markdown for most agents; the weekly planner stores rendered text and
+    # keeps its structured form in `params`.
+    content = Column(Text, nullable=False)
+    # The inputs that produced it, so it can be regenerated or explained.
+    params = Column(Text)  # JSON
+    # Only one plan per type is "current"; older ones stay as history.
+    is_current = Column(Boolean, default=True, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = relationship("User")
+
+
+class WeightLog(Base):
+    """
+    Periodic weight check-ins.
+
+    Every calorie target depends on bodyweight, and the figure captured at
+    registration goes stale quickly - which silently degrades every calculation
+    downstream. Recording weight over time means targets can be recalculated
+    against a recent measurement rather than a months-old one, and gives the
+    progress view something real to chart.
+    """
+    __tablename__ = "weight_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    weight_kg = Column(Float, nullable=False)
+    logged_at = Column(DateTime, default=datetime.utcnow, index=True)
+    note = Column(String, nullable=True)
+
+    user = relationship("User")
+
 
 class Goal(Base):
     __tablename__ = "goals"
@@ -205,6 +262,18 @@ class Recipe(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     
     # Relationships
+    user = relationship("User")
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    role = Column(String, nullable=False)  # "user" or "bot"
+    content = Column(Text)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+
+    # Relationship
     user = relationship("User")
 
 # Dependency to get database session

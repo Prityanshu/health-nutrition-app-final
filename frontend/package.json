@@ -37,5 +37,10 @@
       "last 1 safari version"
     ]
   },
-  "proxy": "http://localhost:8001"
+  "proxy": "http://localhost:8001",
+  "devDependencies": {
+    "tailwindcss": "^3.4.17",
+    "postcss": "^8.5.6",
+    "autoprefixer": "^10.4.21"
+  }
 }

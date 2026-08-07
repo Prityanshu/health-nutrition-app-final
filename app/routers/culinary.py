@@ -113,9 +113,11 @@ async def generate_regional_meal_plan(request: RegionalMealPlanRequest):
             return {"success": True, "message": "Regional meal plan generated successfully", "data": result}
         else:
             raise HTTPException(status_code=500, detail=result.get("error", "Failed to generate regional meal plan"))
+    except HTTPException:
+        raise  # keep the specific reason instead of re-wrapping it
     except Exception as e:
-        logger.error(f"Error in generate_regional_meal_plan endpoint: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to generate regional meal plan: {str(e)}")
+        logger.error("generate_regional_meal_plan failed: %s", f"{type(e).__name__}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Explorer error — {type(e).__name__}: {e}" if str(e) else f"Explorer error — {type(e).__name__}")
 
 @router.post("/culinary/generate-recipe", status_code=201)
 async def generate_regional_recipe(request: RegionalRecipeRequest):
@@ -135,9 +137,11 @@ async def generate_regional_recipe(request: RegionalRecipeRequest):
             return {"success": True, "message": "Regional recipe generated successfully", "data": result}
         else:
             raise HTTPException(status_code=500, detail=result.get("error", "Failed to generate regional recipe"))
+    except HTTPException:
+        raise  # keep the specific reason instead of re-wrapping it
     except Exception as e:
-        logger.error(f"Error in generate_regional_recipe endpoint: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to generate regional recipe: {str(e)}")
+        logger.error("generate_regional_recipe failed: %s", f"{type(e).__name__}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Explorer error — {type(e).__name__}: {e}" if str(e) else f"Explorer error — {type(e).__name__}")
 
 @router.post("/culinary/adapt-plan", status_code=200)
 async def adapt_regional_plan(request: RegionalPlanAdaptationRequest):
@@ -155,9 +159,11 @@ async def adapt_regional_plan(request: RegionalPlanAdaptationRequest):
             return {"success": True, "message": "Regional meal plan adapted successfully", "data": result}
         else:
             raise HTTPException(status_code=500, detail=result.get("error", "Failed to adapt regional meal plan"))
+    except HTTPException:
+        raise  # keep the specific reason instead of re-wrapping it
     except Exception as e:
-        logger.error(f"Error in adapt_regional_plan endpoint: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to adapt regional meal plan: {str(e)}")
+        logger.error("adapt_regional_plan failed: %s", f"{type(e).__name__}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Explorer error — {type(e).__name__}: {e}" if str(e) else f"Explorer error — {type(e).__name__}")
 
 @router.get("/culinary/cuisine-regions")
 async def get_cuisine_regions():

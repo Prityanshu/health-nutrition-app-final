@@ -10,8 +10,28 @@ from datetime import datetime
 from app.database import get_db, User
 from app.auth import get_current_user
 from app.services.ml_recommendations import IntelligentRecommendationEngine, UserPreferenceLearner
+from app.services.personalization import personalised_feed
 
 router = APIRouter()
+
+
+@router.get("/for-you")
+async def get_for_you(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Everything the For You page needs, derived from this user's own activity.
+
+    Replaces the previous recommendation endpoint, whose output was effectively
+    the same for every account. This one is computed from logged meals, the cost
+    and cuisine of those foods, the active goal's targets, the weight trend and
+    any stated restrictions - so two users with different histories get visibly
+    different results, and every suggestion carries the reason it was chosen.
+
+    Deterministic: no model call, no token cost, same answer on refresh.
+    """
+    return personalised_feed(current_user, db)
 
 @router.get("/user-preferences")
 async def get_user_preferences(

@@ -1,5 +1,9 @@
+import logging
+import os
+import secrets
 from datetime import datetime, timedelta
 from typing import Optional
+from dotenv import load_dotenv
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, status
@@ -7,10 +11,48 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from app.database import get_db, User
 
+load_dotenv()
+logger = logging.getLogger(__name__)
+
 # Configuration
-SECRET_KEY = "your-super-secret-key-change-in-production-min-32-chars"
+#
+# SECRET_KEY was previously hardcoded here, which meant anyone with access to
+# the source could mint valid tokens for any account. It now comes from the
+# environment. In production a missing key is fatal; in development we generate
+# an ephemeral one (which invalidates existing tokens on restart - that is
+# intentional, it makes the misconfiguration obvious rather than silent).
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development").lower()
+SECRET_KEY = os.getenv("SECRET_KEY")
+
+_INSECURE_DEFAULTS = {
+    "your-super-secret-key-change-in-production-2024",
+    "your-super-secret-key-change-in-production-min-32-chars",
+    "changeme",
+    "secret",
+}
+
+if SECRET_KEY and SECRET_KEY in _INSECURE_DEFAULTS:
+    logger.warning("SECRET_KEY is a known placeholder value - treating it as unset.")
+    SECRET_KEY = None
+
+if not SECRET_KEY:
+    if ENVIRONMENT == "production":
+        raise RuntimeError(
+            "SECRET_KEY environment variable must be set to a strong random value "
+            "in production. Generate one with: python -c \"import secrets; "
+            "print(secrets.token_urlsafe(48))\""
+        )
+    SECRET_KEY = secrets.token_urlsafe(48)
+    logger.warning(
+        "No SECRET_KEY set - generated a temporary one for this process. "
+        "Sessions will not survive a restart. Set SECRET_KEY in your .env file."
+    )
+
+if len(SECRET_KEY) < 32:
+    raise RuntimeError("SECRET_KEY must be at least 32 characters long.")
+
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")

@@ -1,6 +1,5 @@
 from agno.agent import Agent
 from app.models.groq_with_fallback import GroqWithFallback
-from agno.tools.exa import ExaTools
 from dotenv import load_dotenv
 from textwrap import dedent
 import logging
@@ -12,8 +11,7 @@ class ChefGeniusService:
     def __init__(self):
         self.recipe_agent = Agent(
             name="ChefGenius",
-            tools=[ExaTools()],
-            model=GroqWithFallback(id="llama-3.3-70b-versatile"),
+            model=GroqWithFallback(),
             description=dedent("""\
                 You are ChefGenius, a passionate and knowledgeable culinary expert with expertise in global cuisine! 🍳
 
