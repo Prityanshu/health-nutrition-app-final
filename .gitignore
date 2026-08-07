@@ -91,3 +91,7 @@ pids
 *.csv
 data/
 datasets/
+
+# generated reports
+comprehensive_endpoints_report.json
+endpoints_performance_report_30days_*.json
