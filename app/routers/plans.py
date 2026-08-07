@@ -324,6 +324,9 @@ async def email_plan(
         body=text_body,
         html_body=html_body,
         attachment=(filename, pdf, "pdf"),
+        # Replies should reach the user who shared the plan, not the service
+        # mailbox, which nobody reads.
+        reply_to=current_user.email,
     )
 
     if not result.success:

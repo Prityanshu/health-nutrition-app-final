@@ -15,6 +15,7 @@ import {
   Globe
 } from 'lucide-react';
 import './index.css';
+import Auth from './components/Auth';
 import AppShell from './components/AppShell';
 import Dashboard from './components/Dashboard';
 import GoalSetup from './components/GoalSetup';
@@ -37,25 +38,7 @@ function App() {
   const [error, setError] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  // Login form state
-  const [loginForm, setLoginForm] = useState({
-    username: 'chatbotuser',
-    password: 'testpass123'
-  });
-
-  // Registration form state
-  const [registerForm, setRegisterForm] = useState({
-    email: '',
-    username: '',
-    password: '',
-    full_name: '',
-    age: 25,
-    weight: 70,
-    height: 170,
-    activity_level: 'moderately_active',
-    // Feeds the BMR calculation when goals are set later.
-    sex: ''
-  });
+  // Sign-in and registration state now lives in <Auth>, which owns both forms.
 
   // Dashboard data
   const [dashboardData, setDashboardData] = useState({
@@ -703,74 +686,8 @@ function App() {
     }
   };
 
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    setIsLoading(true);
-    setError('');
-
-    try {
-      const formData = new FormData();
-      formData.append('username', loginForm.username);
-      formData.append('password', loginForm.password);
-
-      const response = await fetch(`${API_BASE_URL}/auth/login`, {
-        method: 'POST',
-        body: formData
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        localStorage.setItem('token', data.access_token);
-        
-        // Clear any previous user's data before loading new user data
-        clearUserData();
-        
-        await fetchUserData();
-      } else {
-        const errorData = await response.json();
-        const errorMessage = typeof errorData.detail === 'string' 
-          ? errorData.detail 
-          : JSON.stringify(errorData.detail) || 'Login failed';
-        setError(errorMessage);
-      }
-    } catch (error) {
-      setError('Network error. Please try again.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleRegister = async (e) => {
-    e.preventDefault();
-    setIsLoading(true);
-    setError('');
-
-    try {
-      const response = await fetch(`${API_BASE_URL}/auth/register`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(registerForm)
-      });
-
-      if (response.ok) {
-        setError('');
-        setCurrentView('login');
-        alert('Registration successful! Please log in.');
-      } else {
-        const errorData = await response.json();
-        const errorMessage = typeof errorData.detail === 'string' 
-          ? errorData.detail 
-          : JSON.stringify(errorData.detail) || 'Registration failed';
-        setError(errorMessage);
-      }
-    } catch (error) {
-      setError('Network error. Please try again.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  // handleLogin / handleRegister moved into <Auth>, which posts to the same
+  // endpoints and hands the token back through onAuthenticated.
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -1892,194 +1809,7 @@ Nutrition Added:
     }
   };
 
-  const renderLogin = () => (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
-        <div>
-          <h2 className="mt-6 text-center text-3xl font-bold text-gray-900">
-            Sign in to your account
-          </h2>
-        </div>
-        <form className="mt-8 space-y-6" onSubmit={handleLogin}>
-          <div className="space-y-4">
-            <div>
-              <label className="form-label">Email or Username</label>
-              <input
-                type="text"
-                required
-                className="form-input"
-                value={loginForm.username}
-                onChange={(e) => setLoginForm({...loginForm, username: e.target.value})}
-              />
-            </div>
-            <div>
-              <label className="form-label">Password</label>
-              <input
-                type="password"
-                required
-                className="form-input"
-                value={loginForm.password}
-                onChange={(e) => setLoginForm({...loginForm, password: e.target.value})}
-              />
-            </div>
-          </div>
-
-          {error && (
-            <div className="text-red-600 text-sm text-center">{error}</div>
-          )}
-
-          <div>
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="btn btn-primary w-full"
-            >
-              {isLoading ? 'Signing in...' : 'Sign in'}
-            </button>
-          </div>
-
-          <div className="text-center">
-            <button
-              type="button"
-              onClick={() => setCurrentView('register')}
-              className="text-blue-600 hover:text-blue-500"
-            >
-              Don't have an account? Sign up
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-
-  const renderRegister = () => (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
-        <div>
-          <h2 className="mt-6 text-center text-3xl font-bold text-gray-900">
-            Create your account
-          </h2>
-        </div>
-        <form className="mt-8 space-y-6" onSubmit={handleRegister}>
-          <div className="space-y-4">
-            <div>
-              <label className="form-label">Email</label>
-              <input
-                type="email"
-                required
-                className="form-input"
-                value={registerForm.email}
-                onChange={(e) => setRegisterForm({...registerForm, email: e.target.value})}
-              />
-            </div>
-            <div>
-              <label className="form-label">Username</label>
-              <input
-                type="text"
-                required
-                className="form-input"
-                value={registerForm.username}
-                onChange={(e) => setRegisterForm({...registerForm, username: e.target.value})}
-              />
-            </div>
-            <div>
-              <label className="form-label">Full Name</label>
-              <input
-                type="text"
-                required
-                className="form-input"
-                value={registerForm.full_name}
-                onChange={(e) => setRegisterForm({...registerForm, full_name: e.target.value})}
-              />
-            </div>
-            <div>
-              <label className="form-label">Password</label>
-              <input
-                type="password"
-                required
-                className="form-input"
-                value={registerForm.password}
-                onChange={(e) => setRegisterForm({...registerForm, password: e.target.value})}
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="form-label">Age</label>
-                <input
-                  type="number"
-                  required
-                  className="form-input"
-                  value={registerForm.age}
-                  onChange={(e) => setRegisterForm({...registerForm, age: parseInt(e.target.value)})}
-                />
-              </div>
-              <div>
-                <label className="form-label">Weight (kg)</label>
-                <input
-                  type="number"
-                  required
-                  className="form-input"
-                  value={registerForm.weight}
-                  onChange={(e) => setRegisterForm({...registerForm, weight: parseFloat(e.target.value)})}
-                />
-              </div>
-            </div>
-            <div>
-              <label className="form-label">Height (cm)</label>
-              <input
-                type="number"
-                required
-                className="form-input"
-                value={registerForm.height}
-                onChange={(e) => setRegisterForm({...registerForm, height: parseFloat(e.target.value)})}
-              />
-            </div>
-          </div>
-
-          {/* Used by the Mifflin-St Jeor BMR equation when calculating goal
-              targets. Optional, but the estimate is more accurate with it. */}
-          <div>
-            <label className="block text-sm font-medium mb-1">
-              Sex <span style={{ color: '#888', fontWeight: 400 }}>(for calorie estimates)</span>
-            </label>
-            <select
-              className="form-input"
-              value={registerForm.sex}
-              onChange={(e) => setRegisterForm({...registerForm, sex: e.target.value})}
-            >
-              <option value="">Prefer not to say</option>
-              <option value="male">Male</option>
-              <option value="female">Female</option>
-            </select>
-          </div>
-
-          {error && (
-            <div className="text-red-600 text-sm text-center">{error}</div>
-          )}
-
-          <div>
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="btn btn-primary w-full"
-            >
-              {isLoading ? 'Creating account...' : 'Create account'}
-            </button>
-          </div>
-
-          <div className="text-center">
-            <button
-              type="button"
-              onClick={() => setCurrentView('login')}
-              className="text-blue-600 hover:text-blue-500"
-            >
-              Already have an account? Sign in
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
+  // renderLogin / renderRegister removed - the <Auth> component replaces both.
 
   const renderLogMeal = () => (
     <div className="min-h-screen bg-gray-50">
@@ -5273,11 +5003,21 @@ Nutrition Added:
     </div>
   );
 
-  if (currentView === 'login') {
-    return renderLogin();
-  }
-  if (currentView === 'register') {
-    return renderRegister();
+  // Auth owns both sign-in and registration, including the switch between
+  // them, so `currentView` no longer needs a separate 'register' branch.
+  if (currentView === 'login' || currentView === 'register') {
+    return (
+      <Auth
+        apiBase={API_BASE_URL}
+        onAuthenticated={async (token) => {
+          localStorage.setItem('token', token);
+          // Wipe whatever the previous account left behind before pulling the
+          // new user's data, or the dashboard briefly shows someone else's.
+          clearUserData();
+          await fetchUserData();
+        }}
+      />
+    );
   }
 
   if (user) {

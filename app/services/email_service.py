@@ -109,6 +109,7 @@ def send_email(
     body: str,
     html_body: Optional[str] = None,
     attachment: Optional[Tuple[str, bytes, str]] = None,
+    reply_to: Optional[str] = None,
 ) -> EmailResult:
     """
     Send one message, optionally with an attachment.
@@ -116,6 +117,12 @@ def send_email(
     `attachment` is (filename, content_bytes, mime_subtype). Bytes rather than a
     file path, because the PDFs here are generated in memory and never touch
     disk.
+
+    `reply_to` should be the address of the person the message is really from -
+    the user sharing their plan, not this service account. It gives the
+    recipient somewhere useful to reply, and a message whose replies go to a
+    real human is treated more favourably by spam filters than one from an
+    unattended no-reply address.
 
     This blocks on the network. Callers inside async endpoints must run it in a
     worker thread.
@@ -131,6 +138,11 @@ def send_email(
         msg["From"] = formataddr((EMAIL_FROM_NAME, EMAIL_USER))
         msg["To"] = to_email
         msg["Subject"] = subject
+
+        # Only set Reply-To when it is a different, valid address - pointing it
+        # back at the sending account would be noise.
+        if reply_to and is_valid_email(reply_to) and reply_to.lower() != EMAIL_USER.lower():
+            msg["Reply-To"] = reply_to
 
         # Plain text first, HTML second: mail clients render the last part they
         # understand, so this gives HTML where supported and text where not.
