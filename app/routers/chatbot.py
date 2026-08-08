@@ -117,6 +117,55 @@ async def simple_chat(
         return {"response": "Sorry, I'm having trouble right now. Please try again in a moment."}
 
 
+@router.get("/status")
+async def service_status(current_user: User = Depends(get_current_active_user)):
+    """
+    Whether the assistant can actually answer right now.
+
+    The UI used to show a hardcoded "Rate Limited - Using Fallback Responses"
+    banner permanently, whatever the real state was. A warning that is always
+    on is worse than no warning: it trains people to ignore it, and it is
+    simply false most of the time. This reports the real key state, and the UI
+    shows nothing at all when everything is fine.
+    """
+    from app.config.groq_config import groq_config
+
+    try:
+        usable = [k for k in groq_config.api_keys if k.usable]
+        exhausted = groq_config.all_keys_exhausted()
+        wait_seconds = groq_config.seconds_until_available() if exhausted else 0
+
+        if not groq_config.api_keys:
+            state, message = "down", "No AI key is configured on the server."
+        elif exhausted:
+            minutes = max(1, round(wait_seconds / 60))
+            state = "down"
+            message = (
+                f"The AI service has hit its usage limit. Try again in about "
+                f"{minutes} minute{'s' if minutes != 1 else ''}."
+            )
+        elif len(usable) < len(groq_config.api_keys):
+            state = "degraded"
+            message = "Running on a backup key - replies may be slower than usual."
+        else:
+            state, message = "ready", ""
+
+        return {
+            "state": state,                  # ready | degraded | down
+            "ok": state == "ready",
+            "message": message,
+            "retry_in_seconds": int(wait_seconds),
+            "keys_usable": len(usable),
+            "keys_total": len(groq_config.api_keys),
+        }
+    except Exception as e:
+        logger.error("status check failed: %s", e, exc_info=True)
+        # Assume healthy rather than showing a scary banner because a status
+        # check broke. If the service is genuinely down the user finds out
+        # when they send a message, with a real error.
+        return {"state": "ready", "ok": True, "message": "", "retry_in_seconds": 0}
+
+
 @router.get("/opener")
 async def get_opener(
     current_user: User = Depends(get_current_active_user),

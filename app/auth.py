@@ -52,7 +52,11 @@ if len(SECRET_KEY) < 32:
     raise RuntimeError("SECRET_KEY must be at least 32 characters long.")
 
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+# 30 minutes was short enough that a session died mid-conversation: you ask the
+# coach something, get distracted, come back, and every request fails. This is a
+# personal health tracker, not a bank - a working day is a more sensible default,
+# and it can still be tightened per deployment.
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "480"))
 
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")

@@ -18,6 +18,7 @@ import './index.css';
 import Auth from './components/Auth';
 import AppShell from './components/AppShell';
 import LogMeal from './components/LogMeal';
+import Assistant from './components/Assistant';
 import Dashboard from './components/Dashboard';
 import GoalSetup from './components/GoalSetup';
 import WeightCheckIn from './components/WeightCheckIn';
@@ -40,6 +41,7 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Sign-in and registration state now lives in <Auth>, which owns both forms.
+  const [sessionExpired, setSessionExpired] = useState(false);
 
   // Dashboard data
   const [dashboardData, setDashboardData] = useState({
@@ -690,12 +692,51 @@ function App() {
   const handleLogout = () => {
     localStorage.removeItem('token');
     setUser(null);
+    setSessionExpired(false);
     setCurrentView('login');
     setActiveView('dashboard');
-    
+
     // Clear all user-specific state to prevent data leakage between users
     clearUserData();
   };
+
+  /*
+   * An expired token used to surface as whatever the screen happened to be
+   * doing - the assistant rendered "Could not validate credentials" as though
+   * the coach had said it, and other screens just went quiet. Neither tells
+   * the user the one thing they need to know, which is to sign in again.
+   *
+   * Intercepting fetch catches it everywhere at once, including screens that
+   * predate this and have no error handling of their own.
+   */
+  useEffect(() => {
+    const original = window.fetch;
+
+    window.fetch = async (...args) => {
+      const response = await original(...args);
+      try {
+        const target = typeof args[0] === 'string' ? args[0] : args[0]?.url || '';
+        const isOurApi = target.startsWith(API_BASE_URL);
+        // A failed login is a wrong password, not an expired session.
+        const isAuthAttempt = target.includes('/auth/login') || target.includes('/auth/register');
+
+        if (response.status === 401 && isOurApi && !isAuthAttempt) {
+          localStorage.removeItem('token');
+          setUser(null);
+          setSessionExpired(true);
+          setCurrentView('login');
+          setActiveView('dashboard');
+          clearUserData();
+        }
+      } catch {
+        // Never let the interceptor break the response it is inspecting.
+      }
+      return response;
+    };
+
+    return () => { window.fetch = original; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const fetchFoodItems = async () => {
     try {
@@ -4045,174 +4086,7 @@ Nutrition Added:
     </div>
   );
 
-  const renderChatbot = () => (
-    <div className="min-h-screen bg-gradient-premium">
-      {/* Header */}
-      <header className="app-header">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center">
-              <button
-                onClick={() => setActiveView('dashboard')}
-                className="btn btn-secondary mr-4"
-              >
-                <ArrowLeft size={20} className="mr-2" />
-                Back to Dashboard
-              </button>
-              <h1 className="header-title text-2xl font-display">AI Chatbot Assistant</h1>
-            </div>
-            <div className="flex items-center gap-4">
-              <span className="welcome-text">Welcome, {user?.full_name || user?.username}</span>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      <div className="container mx-auto px-4 py-8">
-        <div className="max-w-4xl mx-auto">
-          
-            {/* Service Status */}
-            <div className="card mb-6">
-              <div className="flex items-center justify-between">
-                <h2 className="text-lg font-bold flex items-center">
-                  <Brain className="mr-2" size={20} />
-                  AI Service Status
-                </h2>
-                <div className="flex items-center">
-                  <div className="w-3 h-3 bg-yellow-400 rounded-full mr-2 animate-pulse"></div>
-                  <span className="text-sm text-yellow-600">Rate Limited - Using Fallback Responses</span>
-                </div>
-              </div>
-              <p className="text-sm text-gray-600 mt-2">
-                Our AI service is currently experiencing high usage. We're providing helpful fallback responses until the service is restored.
-              </p>
-            </div>
-
-            {/* Available Agents Info */}
-          {availableAgents.length > 0 && (
-            <div className="card mb-6">
-              <h2 className="text-lg font-bold mb-4 flex items-center">
-                <Brain className="mr-2" size={20} />
-                Available AI Agents
-              </h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {availableAgents.map((agent, index) => (
-                  <div key={index} className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                    <div className="font-medium text-blue-900 capitalize">{agent.name.replace(/([A-Z])/g, ' $1').trim()}</div>
-                    <div className="text-sm text-blue-700">{agent.description}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Chat Interface */}
-          <div className="card">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-bold flex items-center">
-                <Brain className="mr-2" size={24} />
-                Chat with AI Assistant
-              </h2>
-              <button
-                onClick={clearChatbotHistory}
-                className="btn btn-secondary text-sm"
-                disabled={chatbotMessages.length === 0}
-              >
-                Clear History
-              </button>
-            </div>
-
-            {/* Messages */}
-            <div className="chat-window">
-              {chatbotMessages.length === 0 ? (
-                <div className="chat-empty">
-                  <Brain size={48} className="mx-auto mb-4 text-gray-300" />
-                  <p>Start a conversation with our AI assistant!</p>
-                  <p className="text-sm mt-2">Try asking about recipes, meal plans, workouts, or nutrition advice.</p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {chatbotMessages.map((message) => (
-                    <div
-                      key={message.id}
-                      className={`chat-row ${message.type === 'user' ? 'chat-row-user' : 'chat-row-bot'}`}
-                    >
-                      <div
-                        className={`chat-bubble ${
-                          message.type === 'user' ? 'chat-bubble-user' : 'chat-bubble-bot'
-                        }`}
-                      >
-                        {message.type === 'bot' ? (
-                          <div dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content) }} />
-                        ) : (
-                          <div style={{ whiteSpace: 'pre-wrap' }}>{message.content}</div>
-                        )}
-                        <div className={`chat-time ${
-                          message.type === 'user' ? 'chat-time-user' : 'chat-time-bot'
-                        }`}>
-                          {message.timestamp.toLocaleTimeString()}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                  {isChatbotLoading && (
-                    <div className="chat-row chat-row-bot">
-                      <div className="chat-bubble chat-bubble-bot">
-                        <div className="chat-typing">AI is thinking...</div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Input */}
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={chatbotInput}
-                onChange={(e) => setChatbotInput(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && sendChatbotMessage()}
-                placeholder="Ask me anything about nutrition, recipes, workouts, or meal planning..."
-                className="form-input"
-                style={{ flex: 1 }}
-                disabled={isChatbotLoading}
-              />
-              <button
-                onClick={sendChatbotMessage}
-                disabled={!chatbotInput.trim() || isChatbotLoading}
-                className="btn btn-primary px-6"
-              >
-                {isChatbotLoading ? 'Sending...' : 'Send'}
-              </button>
-            </div>
-
-            {/* Quick Suggestions */}
-            <div className="mt-4">
-              <p className="text-sm text-gray-600 mb-2">Try asking:</p>
-              <div className="flex flex-wrap gap-2">
-                {[
-                  "Plan a workout for muscle gain, 60 minutes, gym equipment",
-                  "I want a Kerala lunch recipe with chicken",
-                  "Create a budget meal plan for 200 rupees per day",
-                  "Analyze the nutrition in chicken curry 100g",
-                  "Suggest a 7-day meal plan for 2000 calories"
-                ].map((suggestion, index) => (
-                  <button
-                    key={index}
-                    onClick={() => setChatbotInput(suggestion)}
-                    className="text-xs bg-gray-100 hover:bg-gray-200 px-3 py-1 rounded-full transition-colors"
-                  >
-                    {suggestion}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+  // renderChatbot removed - replaced by the <Assistant> component.
 
   const renderAdvancedMealPlanner = () => (
     <div className="min-h-screen bg-gray-50">
@@ -4788,7 +4662,9 @@ Nutrition Added:
     return (
       <Auth
         apiBase={API_BASE_URL}
+        notice={sessionExpired ? 'Your session timed out. Sign in to pick up where you left off.' : ''}
         onAuthenticated={async (token) => {
+          setSessionExpired(false);
           localStorage.setItem('token', token);
           // Wipe whatever the previous account left behind before pulling the
           // new user's data, or the dashboard briefly shows someone else's.
@@ -4846,7 +4722,9 @@ Nutrition Added:
       budgetchef: () => <BudgetChef apiBase={API_BASE_URL} onNavigate={setActiveView} />,
       culinaryexplorer: () => <Explorer apiBase={API_BASE_URL} onNavigate={setActiveView} />,
       advancedmealplanner: () => <MealPlanner apiBase={API_BASE_URL} onNavigate={setActiveView} />,
-      chatbot: renderChatbot,
+      chatbot: () => (
+        <Assistant apiBase={API_BASE_URL} userName={user?.full_name || user?.username} />
+      ),
       'enhanced-challenges': renderEnhancedChallenges,
     };
 

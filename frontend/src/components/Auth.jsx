@@ -95,12 +95,14 @@ function Field({
 
 /* ------------------------------------------------------------------ main -- */
 
-export default function Auth({ apiBase, onAuthenticated }) {
+export default function Auth({ apiBase, onAuthenticated, notice: initialNotice = '' }) {
   const [mode, setMode] = useState('login');     // 'login' | 'register'
   const [step, setStep] = useState(1);           // registration step
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');      // success, e.g. after signup
+  // Seeded by the caller when the user was bounced here - an expired session
+  // needs explaining, or the login screen looks like a bug.
+  const [notice, setNotice] = useState(initialNotice);
   const firstField = useRef(null);
 
   const [login, setLogin] = useState({ username: '', password: '' });
@@ -333,8 +335,11 @@ export default function Auth({ apiBase, onAuthenticated }) {
               </header>
 
               {notice && (
-                <div className="auth-notice">
-                  <Check size={15} /> <span>{notice}</span>
+                <div className={notice === initialNotice && initialNotice ? 'auth-error' : 'auth-notice'}>
+                  {notice === initialNotice && initialNotice
+                    ? <AlertCircle size={15} />
+                    : <Check size={15} />}
+                  <span>{notice}</span>
                 </div>
               )}
 
