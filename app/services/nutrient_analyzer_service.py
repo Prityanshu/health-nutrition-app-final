@@ -1,5 +1,5 @@
 import logging
-from typing import Dict
+from typing import Dict, Optional
 from agno.agent import Agent
 from app.models.groq_with_fallback import GroqWithFallback
 from dotenv import load_dotenv
@@ -77,6 +77,109 @@ class NutrientAnalyzerService:
         """Normalised key so 'Paneer' / ' paneer ' / 'PANEER' share an entry."""
         return f"{(food_name or '').strip().lower()}|{(serving_size or '').strip().lower()}"
 
+    # Units measured by mass or volume: ask for a per-100 figure and scale.
+    _METRIC_UNITS = {
+        "g": 100.0, "gram": 100.0, "grams": 100.0, "gm": 100.0,
+        "ml": 100.0, "millilitre": 100.0, "milliliter": 100.0,
+    }
+    # Units that are simply counted: ask for one, multiply by however many.
+    _COUNT_UNITS = (
+        "piece", "pieces", "slice", "slices", "cup", "cups", "bowl", "bowls",
+        "plate", "plates", "glass", "glasses", "serving", "servings", "roti",
+        "rotis", "chapati", "chapatis", "egg", "eggs", "scoop", "scoops",
+        "tbsp", "tsp", "small", "medium", "large", "handful", "katori",
+    )
+
+    @classmethod
+    def parse_serving(cls, serving_size: str):
+        """
+        Split a serving into (base_serving, multiplier).
+
+        WHY
+        ---
+        Asking the model for "3 pieces" and then again for "1 piece" produced
+        975 and 420 kcal - and "2 pieces" produced 440. It re-estimates from
+        scratch every time and barely registers the quantity, because
+        multiplying is not what a language model is good at.
+
+        So we ask it once for a single unit and do the multiplication here.
+        Nutrition scales linearly with portion, which makes this exactly the
+        kind of arithmetic that belongs in code: same input, same answer,
+        every time, at no API cost.
+
+        Returns ("100g", 1.5) for "150g", ("1 piece", 3.0) for "3 pieces".
+        Unparseable servings fall back to (serving_size, 1.0) so behaviour
+        degrades to the old path rather than breaking.
+        """
+        raw = (serving_size or "").strip().lower()
+        if not raw:
+            return "1 serving", 1.0
+
+        match = re.match(
+            r"^\s*(\d+(?:\.\d+)?)\s*(?:/\s*\d+\s*)?([a-z]+)?", raw
+        )
+        if not match:
+            # No leading digit: "half a cup", "a bowl", "quarter plate".
+            worded = {"half": 0.5, "quarter": 0.25, "third": 0.33,
+                      "one": 1.0, "two": 2.0, "three": 3.0, "a": 1.0, "an": 1.0}
+            quantity = next(
+                (v for w, v in worded.items() if re.search(rf"(?<!\w){w}(?!\w)", raw)),
+                1.0,
+            )
+            for unit in cls._COUNT_UNITS:
+                if re.search(rf"(?<!\w){unit}(?!\w)", raw):
+                    return f"1 {unit.rstrip('s')}", quantity
+            return raw, 1.0
+
+        quantity = float(match.group(1))
+        unit = (match.group(2) or "").strip()
+
+        if quantity <= 0:
+            quantity = 1.0
+
+        if unit in cls._METRIC_UNITS:
+            base_amount = cls._METRIC_UNITS[unit]
+            return f"{base_amount:.0f}{unit}", quantity / base_amount
+
+        if unit:
+            singular = unit.rstrip("s") if unit.endswith("s") and len(unit) > 2 else unit
+            return f"1 {singular}", quantity
+
+        # A bare number - "2" of whatever the food is.
+        return "1 serving", quantity
+
+    @staticmethod
+    def _lookup_database(food_name: str):
+        """
+        Try the real food databases, returning None if nothing confident matched.
+
+        Isolated and defensive on purpose: a lookup failure must never stop a
+        meal being logged. Whatever goes wrong here, the model path still runs.
+        """
+        try:
+            from app.services.food_lookup import lookup
+            facts = lookup(food_name)
+            if facts and facts.verified:
+                logger.info(
+                    "Using %s for %r (matched %r, confidence %.2f) - no model call needed.",
+                    facts.source, food_name, facts.matched_name, facts.confidence,
+                )
+                return facts
+        except Exception as e:
+            logger.warning("Database lookup failed for %r: %s", food_name, e)
+        return None
+
+    @staticmethod
+    def _scale(nutrients: dict, factor: float) -> dict:
+        """Multiply every numeric field, leaving tags and text alone."""
+        if factor == 1.0:
+            return dict(nutrients)
+        scaled = dict(nutrients)
+        for key, value in nutrients.items():
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                scaled[key] = round(value * factor, 1)
+        return scaled
+
     def analyze_food_nutrition(self, food_name: str, serving_size: str) -> dict:
         """
         Analyze nutrition for a given food and serving size.
@@ -87,17 +190,72 @@ class NutrientAnalyzerService:
         app. The cache is per-process and bounded; it is not shared across
         workers, which is fine because a miss just costs one normal call.
         """
-        key = self._cache_key(food_name, serving_size)
+        # Always ask about ONE unit and scale here. Besides making the answer
+        # consistent, it means every portion of the same food shares a cache
+        # entry - "150g paneer" and "200g paneer" are now one API call, not two.
+        base_serving, multiplier = self.parse_serving(serving_size)
+
+        key = self._cache_key(food_name, base_serving)
         cached = self._cache.get(key)
         if cached is not None:
-            logger.info("NutrientAnalyzer cache HIT for %r", key)
-            # Copy so a caller mutating the result cannot corrupt the cache.
-            return dict(cached)
+            logger.info(
+                "NutrientAnalyzer cache HIT for %r (x%.3g for %r)",
+                key, multiplier, serving_size,
+            )
+            result = dict(cached)
+            result["serving_size"] = serving_size
+            result["parsed_nutrients"] = self._scale(cached["parsed_nutrients"], multiplier)
+            return result
+
+        # Before asking the model to remember a product, ask the database that
+        # holds its label. "Milky Mist paneer" is a real item with real printed
+        # figures; an estimate of those figures is strictly worse than the
+        # figures, and this costs ~300ms against ~10s for a model call.
+        #
+        # Only per-100g bases are eligible: databases publish per 100g, and a
+        # "1 piece" question cannot be answered from that without knowing what
+        # a piece weighs.
+        if base_serving.endswith("g") or base_serving.endswith("ml"):
+            facts = self._lookup_database(food_name)
+            if facts is not None:
+                nutrients = facts.as_nutrients()
+                base_result = {
+                    "success": True,
+                    "food_name": facts.matched_name or food_name,
+                    "serving_size": base_serving,
+                    "raw_analysis": (
+                        f"{facts.matched_name or food_name}"
+                        + (f" ({facts.brand})" if facts.brand else "")
+                        + f"\nValues published for {facts.basis}:\n"
+                        f"  Calories      {facts.calories:.0f} kcal\n"
+                        f"  Protein       {facts.protein:.1f} g\n"
+                        f"  Carbohydrates {facts.carbohydrates:.1f} g\n"
+                        f"  Fat           {facts.fat:.1f} g\n"
+                        + (f"  Fibre         {facts.fiber:.1f} g\n" if facts.fiber else "")
+                        + f"\nSource: {facts.source_label}"
+                    ),
+                    "parsed_nutrients": nutrients,
+                    "source": facts.provenance(),
+                }
+                if len(self._cache) >= self._CACHE_MAX:
+                    self._cache.pop(next(iter(self._cache)))
+                self._cache[key] = dict(base_result)
+
+                result = dict(base_result)
+                result["serving_size"] = serving_size
+                result["parsed_nutrients"] = self._scale(nutrients, multiplier)
+                return result
 
         try:
             prompt = f"""Analyze the nutritional content for:
             Food: {food_name}
-            Serving Size: {serving_size}
+            Serving Size: {base_serving}
+
+            Report the values for EXACTLY {base_serving} of {food_name} - not for a
+            larger or smaller portion, and not for a whole package.
+
+            Give a single number for each nutrient, not a range. If you are
+            uncertain, give your best single estimate.
 
             Please provide a complete nutritional breakdown including calories, macronutrients, and key micronutrients.
             Format the response as a structured analysis that can be easily parsed."""
@@ -109,24 +267,39 @@ class NutrientAnalyzerService:
             # Extract content from RunOutput
             analysis = response.content if hasattr(response, 'content') else str(response)
             
-            # Parse the response to extract structured data
-            parsed_nutrients = self._parse_nutrient_response(analysis, food_name, serving_size)
-            
-            result = {
+            # Parse the response to extract structured data. These are the
+            # per-unit figures; scaling happens after caching so the cache
+            # always holds the unscaled base.
+            base_nutrients = self._parse_nutrient_response(analysis, food_name, base_serving)
+            self._sanity_check(base_nutrients, food_name, base_serving)
+
+            base_result = {
                 "success": True,
                 "food_name": food_name,
-                "serving_size": serving_size,
+                "serving_size": base_serving,
                 "raw_analysis": analysis,
-                "parsed_nutrients": parsed_nutrients
+                "parsed_nutrients": base_nutrients,
             }
 
-            # Only successful analyses are cached. Caching a rate-limit failure
-            # would keep returning it long after the quota recovered.
-            if len(self._cache) >= self._CACHE_MAX:
-                self._cache.pop(next(iter(self._cache)))  # drop oldest
-            self._cache[key] = dict(result)
-            logger.info("NutrientAnalyzer cached %r (%d entries)", key, len(self._cache))
+            # Only successful analyses are cached, and only if they parsed to
+            # something usable - caching a zero would keep returning it. A
+            # rate-limit failure must not be cached either, or it would persist
+            # long after the quota recovered.
+            if float(base_nutrients.get("calories") or 0) > 0:
+                if len(self._cache) >= self._CACHE_MAX:
+                    self._cache.pop(next(iter(self._cache)))  # drop oldest
+                self._cache[key] = dict(base_result)
+                logger.info("NutrientAnalyzer cached %r (%d entries)", key, len(self._cache))
 
+            result = dict(base_result)
+            result["serving_size"] = serving_size
+            result["parsed_nutrients"] = self._scale(base_nutrients, multiplier)
+            if multiplier != 1.0:
+                logger.info(
+                    "Scaled %r from %s by x%.3g -> %s kcal",
+                    food_name, base_serving, multiplier,
+                    result["parsed_nutrients"].get("calories"),
+                )
             return result
         except Exception as e:
             error_msg = str(e)
@@ -140,6 +313,142 @@ class NutrientAnalyzerService:
             else:
                 logger.error(f"Error analyzing nutrition with NutrientAnalyzer: {e}")
                 return {"success": False, "error": str(e)}
+
+    # Aliases for each field, longest/most specific first so "total fat" wins
+    # over "fat" and "dietary fiber" over "fiber".
+    _NUTRIENT_ALIASES = {
+        "calories": ("calories", "calorie", "energy", "kcal"),
+        "protein": ("protein",),
+        "carbohydrates": ("total carbohydrate", "carbohydrates", "carbohydrate", "carbs", "carb"),
+        "fat": ("total fat", "fat"),
+        "fiber": ("dietary fiber", "dietary fibre", "fiber", "fibre"),
+        "sugar": ("total sugars", "sugars", "sugar"),
+        "sodium": ("sodium", "salt"),
+        "cholesterol": ("cholesterol",),
+    }
+
+    # Lines mentioning these are talking about a different nutrient than the one
+    # being searched for, so they must not be harvested by a looser alias.
+    _EXCLUDE_FOR = {
+        "fat": ("saturated", "unsaturated", "trans", "omega"),
+        "sugar": ("added sugar",),
+        "calories": ("from fat",),
+    }
+
+    @staticmethod
+    def _first_number(text: str) -> Optional[float]:
+        """
+        First quantity in a fragment, averaging ranges.
+
+        Models answer with ranges far more often than single figures -
+        "approximately 900-1050", "25-30g", "~450". Taking the lower bound
+        understates every meal, so the midpoint is used.
+        """
+        if not text:
+            return None
+        cleaned = text.replace(",", "")
+        # Range: "900-1050", "25 - 30", "25 to 30"
+        range_match = re.search(
+            r"(\d+(?:\.\d+)?)\s*(?:-|–|—|to)\s*(\d+(?:\.\d+)?)", cleaned
+        )
+        if range_match:
+            low, high = float(range_match.group(1)), float(range_match.group(2))
+            if high >= low:
+                return round((low + high) / 2, 1)
+        single = re.search(r"(\d+(?:\.\d+)?)", cleaned)
+        return float(single.group(1)) if single else None
+
+    def _scan_for(self, analysis: str, field: str) -> Optional[float]:
+        """
+        Find one nutrient anywhere in the response.
+
+        Works line by line and reads whatever follows the label, which covers
+        two-column tables (`| Protein (g) | 25-30g |`), three-column tables,
+        bullets (`- Protein: 25g`) and prose alike. The previous version
+        required a digit immediately after the word, so a units bracket between
+        them - the single most common layout - defeated it.
+        """
+        aliases = self._NUTRIENT_ALIASES[field]
+        excluded = self._EXCLUDE_FOR.get(field, ())
+
+        for raw_line in analysis.splitlines():
+            line = raw_line.strip().lower()
+            if not line or any(bad in line for bad in excluded):
+                continue
+
+            for alias in aliases:
+                position = line.find(alias)
+                if position == -1:
+                    continue
+
+                after = line[position + len(alias):]
+                # Skip the unit annotation that usually follows the label so
+                # "(g)" is not mistaken for the value.
+                after = re.sub(r"^\s*\(([^)]*)\)", "", after)
+                value = self._first_number(after)
+                if value is not None:
+                    return value
+        return None
+
+    def _sanity_check(self, nutrients: dict, food_name: str, serving: str) -> None:
+        """
+        Catch estimates that contradict themselves, and repair what we can.
+
+        The model has no idea when it is wrong, so nothing downstream will
+        notice a bad figure - it will simply be logged and quietly distort the
+        user's totals. Two checks catch most of it:
+
+          * Atwater - protein and carbs are 4 kcal/g, fat is 9. If the macros
+            do not add up to the stated calories, at least one number is wrong.
+          * Physical limits - nothing is more than 100g of anything per 100g,
+            and 900 kcal/100g is pure fat.
+
+        Where the calorie figure is the odd one out, it is recalculated from
+        the macros, which are usually the better-remembered numbers. Anything
+        that cannot be repaired is logged loudly and left for the caller's
+        zero-calorie guard to reject.
+        """
+        calories = float(nutrients.get("calories") or 0)
+        protein = float(nutrients.get("protein") or 0)
+        carbs = float(nutrients.get("carbohydrates") or 0)
+        fat = float(nutrients.get("fat") or 0)
+
+        per_100g = serving.endswith("g") or serving.endswith("ml")
+
+        # Impossible quantities mean the reading is untrustworthy as a whole -
+        # one field being nonsense says nothing good about the others. Rather
+        # than repair it, invalidate it: zeroing the calories makes the
+        # caller's existing guard refuse to log it, which is the right outcome.
+        impossible = [
+            (name, value)
+            for name, value in (("protein", protein), ("carbohydrates", carbs), ("fat", fat))
+            if per_100g and value > 100
+        ]
+        if per_100g and calories > 900:
+            impossible.append(("calories", calories))
+
+        if impossible:
+            for name, value in impossible:
+                logger.error(
+                    "%r: %s of %.1f per %s is not physically possible - discarding the reading.",
+                    food_name, name, value, serving,
+                )
+            nutrients["calories"] = 0.0
+            return
+
+        implied = protein * 4 + carbs * 4 + fat * 9
+        if implied <= 0 or calories <= 0:
+            return
+
+        # Atwater factors are exact enough that a gap this size means one of
+        # the numbers is wrong. The macros are usually the better-remembered
+        # ones, so the calorie figure is the one recalculated.
+        if abs(implied - calories) > calories * 0.25:
+            logger.warning(
+                "%r: macros imply %.0f kcal but the model said %.0f - using the macros.",
+                food_name, implied, calories,
+            )
+            nutrients["calories"] = round(implied)
 
     def _parse_nutrient_response(self, analysis: str, food_name: str, serving_size: str) -> dict:
         """Parse the AI response to extract structured nutrient data"""
@@ -193,113 +502,17 @@ class NutrientAnalyzerService:
                 except (json.JSONDecodeError, KeyError, ValueError):
                     pass  # Fall back to regex parsing
             
-            # Extract from table format (markdown tables)
-            # Look for table rows with nutrient data
-            table_rows = re.findall(r'\|[^|]*\|[^|]*\|[^|]*\|', analysis)
-            for row in table_rows:
-                # Skip header rows
-                if 'nutrient' in row.lower() or 'value' in row.lower() or 'unit' in row.lower():
-                    continue
-                
-                # Extract nutrient name and value
-                cells = [cell.strip() for cell in row.split('|') if cell.strip()]
-                if len(cells) >= 2:
-                    nutrient_name = cells[0].lower()
-                    value_str = cells[1]
-                    
-                    # Extract numeric value
-                    value_match = re.search(r'(\d+(?:\.\d+)?)', value_str)
-                    if value_match:
-                        value = float(value_match.group(1))
-                        
-                        if 'calorie' in nutrient_name:
-                            nutrients["calories"] = value
-                        elif 'protein' in nutrient_name:
-                            nutrients["protein"] = value
-                        elif 'carbohydrate' in nutrient_name or 'carb' in nutrient_name:
-                            nutrients["carbohydrates"] = value
-                        elif 'fat' in nutrient_name and 'total' in nutrient_name:
-                            nutrients["fat"] = value
-                        elif 'fiber' in nutrient_name:
-                            nutrients["fiber"] = value
-                        elif 'sugar' in nutrient_name:
-                            nutrients["sugar"] = value
-                        elif 'sodium' in nutrient_name:
-                            nutrients["sodium"] = value
-                        elif 'cholesterol' in nutrient_name:
-                            nutrients["cholesterol"] = value
-            
-            # Fallback to regex patterns for non-table formats
-            if nutrients["calories"] == 0:
-                calorie_patterns = [
-                    r'calories?[:\s]*(\d+(?:\.\d+)?)',
-                    r'(\d+(?:\.\d+)?)\s*kcal',
-                    r'(\d+(?:\.\d+)?)\s*calories?'
-                ]
-                for pattern in calorie_patterns:
-                    calorie_match = re.search(pattern, analysis, re.IGNORECASE)
-                    if calorie_match:
-                        nutrients["calories"] = float(calorie_match.group(1))
-                        break
-            
-            # Extract macronutrients - try multiple patterns
-            if nutrients["protein"] == 0:
-                protein_patterns = [
-                    r'protein[:\s]*(\d+(?:\.\d+)?)\s*g',
-                    r'(\d+(?:\.\d+)?)\s*g\s*protein',
-                    r'protein[:\s]*(\d+(?:\.\d+)?)'
-                ]
-                for pattern in protein_patterns:
-                    protein_match = re.search(pattern, analysis, re.IGNORECASE)
-                    if protein_match:
-                        nutrients["protein"] = float(protein_match.group(1))
-                        break
-            
-            if nutrients["carbohydrates"] == 0:
-                carb_patterns = [
-                    r'carbohydrates?[:\s]*(\d+(?:\.\d+)?)\s*g',
-                    r'(\d+(?:\.\d+)?)\s*g\s*carbohydrates?',
-                    r'carbs?[:\s]*(\d+(?:\.\d+)?)\s*g',
-                    r'(\d+(?:\.\d+)?)\s*g\s*carbs?'
-                ]
-                for pattern in carb_patterns:
-                    carb_match = re.search(pattern, analysis, re.IGNORECASE)
-                    if carb_match:
-                        nutrients["carbohydrates"] = float(carb_match.group(1))
-                        break
-            
-            if nutrients["fat"] == 0:
-                fat_patterns = [
-                    r'fat[:\s]*(\d+(?:\.\d+)?)\s*g',
-                    r'(\d+(?:\.\d+)?)\s*g\s*fat',
-                    r'total\s*fat[:\s]*(\d+(?:\.\d+)?)\s*g'
-                ]
-                for pattern in fat_patterns:
-                    fat_match = re.search(pattern, analysis, re.IGNORECASE)
-                    if fat_match:
-                        nutrients["fat"] = float(fat_match.group(1))
-                        break
-            
-            if nutrients["fiber"] == 0:
-                fiber_match = re.search(r'fiber[:\s]*(\d+(?:\.\d+)?)\s*g', analysis, re.IGNORECASE)
-                if fiber_match:
-                    nutrients["fiber"] = float(fiber_match.group(1))
-            
-            if nutrients["sugar"] == 0:
-                sugar_match = re.search(r'sugar[:\s]*(\d+(?:\.\d+)?)\s*g', analysis, re.IGNORECASE)
-                if sugar_match:
-                    nutrients["sugar"] = float(sugar_match.group(1))
-            
-            if nutrients["sodium"] == 0:
-                sodium_match = re.search(r'sodium[:\s]*(\d+(?:\.\d+)?)\s*mg', analysis, re.IGNORECASE)
-                if sodium_match:
-                    nutrients["sodium"] = float(sodium_match.group(1))
-            
-            if nutrients["cholesterol"] == 0:
-                cholesterol_match = re.search(r'cholesterol[:\s]*(\d+(?:\.\d+)?)\s*mg', analysis, re.IGNORECASE)
-                if cholesterol_match:
-                    nutrients["cholesterol"] = float(cholesterol_match.group(1))
-            
+            # Read every field with one scanner that copes with two- and
+            # three-column tables, bullets and prose alike. The previous code
+            # had a table branch that only matched three-column rows and a
+            # prose branch that required a digit immediately after the label,
+            # so a two-column table with units - the most common shape a model
+            # produces - matched neither and every value stayed at zero.
+            for field in self._NUTRIENT_ALIASES:
+                value = self._scan_for(analysis, field)
+                if value is not None:
+                    nutrients[field] = value
+
             # Extract health tags
             analysis_lower = analysis.lower()
             
@@ -347,15 +560,81 @@ class NutrientAnalyzerService:
                 "health_tags": []
             }
 
-    def log_meal_with_analysis(self, food_name: str, serving_size: str, meal_type: str, user_id: int, db: Session) -> dict:
-        """Analyze nutrition and log a meal with the extracted data to the database."""
-        try:
-            # First analyze the nutrition
-            analysis_result = self.analyze_food_nutrition(food_name, serving_size)
-            if not analysis_result["success"]:
-                return analysis_result  # Propagate error
+    # Every key the FoodItem row needs. A caller-supplied dict is only trusted
+    # if it has all of them with numeric values; anything else falls back to a
+    # fresh analysis rather than writing zeros into the user's history.
+    _REQUIRED_NUTRIENTS = ("calories", "protein", "carbohydrates", "fat")
 
-            parsed_nutrients = analysis_result["parsed_nutrients"]
+    def _usable_nutrients(self, nutrients: Optional[dict]) -> Optional[dict]:
+        """Normalise caller-supplied nutrients, or None if they cannot be trusted."""
+        if not isinstance(nutrients, dict):
+            return None
+        try:
+            clean = {
+                "calories": float(nutrients["calories"]),
+                "protein": float(nutrients["protein"]),
+                "carbohydrates": float(nutrients["carbohydrates"]),
+                "fat": float(nutrients["fat"]),
+                "fiber": float(nutrients.get("fiber") or 0),
+                "sugar": float(nutrients.get("sugar") or 0),
+                "sodium": float(nutrients.get("sodium") or 0),
+            }
+        except (KeyError, TypeError, ValueError):
+            return None
+
+        # A meal with no energy is a parse failure, not a real reading.
+        if clean["calories"] <= 0:
+            return None
+
+        tags = nutrients.get("health_tags") or []
+        clean["health_tags"] = [str(t) for t in tags] if isinstance(tags, list) else []
+        return clean
+
+    def log_meal_with_analysis(
+        self,
+        food_name: str,
+        serving_size: str,
+        meal_type: str,
+        user_id: int,
+        db: Session,
+        nutrients: Optional[dict] = None,
+    ) -> dict:
+        """
+        Log a meal, analysing it first only when we have to.
+
+        The UI analyses a food, shows the numbers, and the user confirms. Re-running
+        the model at that point costs a second API call and another 10-20 seconds
+        to reproduce an answer already on screen - so pre-computed nutrients are
+        accepted here and reused.
+        """
+        try:
+            parsed_nutrients = self._usable_nutrients(nutrients)
+
+            if parsed_nutrients is None:
+                analysis_result = self.analyze_food_nutrition(food_name, serving_size)
+                if not analysis_result["success"]:
+                    return analysis_result  # Propagate error
+                parsed_nutrients = analysis_result["parsed_nutrients"]
+
+            # A zero-calorie meal is a parse failure, not a reading. Writing it
+            # would silently corrupt the day's totals, every average built on
+            # them, and the targets derived from those - and the user would have
+            # no way to tell, because the log entry looks perfectly normal.
+            if not parsed_nutrients or float(parsed_nutrients.get("calories") or 0) <= 0:
+                logger.error(
+                    "Refusing to log %r: nutrition parsed to zero calories.", food_name
+                )
+                return {
+                    "success": False,
+                    "error": (
+                        "I could not read reliable nutrition figures for that. "
+                        "Try naming the food more specifically - for example "
+                        "'grilled chicken sandwich' rather than 'sandwich'."
+                    ),
+                    "error_type": "parse_failure",
+                }
+            else:
+                logger.info("Logging %r with nutrients supplied by the client - skipping re-analysis", food_name)
             
             # Create or find existing FoodItem
             food_item = db.query(FoodItem).filter(

@@ -17,6 +17,7 @@ import {
 import './index.css';
 import Auth from './components/Auth';
 import AppShell from './components/AppShell';
+import LogMeal from './components/LogMeal';
 import Dashboard from './components/Dashboard';
 import GoalSetup from './components/GoalSetup';
 import WeightCheckIn from './components/WeightCheckIn';
@@ -508,12 +509,9 @@ function App() {
     }
   }, [user?.id]);
 
-  useEffect(() => {
-    // Fetch food items when log-meal view is active
-    if (activeView === 'log-meal' && foodItems.length === 0) {
-      fetchFoodItems();
-    }
-  }, [activeView, foodItems.length]);
+  // The old log-meal screen prefetched the whole food-item table to drive a
+  // dropdown. LogMeal describes food in free text instead, so that request is
+  // no longer made.
 
   // Handle food search
   useEffect(() => {
@@ -1811,226 +1809,7 @@ Nutrition Added:
 
   // renderLogin / renderRegister removed - the <Auth> component replaces both.
 
-  const renderLogMeal = () => (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white shadow">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center">
-              <button
-                onClick={() => setActiveView('dashboard')}
-                className="btn btn-secondary mr-4"
-              >
-                <ArrowLeft size={20} className="mr-2" />
-                Back to Dashboard
-              </button>
-              <h1 className="text-2xl font-bold font-display text-primary">AI-Powered Meal Logging</h1>
-            </div>
-            <div className="flex items-center gap-4">
-              <span className="welcome-text">Welcome, {user?.full_name || user?.username}</span>
-              <button
-                onClick={handleLogout}
-                className="btn btn-secondary"
-              >
-                Logout
-              </button>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      <div className="container mx-auto px-4 py-8">
-        <div className="max-w-4xl mx-auto">
-          
-          {/* AI-Powered Nutrition Analysis */}
-          <div className="card mb-8">
-            <h2 className="text-xl font-bold mb-6 flex items-center">
-              <Brain className="mr-2" size={24} />
-              AI Nutrition Analysis
-            </h2>
-            <p className="text-gray-600 mb-6">
-              Simply enter any food name and serving size. Our AI will analyze the complete nutritional content and log your meal automatically.
-            </p>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label className="form-label">Food Name *</label>
-                  <input
-                    type="text"
-                  placeholder="e.g., Grilled Chicken Breast, Apple, Brown Rice"
-                  className="form-input"
-                  value={nutrientForm.food_name}
-                  onChange={(e) => setNutrientForm({...nutrientForm, food_name: e.target.value})}
-                />
-                  </div>
-                  
-              <div>
-                <label className="form-label">Serving Size *</label>
-                <input
-                  type="text"
-                  placeholder="e.g., 150g, 1 cup, 2 pieces, 1 medium"
-                  className="form-input"
-                  value={nutrientForm.serving_size}
-                  onChange={(e) => setNutrientForm({...nutrientForm, serving_size: e.target.value})}
-                />
-              </div>
-              
-              <div>
-                <label className="form-label">Meal Type *</label>
-                <select
-                  className="form-input"
-                  value={nutrientForm.meal_type}
-                  onChange={(e) => setNutrientForm({...nutrientForm, meal_type: e.target.value})}
-                >
-                  <option value="breakfast">Breakfast</option>
-                  <option value="lunch">Lunch</option>
-                  <option value="dinner">Dinner</option>
-                  <option value="snack">Snack</option>
-                </select>
-                                  </div>
-              
-              <div className="flex items-end">
-                <button
-                  onClick={analyzeNutrition}
-                  disabled={isAnalyzingNutrition || !nutrientForm.food_name || !nutrientForm.serving_size}
-                  className="btn btn-secondary w-full"
-                >
-                  {isAnalyzingNutrition ? 'Analyzing...' : 'Analyze Nutrition'}
-                </button>
-                                    </div>
-            </div>
-            
-            {error && (
-              <div className="mt-4 text-red-600 text-sm text-center">{error}</div>
-                                  )}
-                                </div>
-
-          {/* Nutrition Analysis Results */}
-          {showNutrientAnalysis && nutrientAnalysis && (
-            <div className="card mb-8">
-              <h3 className="text-lg font-bold mb-4 flex items-center">
-                <Brain className="mr-2" size={20} />
-                Nutrition Analysis Results
-              </h3>
-              
-              <div className="bg-green-50 border border-green-200 rounded-lg p-6 mb-6">
-                <h4 className="font-bold text-lg mb-4">
-                  {nutrientAnalysis.food_name} ({nutrientAnalysis.serving_size})
-                </h4>
-                
-                {nutrientAnalysis.parsed_nutrients && (
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-                    <div className="text-center">
-                      <div className="text-2xl font-bold text-green-600">
-                        {nutrientAnalysis.parsed_nutrients.calories || 0}
-                                </div>
-                      <div className="text-sm text-gray-600">Calories</div>
-                              </div>
-                    <div className="text-center">
-                      <div className="text-2xl font-bold text-blue-600">
-                        {nutrientAnalysis.parsed_nutrients.protein || 0}g
-                            </div>
-                      <div className="text-sm text-gray-600">Protein</div>
-                        </div>
-                    <div className="text-center">
-                      <div className="text-2xl font-bold text-orange-600">
-                        {nutrientAnalysis.parsed_nutrients.carbohydrates || 0}g
-                    </div>
-                      <div className="text-sm text-gray-600">Carbs</div>
-                </div>
-                    <div className="text-center">
-                      <div className="text-2xl font-bold text-purple-600">
-                        {nutrientAnalysis.parsed_nutrients.fat || 0}g
-                    </div>
-                      <div className="text-sm text-gray-600">Fat</div>
-                  </div>
-              </div>
-                )}
-                
-                {nutrientAnalysis.parsed_nutrients && nutrientAnalysis.parsed_nutrients.health_tags && nutrientAnalysis.parsed_nutrients.health_tags.length > 0 && (
-                  <div className="flex flex-wrap gap-2 mb-4">
-                    {nutrientAnalysis.parsed_nutrients.health_tags.map((tag, index) => (
-                      <span key={index} className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full">
-                        {tag}
-                      </span>
-                    ))}
-              </div>
-                )}
-                
-                <div className="prose max-w-none text-sm">
-                  <div dangerouslySetInnerHTML={{ __html: nutrientAnalysis.raw_analysis.replace(/\n/g, '<br>') }} />
-                </div>
-              </div>
-
-              <div className="flex gap-4">
-              <button
-                  onClick={logMealWithAnalysis}
-                disabled={isLoading}
-                  className="btn btn-primary flex-1"
-              >
-                  {isLoading ? 'Logging Meal...' : 'Log This Meal'}
-              </button>
-                <button
-                  onClick={() => setShowNutrientAnalysis(false)}
-                  className="btn btn-secondary"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Sample Foods */}
-          <div className="card">
-            <h3 className="text-lg font-bold mb-4">Sample Foods to Try</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="bg-gray-50 p-4 rounded-lg">
-                <h4 className="font-semibold mb-2">Proteins</h4>
-                <div className="space-y-1 text-sm">
-                  <div>Chicken Breast - 100g</div>
-                  <div>Salmon Fillet - 150g</div>
-                  <div>Greek Yogurt - 1 cup</div>
-                  <div>Eggs - 2 large</div>
-                  <div>Tofu - 100g</div>
-                </div>
-              </div>
-              <div className="bg-gray-50 p-4 rounded-lg">
-                <h4 className="font-semibold mb-2">Carbohydrates</h4>
-                <div className="space-y-1 text-sm">
-                  <div>Brown Rice - 1 cup cooked</div>
-                  <div>Quinoa - 1 cup cooked</div>
-                  <div>Sweet Potato - 1 medium</div>
-                  <div>Oatmeal - 1 cup cooked</div>
-                  <div>Banana - 1 medium</div>
-                </div>
-              </div>
-              <div className="bg-gray-50 p-4 rounded-lg">
-                <h4 className="font-semibold mb-2">Vegetables</h4>
-                <div className="space-y-1 text-sm">
-                  <div>Broccoli - 1 cup</div>
-                  <div>Spinach - 2 cups raw</div>
-                  <div>Carrots - 1 cup chopped</div>
-                  <div>Bell Peppers - 1 medium</div>
-                  <div>Avocado - 1/2 medium</div>
-                </div>
-              </div>
-              <div className="bg-gray-50 p-4 rounded-lg">
-                <h4 className="font-semibold mb-2">Fruits</h4>
-                <div className="space-y-1 text-sm">
-                  <div>Apple - 1 medium</div>
-                  <div>Blueberries - 1 cup</div>
-                  <div>Orange - 1 medium</div>
-                  <div>Strawberries - 1 cup</div>
-                  <div>Mango - 1 cup sliced</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+  // renderLogMeal removed - replaced by the <LogMeal> component.
 
   const renderSetGoals = () => (
     <div className="min-h-screen bg-gray-50">
@@ -5042,8 +4821,18 @@ Nutrition Added:
       />
     );
 
+    const activeGoal =
+      (dashboardData.goals || []).find((g) => g.is_active) || (dashboardData.goals || [])[0] || null;
+
     const legacyViews = {
-      'log-meal': renderLogMeal,
+      'log-meal': () => (
+        <LogMeal
+          apiBase={API_BASE_URL}
+          onLogged={() => loadDashboardData(true)}
+          calorieTarget={activeGoal?.target_calories || 0}
+          consumedToday={dashboardData.dailyStats?.total_calories || 0}
+        />
+      ),
       'set-goals': renderGoals,
       'view-progress': renderProgress,
       'ml-recommendations': () => (

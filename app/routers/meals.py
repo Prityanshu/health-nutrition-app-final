@@ -105,15 +105,25 @@ async def get_meal_history(
         MealLog.user_id == current_user.id
     ).order_by(MealLog.logged_at.desc()).limit(limit).all()
     
+    # One query for every food referenced, instead of one per log row.
+    food_ids = {log.food_item_id for log in meal_logs}
+    foods = {
+        f.id: f for f in db.query(FoodItem).filter(FoodItem.id.in_(food_ids)).all()
+    } if food_ids else {}
+
     result = []
     for log in meal_logs:
-        food_item = db.query(FoodItem).filter(FoodItem.id == log.food_item_id).first()
+        food_item = foods.get(log.food_item_id)
         result.append(MealLogResponse(
             id=log.id,
+            # A log can outlive the food item it points at. Returning a
+            # placeholder keeps the rest of the history readable; the previous
+            # code raised AttributeError on None and took the whole endpoint
+            # down with it.
             food_item={
-                "id": food_item.id,
-                "name": food_item.name,
-                "cuisine_type": food_item.cuisine_type
+                "id": log.food_item_id,
+                "name": food_item.name if food_item else "Unknown food",
+                "cuisine_type": food_item.cuisine_type if food_item else None,
             },
             meal_type=log.meal_type,
             quantity=log.quantity,

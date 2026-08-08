@@ -37,6 +37,7 @@ Notes on two deliberate choices:
 import asyncio
 import json
 import logging
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from groq import Groq as GroqClient
@@ -84,6 +85,69 @@ _HISTORY_CHAR_CAP = 500
 # Upper bound on reply length. Generators produce the long artifacts; the
 # orchestrator only needs enough room to converse or emit a tool call.
 _MAX_REPLY_TOKENS = 700
+# Ceiling on a single user message. Assistant messages were already truncated,
+# but a pasted article went in verbatim - and then again on every following
+# turn as history. ~4000 characters is roughly 1000 tokens, generous for
+# anything typed and firm enough to stop a paste from eating the day's quota.
+_USER_CHAR_CAP = 4000
+
+
+def tidy_truncated(text: str) -> str:
+    """
+    Salvage a reply that hit the token ceiling.
+
+    A conversational answer that stops at "| Mixed frozen veg" reads as a
+    crash. Cutting back to the last complete sentence or list item and saying
+    so is honest and looks deliberate - and it gives the user an obvious way to
+    get the rest.
+    """
+    if not text:
+        return text
+
+    stripped = text.rstrip()
+
+    # Drop trailing structure that was never finished: table rows, and then any
+    # heading or list marker left dangling above them once they are gone.
+    lines = stripped.splitlines()
+    while lines and lines[-1].lstrip().startswith("|"):
+        lines.pop()
+    while lines and re.fullmatch(r"\s*(?:[-*•]|\d+[.)]|#{1,6})\s*\S{0,40}\s*", lines[-1]):
+        lines.pop()
+    stripped = "\n".join(lines).rstrip()
+
+    removed_structure = len(lines) != len(text.rstrip().splitlines())
+
+    # If it does not end on punctuation, the last sentence was cut mid-word -
+    # back off to the last one that finished. The negative lookbehind stops
+    # "1." in a numbered list counting as a sentence end, which would otherwise
+    # leave the reply ending on a bare list marker.
+    trimmed_sentence = False
+    if stripped and stripped[-1] not in ".!?:":
+        ends = [m.end() for m in re.finditer(r"(?<!\d)[.!?](?=\s|$)", stripped)]
+        # Keep the cut only if a usable sentence survives; below roughly this
+        # length the truncation happened so early that trimming would delete
+        # the answer rather than tidy it.
+        if ends and ends[-1] >= 25:
+            stripped = stripped[: ends[-1]]
+            trimmed_sentence = True
+
+    stripped = stripped.rstrip()
+    if not stripped:
+        return "Let me start that again - ask me once more and I'll keep it shorter."
+
+    if removed_structure or trimmed_sentence:
+        return stripped + "\n\nWant me to write the full version out properly?"
+    return stripped
+
+
+def clamp_user_message(message: str) -> str:
+    """Trim an over-long message, telling the model what happened."""
+    if not message or len(message) <= _USER_CHAR_CAP:
+        return message
+    return (
+        message[:_USER_CHAR_CAP]
+        + "\n\n[message truncated - if you need the rest, ask the user to summarise it]"
+    )
 
 
 INJURY_GUIDANCE = """
@@ -115,14 +179,112 @@ If they report sharp pain, numbness, swelling, giving way, or pain that is getti
 
 """
 
-# Words that mean the injury guidance is worth its ~350 tokens this turn.
-INJURY_TRIGGERS = (
-    "injur", "pain", "hurt", "sore", "strain", "sprain", "tear", "torn",
-    "physio", "surgery", "recovering", "rehab", "ache", "tendon", "acl",
-    "hamstring", "shoulder", "knee", "back", "wrist", "ankle", "hip",
+# Deciding whether to spend ~700 tokens on the injury guidance.
+#
+# The first version was a substring scan over a list that included "back",
+# "hip" and "ache". That fired on "get BACK into running", "HIP hop class" and
+# "headACHE", and missed sciatica, asthma, plantar fasciitis and slipped disc
+# entirely. Both failure modes matter: false positives burn the daily quota,
+# false negatives produce a plan with no safety exclusions at all.
+#
+# So: match on word boundaries, and split the vocabulary into terms that are
+# unambiguous on their own versus body parts that only count alongside a
+# complaint.
+
+# Unambiguous - if any of these appear, an injury or condition is in play.
+_INJURY_TERMS = (
+    # states
+    "injury", "injured", "injuries", "sprain", "sprained", "strain", "strained",
+    "torn", "tear", "ruptured", "rupture", "dislocated", "fracture", "fractured",
+    "broken bone", "inflamed", "inflammation", "swollen", "swelling", "stiffness",
+    # care
+    "physio", "physiotherapy", "physical therapy", "rehab", "rehabilitation",
+    "surgery", "post-op", "post op", "operated", "recovering from",
+    # named conditions - the whole set the old list missed
+    "sciatica", "shin splints", "plantar fasciitis", "tennis elbow",
+    "golfer's elbow", "golfers elbow", "it band", "iliotibial", "runner's knee",
+    "runners knee", "rotator cuff", "slipped disc", "herniated", "bulging disc",
+    "meniscus", "acl", "mcl", "pcl", "labrum", "labral", "tendonitis",
+    "tendinitis", "tendinopathy", "bursitis", "arthritis", "osteoarthritis",
+    "frozen shoulder", "carpal tunnel", "achilles", "hernia", "scoliosis",
+    "spondylitis", "asthma", "asthmatic", "epilepsy", "diabetic neuropathy",
+    "vertigo", "concussion", "whiplash",
 )
 
-SYSTEM_PROMPT = """You are NutriCoach, a warm and knowledgeable health, nutrition and fitness assistant.
+# Body parts. Only meaningful when a complaint word appears near them - which
+# is what separates "my knee hurts" from "knee-high socks".
+_BODY_PARTS = (
+    "hamstring", "quad", "quadricep", "calf", "groin", "glute", "hip flexor",
+    "shoulder", "knee", "elbow", "wrist", "ankle", "neck", "spine",
+    "lower back", "upper back", "hip", "shin", "foot", "heel", "thigh", "chest",
+)
+
+_COMPLAINTS = (
+    "pain", "painful", "hurt", "hurts", "hurting", "sore", "soreness", "ache",
+    "aching", "aches", "niggle", "tight", "tightness", "issue", "problem",
+    "trouble", "weak", "clicking", "locked", "gave way", "giving way", "flare",
+    # How people usually describe doing it, rather than naming the injury.
+    # These are safe next to a body part: "pulled pork" and "rolled oats" have
+    # no body part in them, so they cannot reach this branch.
+    "pulled", "pull", "tweaked", "tweak", "twisted", "rolled", "popped",
+    "jammed", "stiff", "swelling", "bruised", "blown",
+)
+
+# Retained under the old name because scripts and tests reference it.
+INJURY_TRIGGERS = _INJURY_TERMS + _BODY_PARTS
+
+
+def _has_word(text: str, phrase: str) -> bool:
+    """Whole-word / whole-phrase match, so 'hip' never fires inside 'hip hop'."""
+    return re.search(rf"(?<!\w){re.escape(phrase)}(?!\w)", text) is not None
+
+
+def mentions_injury(text: str) -> bool:
+    """
+    Whether this text implies an injury or physical condition.
+
+    Body parts alone are not enough - "back", "hip" and "chest" appear in
+    ordinary sentences constantly. They must be accompanied by a complaint.
+    """
+    if not text:
+        return False
+    lowered = text.lower()
+
+    if any(_has_word(lowered, term) for term in _INJURY_TERMS):
+        return True
+
+    if any(_has_word(lowered, part) for part in _BODY_PARTS):
+        if any(_has_word(lowered, word) for word in _COMPLAINTS):
+            return True
+
+    return False
+
+# One definition of who the assistant is, shared by every prompt path.
+#
+# The greeting path used to declare its own thinner version, so the assistant's
+# voice changed depending on whether you said "hi" or asked a question - which
+# is exactly the tell that gives away a scripted bot.
+PERSONA = """You are NutriCoach.
+
+You are the user's coach, not a search engine and not a customer service bot. You have been working with this person over time: you know what they eat, what they are training for, and how their week is going. Speak like someone who already knows them.
+
+Voice:
+- Warm, direct, unfussy. A knowledgeable friend, not a brochure.
+- Short sentences. No filler openers like "Certainly!" or "Great question!".
+- Never introduce yourself again after the first message, and never list your features unless asked.
+- Use what you know about them naturally, the way a person would - "that's your third paneer day this week" - rather than reciting their data back at them.
+- Never announce that you are consulting their profile or logs. Just know it.
+- One question at a time, and only when you actually need the answer.
+
+Length and format - this matters:
+- When you are TALKING, talk. Two to five sentences. No markdown tables, no ingredient costings, no numbered recipe steps, no emoji section headers.
+- Suggesting what to eat is talking. Name two or three options in a sentence each, with the rough calories and protein, and stop. "Egg curry with two rotis gets you about 600 and 40g of protein. Or paneer bhurji if you want it faster."
+- If they want the full thing - the actual recipe, the week of meals, the training plan - call the tool. That is what the tools are for, and their output is properly formatted.
+- Never begin producing a long structured artifact in a normal reply. You will run out of room and stop mid-sentence, which looks broken.
+"""
+
+SYSTEM_PROMPT = PERSONA + """
+You are a health, nutrition and fitness assistant.
 
 You are ONE assistant having ONE continuous conversation. You are not a router and you never hand the user off. You remember everything said earlier in this conversation and build on it.
 
@@ -208,6 +370,16 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
                     "activity_level": {
                         "type": "string",
                         "enum": ["sedentary", "lightly_active", "moderately_active", "very_active"],
+                    },
+                    "sport": {
+                        "type": "string",
+                        "description": (
+                            "The sport or activity they train FOR, if they named one - "
+                            "'football', 'cricket', 'running', 'swimming', 'climbing'. "
+                            "Training for a sport is not the same as general fitness: it "
+                            "needs the qualities that sport demands and must fit around "
+                            "playing. Omit only if no sport was mentioned."
+                        ),
                     },
                     "constraints": {
                         "type": "array",
@@ -349,19 +521,71 @@ _SMALLTALK = {
 }
 
 
-def is_smalltalk(message: str) -> bool:
-    """True if the entire message is social filler with no actionable request."""
+# Words that are filler on their own but become an ANSWER the moment the
+# assistant has asked something. "no" after "do you have gym access?" is the
+# single most load-bearing word in the conversation; treating it as a greeting
+# discards the reply and restarts the thread.
+_ANSWER_WORDS = {
+    "ok", "okay", "k", "kk", "sure", "yep", "yeah", "yes", "no", "nope",
+    "got it", "understood", "fine", "correct", "right", "nah", "yup",
+}
+
+# Asking for help is a real request. It used to be classified as filler, which
+# routed it to a prompt explicitly instructed not to list capabilities - so the
+# one word a confused user types returned a greeting.
+_HELP_WORDS = {"help", "what can you do", "what do you do", "who are you"}
+
+
+def is_smalltalk(message: str, question_pending: bool = False) -> bool:
+    """
+    True if the entire message is social filler with no actionable request.
+
+    `question_pending` should be True when the assistant's previous turn ended
+    in a question. Bare confirmations are filler in isolation and content when
+    something was asked - the same word means different things depending on
+    what came before it.
+    """
     cleaned = message.strip().lower().strip(".!?,;:'\"")
     cleaned = " ".join(cleaned.split())
+
+    if not cleaned:
+        return True
+
+    # Never swallow a request for help, in any conversational state.
+    if cleaned in _HELP_WORDS:
+        return False
+
+    # A bare answer to a question the assistant just asked is content.
+    if question_pending and cleaned in _ANSWER_WORDS:
+        return False
+
     if cleaned in _SMALLTALK:
         return True
+
     # "hi there", "hello!!", "thanks so much" - greeting plus filler only.
     if len(cleaned.split()) <= 3:
         filler = {"there", "man", "bro", "buddy", "so", "much", "very", "a", "lot", "again", "!"}
         words = [w for w in cleaned.split() if w not in filler]
-        if words and " ".join(words) in _SMALLTALK:
+        stripped = " ".join(words)
+        if question_pending and stripped in _ANSWER_WORDS:
+            return False
+        if words and stripped in _SMALLTALK:
             return True
     return False
+
+
+def ends_with_question(text: str) -> bool:
+    """
+    Did the assistant's last turn ask something?
+
+    A question mark is the reliable signal. Generated plans routinely contain
+    rhetorical questions in their body, so only the tail is examined - what
+    matters is whether the message *finished* by asking.
+    """
+    if not text:
+        return False
+    tail = text.strip()[-200:]
+    return "?" in tail
 
 
 class ConversationManager:
@@ -400,7 +624,14 @@ class ConversationManager:
 
                 response = self._client().chat.completions.create(**kwargs)
                 mark_groq_success()
-                return response.choices[0].message
+                choice = response.choices[0]
+                message = choice.message
+                # The prompt tells the model to keep conversational replies
+                # short, but instructions are not guarantees. Flag the case
+                # where it ran out of room so the caller can tidy up rather
+                # than shipping a sentence that stops mid-word.
+                message._hit_length_limit = getattr(choice, "finish_reason", None) == "length"
+                return message
 
             except Exception as e:
                 last_error = e
@@ -598,6 +829,21 @@ class ConversationManager:
                     if condition and condition not in constraints:
                         constraints.append(condition)
 
+                # The generator has no sport parameter and the fitness_goal enum
+                # has no sport values, so "footballer" had nowhere to go and the
+                # request silently became general_fitness. Passing it as a
+                # constraint is the honest fix: constraints is free text that
+                # reaches the prompt, and a sport genuinely does constrain what
+                # the plan should contain and when.
+                sport = (args.get("sport") or "").strip()
+                if sport:
+                    constraints.insert(
+                        0,
+                        f"Trains for {sport}. Build the plan around the demands of "
+                        f"{sport} and leave enough recovery for training and matches; "
+                        "this is sport preparation, not a bodybuilding split.",
+                    )
+
                 result = await self.fitmentor.generate_workout_plan(
                     activity_level=args.get("activity_level")
                     or ctx.get("activity_level")
@@ -670,17 +916,41 @@ class ConversationManager:
 
     @staticmethod
     def _unwrap(result: Any, primary_key: str) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
-        """Pull display text out of a service result dict."""
+        """
+        Pull display text out of a service result dict.
+
+        The final fallback used to be `str(result)`, which rendered a raw Python
+        dict - braces, quotes and all - straight into the chat window whenever a
+        service returned structured data with no string field. Failing here and
+        letting the recovery path answer in words is always better than showing
+        someone `{'success': True, 'plan': {'day1': [...]}}`.
+        """
+        if isinstance(result, str):
+            return (True, result, None) if result.strip() else (False, "", None)
         if not isinstance(result, dict):
-            return True, str(result), None
+            return False, "", None
         if not result.get("success", True):
             logger.warning("Service reported failure: %s", result.get("error"))
             return False, "", result
-        for key in (primary_key, "data", "message", "recipe", "workout_plan", "meal_plan", "raw_analysis"):
+
+        for key in (primary_key, "data", "message", "recipe", "workout_plan",
+                    "meal_plan", "adapted_plan", "raw_analysis", "content", "text"):
             value = result.get(key)
             if isinstance(value, str) and value.strip():
                 return True, value, result
-        return True, str(result), result
+            # Some services nest one level: {"data": {"recipe": "..."}}
+            if isinstance(value, dict):
+                for inner in (primary_key, "recipe", "workout_plan", "meal_plan",
+                              "adapted_plan", "raw_analysis", "content", "text"):
+                    nested = value.get(inner)
+                    if isinstance(nested, str) and nested.strip():
+                        return True, nested, result
+
+        logger.warning(
+            "Service returned no displayable text (keys: %s) - routing to recovery.",
+            list(result.keys()),
+        )
+        return False, "", result
 
     # --------------------------------------------------------------- main
 
@@ -704,8 +974,9 @@ class ConversationManager:
 
         name = ctx.get("name") or "there"
         system = (
-            "You are NutriCoach, a warm health and nutrition assistant.\n\n"
-            f"The user ({name}) has just sent a short social message: \"{user_query}\".\n\n"
+            PERSONA
+            + "\n"
+            + f"The user ({name}) has just sent a short social message: \"{user_query}\".\n\n"
             "Reply the way a friendly person would: one or two short sentences, maximum. "
             "Greet them back or acknowledge what they said.\n\n"
             "Do NOT summarise, recap, or repeat anything you produced earlier. "
@@ -739,6 +1010,7 @@ class ConversationManager:
         without needing their own copy of the conversation loop.
         """
         try:
+            user_query = clamp_user_message(user_query)
             ctx = self.get_user_context(user_id, db)
             history = self.get_history(user_id, db)
 
@@ -748,11 +1020,11 @@ class ConversationManager:
             # an injury is actually in play. Scan this message, the recent
             # history and the stored profile rather than paying for it always.
             scan = " ".join(
-                [user_query.lower()]
-                + [m["content"].lower() for m in history[-4:]]
-                + [str(ctx.get("health_conditions", "")).lower()]
+                [user_query]
+                + [m["content"] for m in history[-4:]]
+                + [str(ctx.get("health_conditions", ""))]
             )
-            if any(t in scan for t in INJURY_TRIGGERS):
+            if mentions_injury(scan):
                 system += INJURY_GUIDANCE
             if extra_context:
                 system += (
@@ -769,7 +1041,16 @@ class ConversationManager:
             # Greetings and acknowledgements never need a generator. Withholding
             # the schemas makes it impossible for the model to call one, which is
             # more reliable than instructing it not to.
-            smalltalk = is_smalltalk(user_query)
+            # "no" is filler after "thanks for the plan" and an answer after
+            # "do you have gym access?". Which one decides whether the reply is
+            # used or discarded, so look at what the assistant just said.
+            last_assistant = next(
+                (m["content"] for m in reversed(history) if m["role"] == "assistant"),
+                "",
+            )
+            question_pending = ends_with_question(last_assistant)
+
+            smalltalk = is_smalltalk(user_query, question_pending=question_pending)
             if smalltalk:
                 logger.info("Smalltalk detected (%r) - dispatching without tools", user_query)
                 # Withholding tools stops it GENERATING a plan, but with a history
@@ -784,6 +1065,12 @@ class ConversationManager:
             # No tool needed - the model is conversing, asking its own follow-up.
             if not tool_calls:
                 text = (reply.content or "").strip() or "Could you tell me a bit more about what you need?"
+                if getattr(reply, "_hit_length_limit", False):
+                    logger.info(
+                        "Conversational reply hit the token ceiling (%d chars) - tidying.",
+                        len(text),
+                    )
+                    text = tidy_truncated(text)
                 self.save_turn(user_id, user_query, text, db)
                 return {
                     "success": True,

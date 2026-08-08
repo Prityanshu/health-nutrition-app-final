@@ -1795,6 +1795,97 @@ body.theme-dark .chat-typing { color: #98A2B3; }
   .auth-activity-tile:last-child { grid-column: auto; }
 }
 
+/* ===================================================================
+   BARCODE SCANNER
+   =================================================================== */
+
+.scan-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  background: rgba(4, 6, 10, 0.72);
+  backdrop-filter: blur(6px);
+  animation: fade-up 0.2s ease both;
+}
+
+.scan-sheet {
+  width: 100%;
+  max-width: 26rem;
+  padding: 1.25rem;
+  border-radius: 1.125rem;
+  background: #12151B;
+  border: 1px solid #2A3240;
+  box-shadow: 0 30px 70px -20px rgba(0, 0, 0, 0.9);
+}
+
+/* The camera feed is injected by the scanner library, so the frame styles the
+   container and lets the video fill it. */
+.scan-frame {
+  position: relative;
+  overflow: hidden;
+  border-radius: 0.75rem;
+  background: #05070A;
+  border: 1px solid #2A3240;
+  min-height: 210px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.scan-frame video {
+  width: 100% !important;
+  height: auto !important;
+  display: block;
+}
+/* The library draws its own dashed highlight; the app's own framing is enough. */
+.scan-frame img[alt="Info icon"] { display: none; }
+
+.scan-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  color: #667085;
+  font-size: 0.8125rem;
+}
+
+/* --- provenance badge ---------------------------------------------- */
+
+.source-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+.source-verified {
+  color: #34D399;
+  background: rgba(52, 211, 153, 0.12);
+  border: 1px solid rgba(52, 211, 153, 0.3);
+}
+/* A real label, but found by name - so possibly the wrong variant of the
+   right brand. Deliberately distinct from the scanned case. */
+.source-matched {
+  color: #67E8F9;
+  background: rgba(34, 211, 238, 0.10);
+  border: 1px solid rgba(34, 211, 238, 0.28);
+}
+.source-estimate {
+  color: #FBBF24;
+  background: rgba(251, 191, 36, 0.10);
+  border: 1px solid rgba(251, 191, 36, 0.26);
+}
+
 /* Respect a reduced-motion preference: the drifting orbs are the only
    continuously animating element in the app. */
 @media (prefers-reduced-motion: reduce) {

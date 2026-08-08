@@ -23,15 +23,34 @@ class NutrientAnalysisRequest(BaseModel):
     food_name: str = Field(..., description="Name of the food item")
     serving_size: str = Field(..., description="Serving size (e.g., '1 cup', '150g', '2 pieces')")
 
+class BarcodeRequest(BaseModel):
+    barcode: str = Field(..., description="EAN/UPC digits from the packet")
+    serving_size: str = Field(default="100g", description="How much of it they ate")
+
+
 class MealLogRequest(BaseModel):
     food_name: str = Field(..., description="Name of the food item")
     serving_size: str = Field(..., description="Serving size (e.g., '1 cup', '150g', '2 pieces')")
     meal_type: MealType = Field(default=MealType.LUNCH, description="Type of meal")
+    # The UI analyses first and shows the result for confirmation. Passing that
+    # result back here lets the meal be logged without asking the model the
+    # same question a second time - halving both the wait and the API quota
+    # spent per logged meal.
+    nutrients: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Nutrients from a prior /nutrient/analyze call. Re-analysed if omitted.",
+    )
 
 @router.post("/nutrient/analyze", status_code=200)
-async def analyze_food_nutrition(request: NutrientAnalysisRequest):
+async def analyze_food_nutrition(
+    request: NutrientAnalysisRequest,
+    current_user: User = Depends(get_current_active_user),
+):
     """
     Analyze nutritional content of a food item using NutrientAnalyzer AI agent.
+
+    Requires a signed-in user: every call spends shared AI quota, so this must
+    not be open to anonymous traffic.
     """
     try:
         result = nutrient_analyzer_service.analyze_food_nutrition(
@@ -67,7 +86,8 @@ async def log_meal_with_analysis(
             serving_size=request.serving_size,
             meal_type=request.meal_type.value,
             user_id=current_user.id,
-            db=db
+            db=db,
+            nutrients=request.nutrients,
         )
         
         if result["success"]:
@@ -82,6 +102,74 @@ async def log_meal_with_analysis(
     except Exception as e:
         logger.error(f"Error in log_meal_with_analysis endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to log meal: {str(e)}")
+
+@router.post("/nutrient/barcode", status_code=200)
+async def analyze_by_barcode(
+    request: BarcodeRequest,
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Nutrition from a scanned packet.
+
+    This is the only path in the app whose numbers are not an approximation:
+    a barcode identifies exactly one product, and Open Food Facts returns what
+    is printed on its label. No model, no matching heuristics, no guessing at
+    which product was meant - which is why the UI nudges people towards it.
+
+    Returns the same shape as /nutrient/analyze so the frontend can render
+    either without branching, plus a `source` block describing where the
+    numbers came from.
+    """
+    from app.services.food_lookup import lookup
+    from app.services.nutrient_analyzer_service import nutrient_analyzer_service
+
+    digits = "".join(c for c in request.barcode if c.isdigit())
+    if not 8 <= len(digits) <= 14:
+        raise HTTPException(
+            status_code=400,
+            detail="That does not look like a barcode. They are 8 to 14 digits.",
+        )
+
+    facts = lookup(query="", barcode=digits)
+    if not facts:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "That barcode is not in the food database yet. "
+                "Type the food name instead and I'll estimate it."
+            ),
+        )
+
+    # Label data is per 100g; scale to whatever they actually ate using the
+    # same parser the estimate path uses.
+    base_serving, multiplier = nutrient_analyzer_service.parse_serving(request.serving_size)
+    nutrients = nutrient_analyzer_service._scale(facts.as_nutrients(), multiplier)
+
+    name = facts.matched_name or "Scanned product"
+    if facts.brand:
+        name = f"{facts.brand} {name}"
+
+    return {
+        "success": True,
+        "message": "Nutrition read from the product label",
+        "data": {
+            "food_name": name,
+            "serving_size": request.serving_size,
+            "parsed_nutrients": nutrients,
+            "raw_analysis": (
+                f"{name}\n"
+                f"Values printed on the packet, per {facts.basis}:\n"
+                f"  Calories      {facts.calories:.0f} kcal\n"
+                f"  Protein       {facts.protein:.1f} g\n"
+                f"  Carbohydrates {facts.carbohydrates:.1f} g\n"
+                f"  Fat           {facts.fat:.1f} g\n"
+                + (f"  Fibre         {facts.fiber:.1f} g\n" if facts.fiber else "")
+                + f"\nScaled to {request.serving_size}."
+            ),
+            "source": facts.provenance(),
+        },
+    }
+
 
 @router.get("/nutrient/meal-types")
 async def get_meal_types():

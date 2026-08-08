@@ -7,12 +7,27 @@ from sqlalchemy.orm import Session
 
 from app.auth import get_current_active_user
 from app.database import ChatMessage, User, get_db
+from app.services.chat_context import build_and_render, build_chat_context, opening_line
 from app.services.conversation_manager import ConversationManager
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 conversation_manager = ConversationManager()
+
+
+def _personalisation(user_id: int, db: Session) -> Optional[str]:
+    """
+    What this user has actually been doing, for the system prompt.
+
+    Wrapped because the assistant must still answer if this fails - losing
+    personalisation is a degraded reply, not a broken one.
+    """
+    try:
+        return build_and_render(user_id, db) or None
+    except Exception as e:
+        logger.error("Could not build chat personalisation: %s", e, exc_info=True)
+        return None
 
 
 class ChatRequest(BaseModel):
@@ -61,7 +76,10 @@ async def chat(
 
     try:
         result = await conversation_manager.handle_query(
-            current_user.id, request.query.strip(), db
+            current_user.id,
+            request.query.strip(),
+            db,
+            extra_context=_personalisation(current_user.id, db),
         )
         return ChatResponse(
             success=result.get("success", True),
@@ -88,12 +106,78 @@ async def simple_chat(
 
     try:
         result = await conversation_manager.handle_query(
-            current_user.id, request.query.strip(), db
+            current_user.id,
+            request.query.strip(),
+            db,
+            extra_context=_personalisation(current_user.id, db),
         )
         return {"response": str(result.get("response", ""))}
     except Exception as e:
         logger.error("simple_chat error: %s", e, exc_info=True)
         return {"response": "Sorry, I'm having trouble right now. Please try again in a moment."}
+
+
+@router.get("/opener")
+async def get_opener(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """
+    A grounded first line plus suggested follow-ups for an empty chat window.
+
+    Computed, not generated: it costs no AI quota, cannot hallucinate, and is
+    ready before the screen finishes painting. An empty input box is the least
+    inviting thing an assistant can show, and a generic "How can I help?" is
+    barely better - this one knows whether they have eaten today.
+    """
+    try:
+        ctx = build_chat_context(current_user.id, db)
+        name = current_user.full_name or current_user.username or ""
+        return {
+            "greeting": opening_line(ctx, name),
+            "suggestions": _suggestions(ctx),
+        }
+    except Exception as e:
+        logger.error("opener failed: %s", e, exc_info=True)
+        return {
+            "greeting": "What can I help with today?",
+            "suggestions": ["Plan my meals for today", "Build me a workout plan"],
+        }
+
+
+def _suggestions(ctx) -> List[str]:
+    """
+    Three next steps drawn from this user's actual situation.
+
+    Ordered by how likely they are to be what the person came for, so the first
+    chip is usually the right one.
+    """
+    out: List[str] = []
+    remaining = ctx.calories_remaining
+
+    if ctx.meals_today == 0 and ctx.local_hour >= 10:
+        out.append("What should I eat today?")
+    elif remaining is not None and remaining > 250:
+        out.append(f"Dinner idea under {int(remaining)} kcal")
+
+    if ctx.top_foods:
+        out.append(f"A recipe using {ctx.top_foods[0]}")
+
+    if ctx.last_plan_type == "workout":
+        out.append("Adjust my workout plan")
+    else:
+        out.append("Build me a workout plan")
+
+    if ctx.weight_change_kg is not None:
+        out.append("Am I on track with my goal?")
+
+    if ctx.typical_budget:
+        out.append(f"A week of meals under ₹{int(ctx.typical_budget)} a day")
+
+    # Fall back to the generic set only if nothing personal applied.
+    if not out:
+        out = ["Plan my meals for today", "Build me a workout plan", "What can you do?"]
+    return out[:3]
 
 
 @router.get("/history", response_model=List[HistoryMessage])

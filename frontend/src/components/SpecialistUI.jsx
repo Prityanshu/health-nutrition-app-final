@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Plus, X, Sparkles, RefreshCw, Copy, Check, Download, Share2, History, Mail,
 } from 'lucide-react';
@@ -530,12 +531,10 @@ export function PlanActions({
             ref={emailBtnRef}
             className="ghost-btn"
             onClick={() => {
-              // Capture where the button is on screen. The popover positions
-              // itself against the viewport rather than this container,
-              // because the card it sits in uses overflow:hidden and would
-              // otherwise clip it.
-              const rect = emailBtnRef.current?.getBoundingClientRect();
-              setAnchor(rect ? { top: rect.bottom, left: rect.left, right: rect.right } : null);
+              // Capture the button's viewport rect. The popover renders into
+              // document.body and positions itself against these numbers.
+              const r = emailBtnRef.current?.getBoundingClientRect();
+              setAnchor(r ? { top: r.top, bottom: r.bottom, left: r.left, right: r.right } : null);
               setEmailOpen((o) => !o);
             }}
             disabled={busy}
@@ -545,6 +544,7 @@ export function PlanActions({
           {emailOpen && (
             <EmailDialog
               anchor={anchor}
+              ignoreRef={emailBtnRef}
               defaultAddress={defaultEmail}
               busy={busy}
               onSend={emailPlan}
@@ -574,16 +574,24 @@ export function PlanActions({
  * address field and an optional note, because a plan arriving unannounced in a
  * stranger's inbox needs context.
  */
-function EmailDialog({ anchor, defaultAddress, busy, onSend, onClose }) {
+function EmailDialog({ anchor, ignoreRef, defaultAddress, busy, onSend, onClose }) {
   const [mode, setMode] = useState('self');
   const [address, setAddress] = useState('');
   const [note, setNote] = useState('');
+  const [pos, setPos] = useState(null);
   const ref = useRef(null);
 
   // Close on outside click, Escape, or scroll. Scrolling matters because the
   // popover is viewport-positioned and would otherwise detach from its button.
   useEffect(() => {
-    const onDown = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
+    const onDown = (e) => {
+      if (ref.current && ref.current.contains(e.target)) return;
+      // The Email button gets to handle its own click, otherwise mousedown
+      // closes the popover and the click immediately reopens it - so the
+      // button would never close what it opened.
+      if (ignoreRef?.current && ignoreRef.current.contains(e.target)) return;
+      onClose();
+    };
     const onKey = (e) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
@@ -595,7 +603,7 @@ function EmailDialog({ anchor, defaultAddress, busy, onSend, onClose }) {
       window.removeEventListener('scroll', onClose, true);
       window.removeEventListener('resize', onClose);
     };
-  }, [onClose]);
+  }, [onClose, ignoreRef]);
 
   const valid = mode === 'self' || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(address.trim());
 
@@ -604,27 +612,57 @@ function EmailDialog({ anchor, defaultAddress, busy, onSend, onClose }) {
     onSend({ toEmail: mode === 'self' ? null : address.trim(), note: mode === 'other' ? note : null });
   };
 
-  // Fixed to the viewport so no ancestor's overflow or stacking context can
-  // clip it. Right-aligned to the button, flipped upward when there is not
-  // enough room below, and clamped to stay on screen.
   const WIDTH = 300;
-  const EST_HEIGHT = mode === 'other' ? 330 : 230;
-  const gap = 8;
+  const GAP = 8;
 
-  let top = (anchor?.top ?? 120) + gap;
-  const spaceBelow = window.innerHeight - (anchor?.top ?? 0);
-  const flipUp = spaceBelow < EST_HEIGHT + 24;
-  if (flipUp && anchor) top = Math.max(12, anchor.top - EST_HEIGHT - gap - 34);
+  // Measure the real height rather than guessing it. The popover grows when
+  // "Someone else" is chosen, and a wrong guess is what decides whether it
+  // flips above the button or hangs off the bottom of the screen.
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const { height } = el.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
 
-  let left = (anchor?.right ?? WIDTH + 16) - WIDTH;
-  left = Math.max(12, Math.min(left, window.innerWidth - WIDTH - 12));
+    // Prefer below the button; go above if it would not fit; if neither fits
+    // (a short window), sit against the bottom edge.
+    let top = (anchor?.bottom ?? 100) + GAP;
+    if (top + height > vh - 12) {
+      const above = (anchor?.top ?? 0) - height - GAP;
+      top = above >= 12 ? above : Math.max(12, vh - height - 12);
+    }
 
-  return (
+    // Right-aligned to the button, then clamped inside the viewport.
+    let left = (anchor?.right ?? WIDTH + 16) - WIDTH;
+    left = Math.max(12, Math.min(left, vw - WIDTH - 12));
+
+    setPos({ top, left });
+  }, [anchor, mode]);
+
+  /*
+   * Rendered into <body> through a portal.
+   *
+   * position:fixed alone was not enough. `.stagger > *` keeps a transform
+   * after its entry animation (fill mode `forwards`), and an ancestor with any
+   * transform becomes the containing block for fixed-position descendants - so
+   * the popover was being offset by the card's position instead of the
+   * viewport's. That put it off the right edge on FitMentor and halfway down
+   * the day list on the meal planner. A portal removes it from that subtree
+   * entirely, which no amount of z-index or overflow tuning could do.
+   */
+  return createPortal(
     <div
       ref={ref}
       className="surface"
       style={{
-        position: 'fixed', top, left, zIndex: 9999,
+        position: 'fixed',
+        top: pos?.top ?? -9999,
+        left: pos?.left ?? -9999,
+        // Hidden for the single frame between mount and measurement, so it
+        // never appears in the wrong place first.
+        visibility: pos ? 'visible' : 'hidden',
+        zIndex: 9999,
         width: WIDTH, padding: '1rem', display: 'grid', gap: '0.75rem',
         boxShadow: '0 20px 50px -12px rgba(0,0,0,0.9)',
         animation: 'fade-up 0.18s ease both',
@@ -691,7 +729,8 @@ function EmailDialog({ anchor, defaultAddress, busy, onSend, onClose }) {
           ? <><RefreshCw size={14} className="spin" style={{ marginRight: 6 }} /> Sending…</>
           : <><Mail size={14} style={{ marginRight: 6 }} /> Send PDF</>}
       </button>
-    </div>
+    </div>,
+    document.body
   );
 }
 

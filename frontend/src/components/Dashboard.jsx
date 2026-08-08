@@ -17,6 +17,20 @@ import useCountUp from './useCountUp';
 const clamp = (n, min = 0, max = 100) => Math.min(max, Math.max(min, n));
 const num = (v) => (typeof v === 'number' && !Number.isNaN(v) ? v : 0);
 
+/** "1.5" but "2" - trailing zeros on a serving count are noise. */
+const formatQty = (q) => {
+  const n = num(q);
+  return Number.isInteger(n) ? String(n) : n.toFixed(1).replace(/\.0$/, '');
+};
+
+/** Local time of a log entry, or '' if the timestamp is missing or unparseable. */
+const mealTime = (iso) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+};
+
 /** Concentric progress rings: calories outer, protein inner. */
 function GoalRings({ calories, calorieTarget, protein, proteinTarget, hasGoal }) {
   const size = 224;
@@ -400,11 +414,22 @@ export default function Dashboard({ user, dashboardData, onNavigate, isLoading }
                 }}
               >
                 <div style={{ minWidth: 0 }}>
+                  {/* /meals/history nests the name inside food_item - it does
+                      not return a flat food_name. Reading the wrong key is why
+                      every row said "Meal". */}
                   <div style={{ fontSize: '0.875rem', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {meal.food_name || meal.name || 'Meal'}
+                    {meal.food_item?.name || meal.food_name || meal.name || 'Meal'}
+                    {num(meal.quantity) > 1 && (
+                      <span style={{ color: '#667085', fontWeight: 500 }}>
+                        {' '}&times;{formatQty(meal.quantity)}
+                      </span>
+                    )}
                   </div>
-                  <div style={{ fontSize: '0.75rem', color: '#667085', marginTop: 2, textTransform: 'capitalize' }}>
-                    {meal.meal_type || 'meal'}
+                  {/* Three rows all reading "Lunch" is not much use - the time
+                      is what tells them apart. */}
+                  <div style={{ fontSize: '0.75rem', color: '#667085', marginTop: 2 }}>
+                    <span style={{ textTransform: 'capitalize' }}>{meal.meal_type || 'meal'}</span>
+                    {mealTime(meal.logged_at) && <> · {mealTime(meal.logged_at)}</>}
                   </div>
                 </div>
                 <div className="tabular" style={{ fontSize: '0.875rem', fontWeight: 700, color: '#FBBF24', flexShrink: 0 }}>
