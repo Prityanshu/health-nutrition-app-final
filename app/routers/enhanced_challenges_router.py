@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from pydantic import BaseModel
 import logging
 
+from app.services import daytime
 from app.database import get_db, User
 from app.auth import get_current_active_user
 from app.services.data_driven_challenge_generator import DataDrivenChallengeGenerator
@@ -144,8 +145,11 @@ async def update_challenge_progress(
             logger.error(f"Challenge {request.challenge_id} not found for user {current_user.id}")
             raise HTTPException(status_code=404, detail="Challenge not found")
         
-        # Use current date if not provided
-        progress_date = request.progress_date or datetime.now()
+        # Stored UTC, matched on the user's local day. Previously this was
+        # datetime.now() (server-local) written into a UTC column and then
+        # compared with func.date() - so near midnight a second log could
+        # create a duplicate row for "the same" day, or overwrite the wrong one.
+        progress_date = request.progress_date or daytime.utcnow()
         
         # Calculate daily target
         daily_target = challenge.target_value / 7  # Assuming 7-day challenges

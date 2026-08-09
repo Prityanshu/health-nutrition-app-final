@@ -1,9 +1,11 @@
 import React from 'react';
 import {
   Flame, UtensilsCrossed, MessageSquare, Trophy, Target,
-  ChevronRight, Plus, Sparkles, TrendingDown, TrendingUp, Minus, Scale,
+  ChevronRight, Plus, Sparkles, TrendingDown, TrendingUp, Minus, Scale, Check,
 } from 'lucide-react';
 import useCountUp from './useCountUp';
+import InjuryTracker from './InjuryTracker';
+import WorkoutCheckIn from './WorkoutCheckIn';
 
 /**
  * Dashboard - today at a glance, measured against the active goal.
@@ -30,6 +32,125 @@ const mealTime = (iso) => {
   if (Number.isNaN(d.getTime())) return '';
   return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 };
+
+/* ------------------------------------------------------- goal adherence -- */
+
+const DAY_COLOURS = {
+  hit: '#34D399',
+  missed: '#F87171',
+  partial: '#FBBF24',
+  unlogged: '#2A3240',
+  no_goal: '#2A3240',
+};
+
+const DAY_LABELS = {
+  hit: 'On target',
+  missed: 'Missed',
+  partial: 'Partly logged',
+  unlogged: 'Nothing logged',
+  no_goal: 'No target set',
+};
+
+/** Mon/Tue/… for a YYYY-MM-DD string, parsed as a LOCAL date. */
+const weekdayOf = (iso) => {
+  // new Date('2026-08-09') parses as UTC midnight, which renders as the
+  // previous day for anyone west of Greenwich. Splitting the parts avoids it.
+  const [y, m, d] = String(iso).split('-').map(Number);
+  if (!y || !m || !d) return '';
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'short' });
+};
+
+/**
+ * The last seven days as a row of marks.
+ *
+ * Intentionally not a streak counter alone. A single number hides the shape -
+ * four hits then three misses and three misses then four hits are the same
+ * "4/7", and they mean opposite things about where you are heading.
+ */
+function AdherenceStrip({ history, summary }) {
+  const [open, setOpen] = React.useState(null);
+
+  if (!history?.length) return null;
+
+  return (
+    <div style={{ marginBottom: '1.25rem' }}>
+      <div className="flex items-center justify-between" style={{ marginBottom: '0.6rem' }}>
+        <span style={{ fontSize: '0.75rem', color: '#98A2B3' }}>
+          Last {history.length} days
+        </span>
+        {summary?.current_streak > 0 && (
+          <span className="pill" style={{
+            fontSize: '0.6875rem', color: '#34D399',
+            background: 'rgba(52,211,153,0.12)', border: '1px solid rgba(52,211,153,0.3)',
+          }}>
+            {summary.current_streak} day{summary.current_streak === 1 ? '' : 's'} on target
+          </span>
+        )}
+      </div>
+
+      <div style={{ display: 'flex', gap: '0.375rem' }}>
+        {history.map((day) => {
+          const colour = DAY_COLOURS[day.status] || '#2A3240';
+          const isOpen = open === day.date;
+          return (
+            <button
+              key={day.date}
+              type="button"
+              onClick={() => setOpen(isOpen ? null : day.date)}
+              title={`${day.date} — ${DAY_LABELS[day.status]}`}
+              style={{
+                flex: 1, background: 'none', border: 'none', padding: 0,
+                cursor: 'pointer', display: 'grid', gap: '0.3rem', justifyItems: 'center',
+              }}
+            >
+              <span style={{ fontSize: '0.625rem', color: '#667085' }}>
+                {weekdayOf(day.date).slice(0, 1)}
+              </span>
+              <span style={{
+                width: '100%', height: 6, borderRadius: 3, background: colour,
+                opacity: day.status === 'unlogged' || day.status === 'no_goal' ? 1 : 0.9,
+                outline: isOpen ? `2px solid ${colour}` : 'none',
+                outlineOffset: 2,
+              }} />
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Tapping a day says WHICH macro missed. "You missed" on its own is
+          not information anybody can act on. */}
+      {open && (() => {
+        const day = history.find((d) => d.date === open);
+        if (!day) return null;
+        return (
+          <div style={{
+            marginTop: '0.6rem', padding: '0.625rem 0.75rem', borderRadius: '0.5rem',
+            background: '#12151B', border: '1px solid #2A3240',
+            fontSize: '0.75rem', color: '#98A2B3', lineHeight: 1.5,
+          }}>
+            <span style={{ color: DAY_COLOURS[day.status], fontWeight: 600 }}>
+              {weekdayOf(day.date)}
+            </span>
+            {' — '}{day.summary}
+            {day.meals > 0 && (
+              <span style={{ color: '#667085' }}>
+                {' '}· {day.meals} meal{day.meals === 1 ? '' : 's'}
+              </span>
+            )}
+          </div>
+        );
+      })()}
+
+      {summary?.headline && (
+        <div style={{
+          marginTop: '0.6rem', fontSize: '0.75rem', color: '#667085', lineHeight: 1.5,
+        }}>
+          {summary.headline}
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** Concentric progress rings: calories outer, protein inner. */
 function GoalRings({ calories, calorieTarget, protein, proteinTarget, hasGoal }) {
@@ -165,64 +286,386 @@ function StatTile({ icon: Icon, label, value, sub, accent, onClick }) {
   );
 }
 
-/** Progress along a weight goal, start → now → target. */
-function WeightProgress({ weight, goal, onNavigate }) {
-  const entries = weight?.entries || [];
-  if (!goal?.target_weight || entries.length === 0) return null;
+/* ----------------------------------------------------------- this week -- */
 
-  const start = entries[0].weight_kg;
-  const current = entries[entries.length - 1].weight_kg;
-  const target = goal.target_weight;
+const MACRO_UNIT = (m) => (m === 'calories' ? 'kcal' : 'g');
 
-  const total = Math.abs(target - start);
-  const done = Math.abs(current - start);
-  const pct = total > 0 ? clamp((done / total) * 100) : 0;
-  const movedRight = Math.sign(target - start) === Math.sign(current - start) || current === start;
-
-  const change = current - start;
-  const Trend = change < -0.05 ? TrendingDown : change > 0.05 ? TrendingUp : Minus;
-
+/** A compact labelled figure for the right-hand side of the week band. */
+function WeekMetric({ icon: Icon, label, value, sub, accent = '#A78BFA' }) {
   return (
-    <div className="surface lift" style={{ padding: '1.25rem' }}>
-      <div className="flex items-center justify-between" style={{ marginBottom: '1rem' }}>
-        <div>
-          <div className="section-title">Weight goal</div>
-          <div className="section-sub">{start} kg → {target} kg</div>
+    <div style={{ display: 'flex', gap: '0.625rem', alignItems: 'flex-start', minWidth: 0 }}>
+      <Icon size={15} color={accent} style={{ flexShrink: 0, marginTop: 3 }} />
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: '0.6875rem', color: '#667085', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+          {label}
         </div>
-        <span className={`pill ${movedRight ? 'pill-good' : 'pill-warn'}`}>
-          <Trend size={13} />
-          {change > 0 ? '+' : ''}{change.toFixed(1)} kg
-        </span>
-      </div>
-
-      <div className="macro-track" style={{ height: '0.625rem' }}>
-        <div
-          className="macro-fill macro-fill-animate"
-          style={{
-            width: `${pct}%`,
-            background: 'linear-gradient(90deg,#8B5CF6,#22D3EE)',
-            boxShadow: '0 0 12px rgba(139,92,246,0.5)',
-          }}
-        />
-      </div>
-
-      <div className="flex items-center justify-between" style={{ marginTop: '0.625rem', fontSize: '0.75rem', color: '#667085' }}>
-        <span>{Math.round(pct)}% there</span>
-        <span className="tabular" style={{ color: '#EEF2F7', fontWeight: 600 }}>{current} kg now</span>
-        <button
-          onClick={() => onNavigate('view-progress')}
-          style={{ background: 'none', border: 'none', color: '#A78BFA', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer' }}
-        >
-          Details
-        </button>
+        <div className="tabular" style={{ fontSize: '1.0625rem', fontWeight: 700, marginTop: 1 }}>
+          {value}
+        </div>
+        {sub && (
+          <div style={{ fontSize: '0.6875rem', color: '#667085', marginTop: 1, lineHeight: 1.4 }}>
+            {sub}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-export default function Dashboard({ user, dashboardData, onNavigate, isLoading }) {
+/**
+ * The wide row: what you are working on, and how the week is going.
+ *
+ * This space used to hold the weight goal - one number that moves a few times
+ * a month, given the most prominent horizontal band on the screen. Challenges
+ * were meanwhile reduced to a count in a small tile, which told you there were
+ * three of them and nothing about whether you were close to finishing any.
+ *
+ * Everything here is already computed server-side by the adherence service, so
+ * this costs no extra requests.
+ */
+/**
+ * A slice of the leaderboard centred on you.
+ *
+ * Showing only the top five is demotivating for everyone outside it and
+ * uninformative for everyone in it - the useful question is "who is just
+ * ahead of me", which is the only gap you can actually close.
+ */
+function MiniBoard({ board, onNavigate }) {
+  const entries = board?.entries || [];
+  if (entries.length < 2) return null;
+
+  const myIndex = entries.findIndex((e) => e.is_you);
+  // Centre on you when you are outside the visible top, otherwise just show
+  // the top - being 1st should look like being 1st.
+  const window = myIndex > 2
+    ? entries.slice(Math.max(0, myIndex - 1), myIndex + 2)
+    : entries.slice(0, 3);
+
+  return (
+    <div style={{ display: 'grid', gap: '0.45rem', minWidth: 0 }}>
+      <div className="flex items-center justify-between" style={{ marginBottom: '0.15rem' }}>
+        <span style={{ fontSize: '0.6875rem', color: '#667085', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+          Leaderboard
+        </span>
+        <button
+          onClick={() => onNavigate('profile')}
+          style={{
+            background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+            color: '#A78BFA', fontSize: '0.6875rem', fontWeight: 600,
+          }}
+        >
+          All
+        </button>
+      </div>
+
+      {window.map((e) => (
+        <button
+          key={e.user_id}
+          onClick={() => onNavigate('profile')}
+          className="flex items-center justify-between"
+          style={{
+            padding: '0.4rem 0.55rem', borderRadius: '0.4rem', cursor: 'pointer',
+            background: e.is_you ? 'rgba(139,92,246,0.14)' : '#12151B',
+            border: `1px solid ${e.is_you ? 'rgba(139,92,246,0.35)' : '#2A3240'}`,
+            gap: '0.5rem', width: '100%', textAlign: 'left',
+          }}
+        >
+          <span className="tabular" style={{ color: '#667085', fontSize: '0.75rem', width: 16, flexShrink: 0 }}>
+            {e.rank}
+          </span>
+          <span style={{
+            flex: 1, minWidth: 0, fontSize: '0.75rem',
+            fontWeight: e.is_you ? 700 : 500,
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          }}>
+            {e.is_you ? 'You' : e.name}
+          </span>
+          <span className="tabular" style={{ fontSize: '0.75rem', fontWeight: 600, color: '#A78BFA', flexShrink: 0 }}>
+            {e.points.toLocaleString()}
+          </span>
+        </button>
+      ))}
+
+      {/* The gap to the person above - the only number here you can act on. */}
+      {myIndex > 0 && (
+        <div style={{ fontSize: '0.6875rem', color: '#667085', paddingLeft: '0.15rem' }}>
+          {entries[myIndex - 1].points - entries[myIndex].points} points behind {entries[myIndex - 1].name.split(' ')[0]}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function WeekBand({ challenges, summary, history, board, onNavigate }) {
+  // Unfinished first - a completed challenge is nice to see but it is not
+  // what you can still act on today.
+  const active = [...(challenges || [])]
+    .sort((a, b) => (a.completed === b.completed ? 0 : a.completed ? 1 : -1))
+    .slice(0, 3);
+
+  const assessable = summary?.assessable_days || 0;
+  const hits = summary?.hits || 0;
+  const streak = summary?.current_streak || 0;
+  const logged = history?.length
+    ? history.filter((d) => d.status !== 'unlogged').length
+    : 0;
+  const worst = summary?.weak_points?.[0] || null;
+
+  // With no goal and no challenges there is nothing honest to show, and an
+  // empty band is worse than no band.
+  if (!active.length && !assessable && !logged) {
+    return (
+      <button
+        onClick={() => onNavigate('enhanced-challenges')}
+        className="surface lift"
+        style={{
+          padding: '1.25rem', width: '100%', textAlign: 'left', cursor: 'pointer',
+          display: 'flex', alignItems: 'center', gap: '0.875rem',
+          background: 'linear-gradient(100deg, rgba(167,139,250,0.10), rgba(34,211,238,0.04))',
+        }}
+      >
+        <Trophy size={20} color="#A78BFA" />
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 700, fontSize: '0.9375rem' }}>Pick up a challenge</div>
+          <div style={{ fontSize: '0.8125rem', color: '#98A2B3', marginTop: 2 }}>
+            A few days of logging is enough for the app to build ones that fit you.
+          </div>
+        </div>
+        <ChevronRight size={18} color="#667085" />
+      </button>
+    );
+  }
+
+  return (
+    <div className="surface" style={{ padding: '1.25rem' }}>
+      <div className="flex items-center justify-between" style={{ marginBottom: '1rem' }}>
+        <span className="section-title">This week</span>
+        {assessable > 0 && (
+          <span
+            className={`pill ${hits === assessable ? 'pill-good' : hits ? 'pill-brand' : 'pill-warn'}`}
+            style={{ fontSize: '0.6875rem' }}
+          >
+            {hits} of {assessable} day{assessable === 1 ? '' : 's'} on target
+          </span>
+        )}
+      </div>
+
+      <div style={{
+        display: 'grid',
+        // Three regions when there is a board to show, two when there is not -
+        // an empty third column reads as something failing to load.
+        gridTemplateColumns: board?.entries?.length > 1
+          ? 'minmax(0,1.3fr) minmax(0,1fr) minmax(0,0.9fr)'
+          : 'minmax(0,1.4fr) minmax(0,1fr)',
+        gap: '1.5rem', alignItems: 'start',
+      }}>
+        {/* --- challenges, with progress rather than just a count --------- */}
+        <div style={{ display: 'grid', gap: '0.7rem', minWidth: 0 }}>
+          {active.length === 0 ? (
+            <button
+              onClick={() => onNavigate('enhanced-challenges')}
+              style={{
+                background: 'none', border: '1px dashed #2A3240', borderRadius: '0.625rem',
+                padding: '0.875rem', cursor: 'pointer', color: '#98A2B3',
+                fontSize: '0.8125rem', textAlign: 'left', display: 'flex',
+                alignItems: 'center', gap: '0.5rem',
+              }}
+            >
+              <Plus size={14} color="#A78BFA" />
+              No challenge running — pick one built from how you actually eat
+            </button>
+          ) : active.map((c, i) => {
+            const pct = clamp(num(c.progress_percentage));
+            const done = pct >= 100 || c.completed;
+            const left = num(c.days_remaining);
+            return (
+              <button
+                key={c.challenge_id ?? i}
+                onClick={() => onNavigate('enhanced-challenges')}
+                style={{
+                  background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                  textAlign: 'left', display: 'grid', gap: '0.3rem', minWidth: 0,
+                }}
+              >
+                <div className="flex items-center justify-between" style={{ gap: '0.5rem' }}>
+                  <span style={{
+                    fontSize: '0.8125rem', fontWeight: 600, whiteSpace: 'nowrap',
+                    overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0,
+                  }}>
+                    {done && <Check size={12} color="#34D399" style={{ marginRight: 4 }} />}
+                    {c.title || 'Challenge'}
+                  </span>
+                  <span className="tabular" style={{
+                    fontSize: '0.75rem', color: done ? '#34D399' : '#98A2B3', flexShrink: 0,
+                  }}>
+                    {Math.round(num(c.current_value))}/{Math.round(num(c.target_value))}
+                    {c.unit ? ` ${c.unit}` : ''}
+                  </span>
+                </div>
+                <div className="macro-track" style={{ height: '0.3125rem' }}>
+                  <div
+                    className="macro-fill macro-fill-animate"
+                    style={{
+                      width: `${pct}%`,
+                      background: done
+                        ? '#34D399'
+                        : 'linear-gradient(90deg,#8B5CF6,#22D3EE)',
+                    }}
+                  />
+                </div>
+                {/* Days left is the bit that makes a challenge feel live. A
+                    percentage alone gives no sense of whether it is winnable. */}
+                <div style={{ fontSize: '0.6875rem', color: '#667085' }}>
+                  {done ? 'complete' : left > 0 ? `${left} day${left === 1 ? '' : 's'} left` : 'last day'}
+                </div>
+              </button>
+            );
+          })}
+
+          {(challenges || []).length > 3 && (
+            <button
+              onClick={() => onNavigate('enhanced-challenges')}
+              style={{
+                background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                color: '#A78BFA', fontSize: '0.75rem', fontWeight: 600, textAlign: 'left',
+              }}
+            >
+              +{challenges.length - 3} more
+            </button>
+          )}
+        </div>
+
+        {/* --- the week in three figures ---------------------------------- */}
+        <div style={{ display: 'grid', gap: '0.875rem', minWidth: 0 }}>
+          <WeekMetric
+            icon={Flame} accent="#FBBF24" label="Streak"
+            value={streak ? `${streak} day${streak === 1 ? '' : 's'}` : '—'}
+            sub={streak ? 'on target in a row' : 'no run going yet'}
+          />
+          <WeekMetric
+            icon={UtensilsCrossed} accent="#22D3EE" label="Logged"
+            value={history?.length ? `${logged}/${history.length}` : '—'}
+            sub="days with meals recorded"
+          />
+          {/* The single most actionable line on the dashboard: not "you
+              missed", but which macro, how often, and by how much. */}
+          <WeekMetric
+            icon={Target} accent={worst ? '#F87171' : '#34D399'} label="To fix"
+            value={worst
+              ? `${worst.direction === 'short' ? '−' : '+'}${Math.abs(worst.average_delta).toFixed(0)}${MACRO_UNIT(worst.macro)}`
+              : 'nothing'}
+            sub={worst
+              ? `${worst.macro} on ${worst.days} of ${worst.of} days`
+              : assessable ? 'every macro in band' : 'not enough logged yet'}
+          />
+        </div>
+
+        <MiniBoard board={board} onNavigate={onNavigate} />
+      </div>
+
+      {summary?.headline && (
+        <div style={{
+          marginTop: '1rem', paddingTop: '0.875rem', borderTop: '1px solid #2A3240',
+          fontSize: '0.75rem', color: '#98A2B3', lineHeight: 1.5,
+        }}>
+          {summary.headline}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Weight goal, as a tile rather than a full-width bar.
+ *
+ * It had an entire row to itself for one number that moves a few times a
+ * month. The tile keeps everything that was on the bar - start, target,
+ * current, percentage, direction - and gives the row back to things that
+ * change daily.
+ */
+function WeightTile({ weight, goal, onNavigate }) {
+  const entries = weight?.entries || [];
+  const target = goal?.target_weight;
+  const current = entries.length ? entries[entries.length - 1].weight_kg : weight?.latest;
+
+  // No goal or no weigh-in: fall back to a plain reading rather than
+  // rendering an empty progress bar that implies zero progress.
+  if (!target || !entries.length) {
+    return (
+      <StatTile
+        icon={Scale} accent="#34D399" label="Weight"
+        value={current ? `${current} kg` : '—'}
+        sub={target ? `target ${target} kg` : 'log your first'}
+        onClick={() => onNavigate('set-goals')}
+      />
+    );
+  }
+
+  const start = entries[0].weight_kg;
+  const total = Math.abs(target - start);
+  const done = Math.abs(current - start);
+  const pct = total > 0 ? clamp((done / total) * 100) : 0;
+  const movedRight =
+    Math.sign(target - start) === Math.sign(current - start) || current === start;
+
+  const change = current - start;
+  const remaining = Math.abs(target - current);
+  const Trend = change < -0.05 ? TrendingDown : change > 0.05 ? TrendingUp : Minus;
+
+  return (
+    <div
+      className="surface lift"
+      onClick={() => onNavigate('view-progress')}
+      style={{ padding: '1.125rem', cursor: 'pointer' }}
+    >
+      <div className="flex items-center justify-between" style={{ marginBottom: '0.75rem' }}>
+        <span className="metric-label">Weight goal</span>
+        <Scale size={16} color="#34D399" />
+      </div>
+
+      <div className="flex items-center justify-between" style={{ gap: '0.5rem' }}>
+        <span className="tabular" style={{ fontSize: '1.75rem', fontWeight: 700, letterSpacing: '-0.02em' }}>
+          {current} kg
+        </span>
+        <span
+          className={`pill ${movedRight ? 'pill-good' : 'pill-warn'}`}
+          style={{ fontSize: '0.6875rem' }}
+        >
+          <Trend size={12} />
+          {change > 0 ? '+' : ''}{change.toFixed(1)}
+        </span>
+      </div>
+
+      <div className="macro-track" style={{ height: '0.3125rem', marginTop: '0.6rem' }}>
+        <div
+          className="macro-fill macro-fill-animate"
+          style={{
+            width: `${pct}%`,
+            background: 'linear-gradient(90deg,#8B5CF6,#22D3EE)',
+          }}
+        />
+      </div>
+
+      <div style={{ fontSize: '0.75rem', color: '#667085', marginTop: 6 }}>
+        {remaining < 0.05
+          ? `target reached · ${target} kg`
+          : `${remaining.toFixed(1)} kg to ${target} · ${Math.round(pct)}% there`}
+      </div>
+    </div>
+  );
+}
+
+export default function Dashboard({
+  user, dashboardData, onNavigate, isLoading, injuries, apiBase, onInjuryChanged,
+  workout, board, onWorkoutLogged,
+}) {
   const stats = dashboardData?.dailyStats || {};
-  const meals = dashboardData?.recentMeals || [];
+  // Today's meals in time order, plus how the completed days went. The old
+  // `recentMeals` was the last N logs whenever they happened, which is a
+  // different question - and one nobody was asking.
+  const timeline = dashboardData?.timeline || [];
+  const history = dashboardData?.adherenceHistory || [];
+  const summary = dashboardData?.adherenceSummary || null;
   const challenges = dashboardData?.challenges || [];
   const goals = dashboardData?.goals || [];
   const weight = dashboardData?.weight;
@@ -327,7 +770,26 @@ export default function Dashboard({ user, dashboardData, onNavigate, isLoading }
         </div>
       </div>
 
-      <WeightProgress weight={weight} goal={goal} onNavigate={onNavigate} />
+      {/* The wide row now carries what changes daily - challenges in
+          progress, the streak, logging consistency and the macro to fix -
+          instead of a weight bar that moves a few times a month. */}
+      <WeekBand
+        challenges={challenges}
+        summary={summary}
+        history={history}
+        board={board}
+        onNavigate={onNavigate}
+      />
+
+      {/* Training, answerable from the first screen. The app produced workout
+          plans for months and never asked whether any of them happened -
+          putting the question behind a profile tab would keep it unanswered. */}
+      <WorkoutCheckIn
+        apiBase={apiBase}
+        workout={workout}
+        onLogged={onWorkoutLogged}
+        compact
+      />
 
       {/* Stats */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))', gap: '1rem' }}>
@@ -341,18 +803,32 @@ export default function Dashboard({ user, dashboardData, onNavigate, isLoading }
           value={num(stats.meal_count)} sub="logged today"
           onClick={() => onNavigate('log-meal')}
         />
+        {/* Weight goal moved down here, keeping its progress track. */}
+        <WeightTile weight={weight} goal={goal} onNavigate={onNavigate} />
+        {/* Protein replaces the challenge count, which said "3" and nothing
+            about whether any of them were close to done - that now lives in
+            the band above with actual progress. Protein is the macro most
+            often missed, and the one worth watching mid-day. */}
         <StatTile
-          icon={Scale} accent="#34D399" label="Weight"
-          value={weight?.latest ? `${weight.latest} kg` : '—'}
-          sub={weight?.count > 1 ? `${weight.change_kg > 0 ? '+' : ''}${weight.change_kg} kg overall` : 'log your first'}
-          onClick={() => onNavigate('set-goals')}
-        />
-        <StatTile
-          icon={Trophy} accent="#A78BFA" label="Challenges"
-          value={challenges.length} sub={challenges.length ? 'in progress' : 'none active'}
-          onClick={() => onNavigate('enhanced-challenges')}
+          icon={Target} accent="#22D3EE" label="Protein"
+          value={`${Math.round(protein)}g`}
+          sub={hasGoal && proteinTarget
+            ? (protein >= proteinTarget
+                ? 'target met'
+                : `${Math.round(proteinTarget - protein)}g to go`)
+            : 'no target set'}
+          onClick={() => onNavigate('log-meal')}
         />
       </div>
+
+      {/* Injuries, in full, right here.
+          An injury changes every workout, meal and challenge the app produces,
+          so checking in on it should take one tap from the screen you open
+          first - not a trip to another tab. The card collapses to nothing when
+          there is no injury to report. */}
+      {injuries?.injuries?.length > 0 && (
+        <InjuryTracker data={injuries} apiBase={apiBase} onChanged={onInjuryChanged} />
+      )}
 
       {/* Assistant */}
       <button
@@ -382,10 +858,14 @@ export default function Dashboard({ user, dashboardData, onNavigate, isLoading }
         <ChevronRight size={18} color="#667085" />
       </button>
 
-      {/* Recent meals */}
+      {/* Today, and how the week has gone.
+          This replaced "Recent meals", which showed the last five logs
+          regardless of when - so at 9am it was mostly yesterday's dinner, and
+          there was no way to see what you had actually eaten today or whether
+          any recent day had hit its targets. */}
       <div className="surface" style={{ padding: '1.25rem' }}>
         <div className="flex items-center justify-between" style={{ marginBottom: '1rem' }}>
-          <span className="section-title">Recent meals</span>
+          <span className="section-title">Today</span>
           <button
             onClick={() => onNavigate('view-progress')}
             style={{ background: 'none', border: 'none', color: '#A78BFA', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer' }}
@@ -394,7 +874,9 @@ export default function Dashboard({ user, dashboardData, onNavigate, isLoading }
           </button>
         </div>
 
-        {meals.length === 0 ? (
+        <AdherenceStrip history={history} summary={summary} />
+
+        {timeline.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '2rem 1rem' }}>
             <Sparkles size={26} color="#3A4453" style={{ marginBottom: 10 }} />
             <div style={{ color: '#98A2B3', fontSize: '0.875rem' }}>Nothing logged yet today</div>
@@ -404,39 +886,61 @@ export default function Dashboard({ user, dashboardData, onNavigate, isLoading }
           </div>
         ) : (
           <div style={{ display: 'grid', gap: '0.5rem' }}>
-            {meals.slice(0, 5).map((meal, i) => (
-              <div
-                key={meal.id ?? i}
-                className="flex items-center justify-between lift"
-                style={{
-                  padding: '0.75rem', borderRadius: '0.625rem',
-                  background: '#12151B', border: '1px solid #2A3240',
-                }}
-              >
-                <div style={{ minWidth: 0 }}>
-                  {/* /meals/history nests the name inside food_item - it does
-                      not return a flat food_name. Reading the wrong key is why
-                      every row said "Meal". */}
-                  <div style={{ fontSize: '0.875rem', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {meal.food_item?.name || meal.food_name || meal.name || 'Meal'}
-                    {num(meal.quantity) > 1 && (
-                      <span style={{ color: '#667085', fontWeight: 500 }}>
-                        {' '}&times;{formatQty(meal.quantity)}
-                      </span>
-                    )}
+            {timeline.map((meal, i) => {
+              // Gap since the previous meal. Worth showing because a seven
+              // hour hole between lunch and dinner explains an evening binge
+              // far better than the calorie total does.
+              const previous = timeline[i - 1];
+              const gapHours = previous && meal.local_hour != null && previous.local_hour != null
+                ? meal.local_hour - previous.local_hour
+                : null;
+
+              return (
+                <React.Fragment key={meal.id ?? i}>
+                  {gapHours != null && gapHours >= 5 && (
+                    <div style={{
+                      fontSize: '0.6875rem', color: '#667085',
+                      paddingLeft: '0.75rem', display: 'flex',
+                      alignItems: 'center', gap: '0.4rem',
+                    }}>
+                      <span style={{ width: 1, height: 12, background: '#2A3240' }} />
+                      {gapHours} hours
+                    </div>
+                  )}
+                  <div
+                    className="flex items-center justify-between lift"
+                    style={{
+                      padding: '0.75rem', borderRadius: '0.625rem',
+                      background: '#12151B', border: '1px solid #2A3240',
+                    }}
+                  >
+                    <div style={{
+                      fontSize: '0.75rem', color: '#98A2B3', fontVariantNumeric: 'tabular-nums',
+                      width: 44, flexShrink: 0,
+                    }}>
+                      {meal.local_time || mealTime(meal.logged_at)}
+                    </div>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ fontSize: '0.875rem', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {meal.name || 'Meal'}
+                        {num(meal.quantity) > 1 && (
+                          <span style={{ color: '#667085', fontWeight: 500 }}>
+                            {' '}&times;{formatQty(meal.quantity)}
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: '#667085', marginTop: 2 }}>
+                        <span style={{ textTransform: 'capitalize' }}>{meal.meal_type || 'meal'}</span>
+                        {num(meal.protein) > 0 && <> · {Math.round(num(meal.protein))}g protein</>}
+                      </div>
+                    </div>
+                    <div className="tabular" style={{ fontSize: '0.875rem', fontWeight: 700, color: '#FBBF24', flexShrink: 0 }}>
+                      {Math.round(num(meal.calories))} kcal
+                    </div>
                   </div>
-                  {/* Three rows all reading "Lunch" is not much use - the time
-                      is what tells them apart. */}
-                  <div style={{ fontSize: '0.75rem', color: '#667085', marginTop: 2 }}>
-                    <span style={{ textTransform: 'capitalize' }}>{meal.meal_type || 'meal'}</span>
-                    {mealTime(meal.logged_at) && <> · {mealTime(meal.logged_at)}</>}
-                  </div>
-                </div>
-                <div className="tabular" style={{ fontSize: '0.875rem', fontWeight: 700, color: '#FBBF24', flexShrink: 0 }}>
-                  {Math.round(num(meal.calories))} kcal
-                </div>
-              </div>
-            ))}
+                </React.Fragment>
+              );
+            })}
           </div>
         )}
       </div>

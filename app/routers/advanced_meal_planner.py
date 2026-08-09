@@ -4,6 +4,12 @@ from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from enum import Enum
 
+from sqlalchemy.orm import Session
+
+from app.auth import get_current_active_user
+from app.database import User, get_db
+from app.services import macro_targets
+
 from ..services.advanced_meal_planner_service import advanced_meal_planner_service
 
 logger = logging.getLogger(__name__)
@@ -20,6 +26,11 @@ class MealPlanRequest(BaseModel):
     time_per_meal_min: Optional[int] = Field(30, ge=5, description="Average time per meal in minutes")
     region_or_cuisine: Optional[str] = Field(None, description="Preferred region or cuisine")
     user_notes: Optional[str] = Field(None, description="Additional user notes or preferences")
+    # Off by default so the existing calorie-only behaviour is untouched. When
+    # set, every day is held to all four macros from the user's active goal
+    # rather than to "a balance appropriate for general healthy eating", which
+    # was the only macro instruction the planner had.
+    match_macros: bool = Field(default=False, description="Hold every day to the user's macro targets")
 
 class MealPlanAdaptationRequest(BaseModel):
     current_plan: Dict[str, Any] = Field(..., description="Current meal plan to adapt")
@@ -27,21 +38,43 @@ class MealPlanAdaptationRequest(BaseModel):
     new_requirements: Optional[Dict[str, Any]] = Field(None, description="New requirements or preferences")
 
 @router.post("/advanced-meal-planner/generate", status_code=201)
-async def generate_advanced_meal_plan(request: MealPlanRequest):
+async def generate_advanced_meal_plan(
+    request: MealPlanRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
     """
     Generate a comprehensive 7-day meal plan using AdvancedMealPlanner AI agent.
     """
     try:
         # Convert Pydantic model to dict
         payload = request.dict()
-        
-        result = advanced_meal_planner_service.generate_meal_plan(payload)
-        
+
+        target = None
+        if request.match_macros:
+            # A full day's targets, applied to each of the seven days.
+            target = macro_targets.resolve(db, current_user,
+                                           meal_type="full_day", basis="daily")
+            if target is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Set a nutrition goal first and the plan can be built around your macros.",
+                )
+
+        result = advanced_meal_planner_service.generate_meal_plan(payload, macro_target=target)
+
         if result["success"]:
+            plan = result["meal_plan"]
+            # Attached to the plan itself so it survives being saved and
+            # restored - a verification that vanishes on reload is not much of
+            # a record.
+            if target:
+                plan["macro_target"] = target.as_dict()
+                plan["verification"] = result.get("verification")
             return {
                 "success": True,
                 "message": "Advanced meal plan generated successfully",
-                "data": result["meal_plan"]
+                "data": plan
             }
         else:
             error_msg = result.get("error", "Failed to generate meal plan")

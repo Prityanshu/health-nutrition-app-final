@@ -11,6 +11,7 @@ from app.database import get_db, User
 from app.auth import get_current_user
 from app.services.ml_recommendations import IntelligentRecommendationEngine, UserPreferenceLearner
 from app.services.personalization import personalised_feed
+from app.services import daytime
 
 router = APIRouter()
 
@@ -83,11 +84,14 @@ async def get_smart_meal_suggestions(
     
     engine = IntelligentRecommendationEngine(db)
     
-    # Determine current meal type
-    meal_type = engine.determine_meal_type(datetime.now())
-    
+    # The user's clock, not the server's. Meal type is decided purely by the
+    # hour, so on a UTC server an IST user asking at 20:00 local (14:30 UTC)
+    # was offered lunch.
+    now_local = daytime.local_now(current_user)
+    meal_type = engine.determine_meal_type(now_local)
+
     context = {
-        'current_time': datetime.now(),
+        'current_time': now_local,
         'meal_type': meal_type,
         'exclude_recent_days': exclude_recent_days
     }
@@ -99,7 +103,7 @@ async def get_smart_meal_suggestions(
         'suggestions': recommendations['food_recommendations'][:5],
         'cuisine_to_try': recommendations.get('cuisine_recommendations', [])[:2],
         'variety_tips': recommendations.get('variety_suggestions', []),
-        'context': f"Suggestions for {meal_type} at {datetime.now().strftime('%I:%M %p')}"
+        'context': f"Suggestions for {meal_type} at {now_local.strftime('%I:%M %p')}"
     }
 
 @router.post("/update-food-rating")

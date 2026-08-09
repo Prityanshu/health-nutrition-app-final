@@ -57,6 +57,7 @@ export default function AppShell({
   activeView,
   onNavigate,
   user,
+  points,
   onLogout,
   sidebarOpen,
   setSidebarOpen,
@@ -144,23 +145,34 @@ export default function AppShell({
         </nav>
 
         <div style={{ borderTop: '1px solid #2A3240', paddingTop: '0.75rem', marginTop: '0.75rem' }}>
-          <div className="flex items-center" style={{ gap: '0.625rem', padding: '0 0.75rem 0.625rem' }}>
+          {/* This said "View profile" and went nowhere for the whole life of
+              the app. It is a button now. */}
+          <button
+            className={`nav-item ${activeView === 'profile' ? 'is-active' : ''}`}
+            onClick={() => onNavigate('profile')}
+            style={{ gap: '0.625rem', width: '100%' }}
+          >
             <div
               className="flex items-center justify-center"
               style={{
-                width: 32, height: 32, borderRadius: 999,
-                background: '#2A3240', fontSize: '0.75rem', fontWeight: 700, color: '#EEF2F7',
+                width: 32, height: 32, borderRadius: 999, flexShrink: 0,
+                background: activeView === 'profile'
+                  ? 'linear-gradient(135deg,#8B5CF6,#22D3EE)' : '#2A3240',
+                fontSize: '0.75rem', fontWeight: 700,
+                color: activeView === 'profile' ? '#0B0E14' : '#EEF2F7',
               }}
             >
               {initials}
             </div>
-            <div style={{ minWidth: 0 }}>
+            <div style={{ minWidth: 0, textAlign: 'left' }}>
               <div style={{ fontSize: '0.8125rem', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {user?.full_name || user?.username || 'Athlete'}
               </div>
-              <div style={{ fontSize: '0.6875rem', color: '#667085' }}>View profile</div>
+              <div style={{ fontSize: '0.6875rem', color: '#667085' }}>
+                {points != null ? `${points.toLocaleString()} points` : 'View profile'}
+              </div>
             </div>
-          </div>
+          </button>
           <button className="nav-item" onClick={onLogout}>
             <LogOut size={17} />
             <span>Sign out</span>

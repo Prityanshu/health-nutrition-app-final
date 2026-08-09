@@ -69,7 +69,10 @@ class AdvancedMealPlannerService:
                 2. Prefer meals that match food_preferences and comply with dietary_restrictions.
                 3. Respect budget_per_day by selecting cost-conscious staples and suggesting swaps.
                 4. Make recipes realistic given equipment and time_per_meal. For heavy work_hours_per_day, prefer quick prep / make-ahead meals.
-                5. Aim for daily macro balance (protein-carbs-fat) roughly appropriate for general healthy eating. Provide protein-forward or low-carb variations only if requested.
+                5. MACRO TARGETS: if the user inputs include protein/carb/fat targets, EVERY day must total
+                   all four numbers inside the stated ranges - not just calories. Adjust portion sizes and
+                   pick dishes to reach them. If no macro targets are given, aim for a balance appropriate
+                   for general healthy eating.
                 6. Provide variety across the 7 days and reuse ingredients to reduce waste/cost.
 
                 OUTPUT SCHEMA (Return this exact JSON structure):
@@ -121,8 +124,19 @@ class AdvancedMealPlannerService:
             markdown=False,  # keep the agent's output plain text (we require strict JSON)
         )
 
-    def build_query(self, payload: dict) -> str:
-        """Build query from user inputs"""
+    def build_query(self, payload: dict, macro_target=None) -> str:
+        """
+        Build query from user inputs.
+
+        `macro_target` is optional. Without it the planner behaves exactly as
+        it always has - calorie-only - so the generic path is untouched.
+
+        Before this existed the only macro instruction was "aim for daily macro
+        balance roughly appropriate for general healthy eating", which is
+        identical advice for a 60kg sedentary user and a 90kg athlete. The plan
+        still REPORTED per-meal macros, so it looked constrained while being
+        constrained by nothing.
+        """
         # convert lists to comma-separated strings for concise prompt
         prefs = ", ".join(payload.get('food_preferences', [])) if payload.get('food_preferences') else "none"
         restrictions = ", ".join(payload.get('dietary_restrictions', [])) if payload.get('dietary_restrictions') else "none"
@@ -140,9 +154,18 @@ class AdvancedMealPlannerService:
         # than leaving the model to invent one.
         budget = payload.get('budget_per_day')
         if budget:
+            # Only refer to targets that are actually in the prompt. The
+            # original said "do not sacrifice the protein target" when no
+            # protein target was ever given - the model was told to protect a
+            # number it could not see. Naming them conditionally keeps that
+            # from happening in either direction.
+            what_to_protect = (
+                "the macro targets below" if macro_target is not None
+                else "nutritional quality"
+            )
             budget_line = (
                 f"- budget_per_day: {budget} (INR). Respect this, but do not "
-                f"sacrifice the protein target to hit it - if the two conflict, "
+                f"sacrifice {what_to_protect} to hit it - if the two conflict, "
                 f"prioritise nutrition and note the overage in meta.assumptions."
             )
         else:
@@ -151,6 +174,14 @@ class AdvancedMealPlannerService:
                 "Choose whatever best meets the nutrition targets, and still fill "
                 "in est_cost fields with realistic estimates for reference."
             )
+
+        # Goes after the inputs and immediately before the instruction to
+        # generate - the last thing read, which is where a hard requirement
+        # has to sit.
+        macro_block = ""
+        if macro_target is not None:
+            macro_block = "\n" + macro_target.prompt_block(
+                per_day=True, structured=True) + "\n"
 
         query = dedent(f"""\
             Create a 7-day meal plan JSON for the following user inputs.
@@ -167,15 +198,22 @@ class AdvancedMealPlannerService:
             - time_per_meal_min: {payload.get('time_per_meal_min', 30)}
             - region_or_cuisine: {region}
             - user_notes: {payload.get('user_notes', '')}
-
+            {macro_block}
             Please generate the 7-day plan now.
         """)
         return query
 
-    def generate_meal_plan(self, payload: dict) -> dict:
-        """Generate a 7-day meal plan using AdvancedMealPlanner agent"""
+    def generate_meal_plan(self, payload: dict, macro_target=None) -> dict:
+        """
+        Generate a 7-day meal plan using AdvancedMealPlanner agent.
+
+        With `macro_target`, every day is held to all four macros and the
+        result is checked by summing the plan's own per-meal figures - which is
+        stronger than reading a stated total, because it uses the numbers the
+        plan is actually made of.
+        """
         try:
-            query = self.build_query(payload)
+            query = self.build_query(payload, macro_target=macro_target)
             logger.info(f"AdvancedMealPlanner query: {query}")
 
             # call the agent; using run() returns a RunOutput object
@@ -241,9 +279,44 @@ class AdvancedMealPlannerService:
                         "error": f"Failed parsing JSON from agent output: {str(e)}"
                     }
 
+            verification = None
+            if macro_target is not None:
+                from app.services import macro_targets as mt
+
+                verification = mt.verify_structured(macro_target, parsed)
+
+                # One retry, naming the days that missed and by how much.
+                # A 7-day plan is expensive to generate, so this is bounded at
+                # a single attempt and only kept if it is genuinely better.
+                if verification.get("checked") and not verification.get("hit"):
+                    logger.warning("Meal plan missed macros: %s", verification["summary"])
+                    try:
+                        retry_query = (
+                            f"{query}\n\n            "
+                            f"{mt.retry_brief_structured(verification, macro_target)}"
+                        )
+                        again = self.advanced_meal_agent.run(retry_query)
+                        again_text = _strip_code_fences(
+                            again.content if hasattr(again, "content") else str(again)
+                        )
+                        second = json.loads(again_text)
+                        recheck = mt.verify_structured(macro_target, second)
+                        if recheck.get("checked") and (
+                            recheck.get("days_on_target", 0)
+                            > verification.get("days_on_target", 0)
+                        ):
+                            parsed, agent_text = second, again_text
+                            verification = recheck
+                            verification["retried"] = True
+                    except Exception as e:
+                        # A failed retry must never cost the user the plan they
+                        # already have.
+                        logger.warning("Meal plan retry failed, keeping first: %s", e)
+
             return {
                 "success": True,
                 "meal_plan": parsed,
+                "verification": verification,
                 "raw_response": agent_text
             }
 

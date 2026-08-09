@@ -48,6 +48,20 @@ class WorkoutPlanRequest(BaseModel):
         le=300.0,
         description="Weight in kg (optional)"
     )
+    sport: Optional[str] = Field(
+        default=None,
+        max_length=60,
+        description=(
+            "Sport or activity trained FOR - football, cricket, running. Not the "
+            "same as a fitness goal: sport preparation has different demands and "
+            "has to leave enough in the legs to actually play."
+        ),
+    )
+    preferences: Optional[str] = Field(
+        default=None,
+        max_length=400,
+        description="Anything the other fields cannot express - disliked exercises, schedule quirks.",
+    )
 
 class WorkoutAdaptationRequest(BaseModel):
     """Request model for workout plan adaptation"""
@@ -83,7 +97,9 @@ async def generate_workout_plan(request: WorkoutPlanRequest):
             equipment=request.equipment,
             constraints=request.constraints,
             age=request.age,
-            weight=request.weight
+            weight=request.weight,
+            sport=request.sport,
+            preferences=request.preferences,
         )
 
         if result["success"]:

@@ -4,6 +4,12 @@ from pydantic import BaseModel, Field
 from typing import List, Optional
 from enum import Enum
 
+from sqlalchemy.orm import Session
+
+from app.auth import get_current_active_user
+from app.database import User, get_db
+from app.services import macro_targets
+
 from ..services.culinaryexplorer_service import culinaryexplorer_service
 
 logger = logging.getLogger(__name__)
@@ -80,6 +86,11 @@ class RegionalMealPlanRequest(BaseModel):
     time_constraint: int = Field(default=60, ge=15, le=300, description="Maximum cooking time in minutes")
     cooking_skill: CookingSkill = Field(default=CookingSkill.INTERMEDIATE, description="User's cooking skill level")
     available_ingredients: List[str] = Field(default=[], description="Available ingredients (optional)")
+    # Off by default, so the existing generic behaviour is untouched.
+    personalised: bool = Field(default=False, description="Build the plan to hit the user's macro targets")
+    # daily = the day's goal split across this meal type
+    # remaining = what is left of today after everything already logged
+    basis: str = Field(default="daily", description="daily | remaining")
 
 class RegionalRecipeRequest(BaseModel):
     cuisine_region: CuisineRegion = Field(..., description="Preferred cuisine or regional preference")
@@ -95,21 +106,74 @@ class RegionalPlanAdaptationRequest(BaseModel):
     new_cuisine_preference: Optional[str] = Field(default=None, description="New cuisine preference (optional)")
     new_dietary_restrictions: Optional[List[str]] = Field(default=None, description="New dietary restrictions (optional)")
 
-@router.post("/culinary/generate-meal-plan", status_code=201)
-async def generate_regional_meal_plan(request: RegionalMealPlanRequest):
+@router.get("/culinary/macro-targets")
+async def get_macro_targets(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
     """
-    Generate a personalized regional meal plan using CulinaryExplorer AI agent.
+    What each mode would aim at right now.
+
+    Fetched before generating so the numbers can be shown on the mode picker -
+    personalisation applied invisibly is indistinguishable from no
+    personalisation at all.
     """
     try:
+        return {"success": True, **macro_targets.preview(db, current_user)}
+    except Exception as e:
+        logger.error("macro target preview failed: %s", e, exc_info=True)
+        return {"success": False, "has_goal": False}
+
+
+@router.post("/culinary/generate-meal-plan", status_code=201)
+async def generate_regional_meal_plan(
+    request: RegionalMealPlanRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Generate a regional meal plan using CulinaryExplorer AI agent.
+
+    With `personalised` set, the plan is built to hit the user's macro targets
+    rather than being nutritionally arbitrary - the generator has never had
+    access to a single one of their numbers, so a full day of regional food
+    could total 40g of protein against a 150g target and look entirely fine.
+    """
+    try:
+        target = None
+        if request.personalised:
+            target = macro_targets.resolve(
+                db, current_user,
+                meal_type=request.meal_type.value,
+                basis=request.basis,
+            )
+            if target is None:
+                # No goal set. Refuse rather than generating something that
+                # claims to be personalised and is not.
+                raise HTTPException(
+                    status_code=400,
+                    detail="Set a nutrition goal first and this can build around your targets.",
+                )
+            if not target.usable:
+                raise HTTPException(
+                    status_code=400,
+                    detail=("You have already met today's targets, so there is nothing "
+                            "left to plan around. Switch to a standard plan, or try "
+                            "'my daily targets' instead of what's left."),
+                )
+
         result = await culinaryexplorer_service.generate_regional_meal_plan(
             cuisine_region=request.cuisine_region.value,
             meal_type=request.meal_type.value,
             dietary_restrictions=request.dietary_restrictions,
             time_constraint=request.time_constraint,
             cooking_skill=request.cooking_skill.value,
-            available_ingredients=request.available_ingredients
+            available_ingredients=request.available_ingredients,
+            macro_target=target,
         )
         if result["success"]:
+            if target:
+                result["macro_target"] = target.as_dict()
             return {"success": True, "message": "Regional meal plan generated successfully", "data": result}
         else:
             raise HTTPException(status_code=500, detail=result.get("error", "Failed to generate regional meal plan"))

@@ -3,6 +3,7 @@ import {
   Activity, ArrowLeft, ArrowRight, Check, ChefHat, Eye, EyeOff,
   Loader2, Lock, Mail, Sparkles, Target, User as UserIcon, AlertCircle,
 } from 'lucide-react';
+import { browserTimezone, syncTimezone } from '../localDay';
 
 /**
  * Sign in / create account.
@@ -160,6 +161,10 @@ export default function Auth({ apiBase, onAuthenticated, notice: initialNotice =
       const data = await res.json().catch(() => ({}));
 
       if (res.ok && data.access_token) {
+        // Store first, then sync: syncTimezone reads the token from
+        // localStorage, and onAuthenticated is what puts it there.
+        localStorage.setItem('token', data.access_token);
+        await syncTimezone(apiBase);
         onAuthenticated(data.access_token);
       } else {
         setError(readError(data.detail, 'That username or password was not recognised.'));
@@ -216,6 +221,10 @@ export default function Auth({ apiBase, onAuthenticated, notice: initialNotice =
           age,
           weight,
           height,
+          // So the very first day is theirs, not UTC's. Without this a user
+          // registering at 01:00 IST would have their first meals filed
+          // against the previous day.
+          timezone: browserTimezone(),
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -230,6 +239,8 @@ export default function Auth({ apiBase, onAuthenticated, notice: initialNotice =
         const loginData = await loginRes.json().catch(() => ({}));
 
         if (loginRes.ok && loginData.access_token) {
+          localStorage.setItem('token', loginData.access_token);
+          await syncTimezone(apiBase);
           onAuthenticated(loginData.access_token);
           return;
         }

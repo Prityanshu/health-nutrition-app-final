@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   CalendarDays, Flame, Wallet, Clock, Briefcase, Leaf, Wheat, Milk, Nut,
   Egg, Flame as Stove, Microwave, Refrigerator, ShoppingCart, ChevronDown,
-  Coffee, UtensilsCrossed, Sparkles, Check,
+  Coffee, UtensilsCrossed, Sparkles, Check, Target,
 } from 'lucide-react';
 import {
   PageHero, Section, TileGroup, SliderField, ChipToggles, ChipInput,
@@ -181,6 +181,7 @@ export default function MealPlanner({ apiBase }) {
   const [prefs, setPrefs] = useState([]);
   const [notes, setNotes] = useState('');
   const [goalCalories, setGoalCalories] = useState(null);
+  const [goalMacros, setGoalMacros] = useState(null);
   // Two ways to build a week. Standard uses only what is on this form.
   // Personalised additionally uses the profile behind the For You page -
   // logged meals, cuisine affinity, spending habits, stated restrictions -
@@ -206,8 +207,19 @@ export default function MealPlanner({ apiBase }) {
     })
       .then((r) => (r.ok ? r.json() : []))
       .then((goals) => {
-        const t = goals?.[0]?.target_calories;
+        const g = goals?.[0];
+        const t = g?.target_calories;
         if (t) { setCalories(Math.round(t)); setGoalCalories(Math.round(t)); }
+        // The macro targets were fetched and thrown away before - only
+        // calories were kept, which is why the planner never knew them.
+        if (g) {
+          setGoalMacros({
+            calories: Math.round(g.target_calories || 0),
+            protein: Math.round(g.target_protein || 0),
+            carbs: Math.round(g.target_carbs || 0),
+            fat: Math.round(g.target_fat || 0),
+          });
+        }
       })
       .catch(() => {});
   }, [apiBase]);
@@ -300,6 +312,12 @@ export default function MealPlanner({ apiBase }) {
       time_per_meal_min: timePerMeal,
       region_or_cuisine: cuisine,
       user_notes: personalNotes(),
+      // Personalised mode now holds every DAY to all four macros from the
+      // goal. Before this the only macro instruction was "aim for a balance
+      // appropriate for general healthy eating" - identical advice for every
+      // user - while the plan still reported per-meal macros, so it looked
+      // constrained by numbers it had never been given.
+      match_macros: personalised,
     });
 
   // The endpoint returns `data = result["meal_plan"]`, so the response body
@@ -330,7 +348,9 @@ export default function MealPlanner({ apiBase }) {
           {
             key: true, icon: Sparkles, title: 'Personalised plan',
             body: profileReady
-              ? `Also uses your ${profile.profile.log_count} logged meals — the foods you actually eat, your cuisine, and where your protein falls short.`
+              ? (goalMacros?.protein
+                  ? `Every day built to hit ${goalMacros.calories} kcal, ${goalMacros.protein}g protein, ${goalMacros.carbs}g carbs and ${goalMacros.fat}g fat — plus the foods you actually eat, from your ${profile.profile.log_count} logged meals.`
+                  : `Also uses your ${profile.profile.log_count} logged meals — the foods you actually eat, your cuisine, and where your protein falls short.`)
               : 'Log a few meals first and this will use your real eating patterns.',
             disabled: !profileReady,
           },
@@ -379,6 +399,90 @@ export default function MealPlanner({ apiBase }) {
                 `you often skip ${profile.profile.often_skipped.join(' & ')}`,
             ].filter(Boolean).join(' · ')}
             . Everything below is still editable.
+          </div>
+        </div>
+      )}
+
+      {/* The macro numbers every day will be built to. Shown before
+          generating, because a target you cannot see is indistinguishable
+          from no target - and this is the one thing the planner never had. */}
+      {personalised && goalMacros?.protein > 0 && (
+        <div style={{
+          background: 'rgba(34,211,238,0.07)', border: '1px solid rgba(34,211,238,0.22)',
+          borderRadius: '0.75rem', padding: '1rem', display: 'grid', gap: '0.75rem',
+        }}>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <Target size={15} color="#22D3EE" />
+            <span style={{ fontSize: '0.8125rem', fontWeight: 600 }}>
+              Every day will be built to hit
+            </span>
+          </div>
+          <div style={{
+            display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(90px,1fr))', gap: '0.75rem',
+          }}>
+            {[
+              ['Calories', goalMacros.calories, 'kcal', '#FBBF24'],
+              ['Protein', goalMacros.protein, 'g', '#22D3EE'],
+              ['Carbs', goalMacros.carbs, 'g', '#A78BFA'],
+              ['Fat', goalMacros.fat, 'g', '#F87171'],
+            ].map(([label, value, unit, colour]) => (
+              <div key={label}>
+                <div style={{ fontSize: '0.625rem', color: '#667085', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  {label}
+                </div>
+                <div className="tabular" style={{ fontSize: '1.0625rem', fontWeight: 700, color: colour, marginTop: 2 }}>
+                  {value}<span style={{ fontSize: '0.6875rem', color: '#667085', fontWeight: 500 }}> {unit}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Whether it actually landed - summed from the plan's own per-meal
+          macros, so it reflects the food rather than a claimed total. */}
+      {source.verification?.checked && (
+        <div style={{
+          background: source.verification.hit
+            ? 'rgba(52,211,153,0.08)' : 'rgba(251,191,36,0.08)',
+          border: `1px solid ${source.verification.hit
+            ? 'rgba(52,211,153,0.28)' : 'rgba(251,191,36,0.28)'}`,
+          borderRadius: '0.75rem', padding: '1rem', display: 'grid', gap: '0.75rem',
+        }}>
+          <div style={{ display: 'flex', gap: '0.625rem', alignItems: 'flex-start' }}>
+            {source.verification.hit
+              ? <Check size={15} color="#34D399" style={{ flexShrink: 0, marginTop: 2 }} />
+              : <Target size={15} color="#FBBF24" style={{ flexShrink: 0, marginTop: 2 }} />}
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: '0.8125rem', fontWeight: 600 }}>
+                {source.verification.days_on_target} of {source.verification.days_total} days
+                hit every macro
+              </div>
+              <div style={{ fontSize: '0.75rem', color: '#98A2B3', marginTop: 2, lineHeight: 1.5 }}>
+                {source.verification.summary}
+                {source.verification.retried && ' Regenerated once to get closer.'}
+              </div>
+            </div>
+          </div>
+
+          {/* Per day, so a single bad Thursday is visible rather than
+              averaged into the week. */}
+          <div style={{ display: 'flex', gap: '0.3rem' }}>
+            {source.verification.days.map((d) => (
+              <div key={d.day} style={{ flex: 1, display: 'grid', gap: 3, justifyItems: 'center' }}>
+                <span
+                  title={`${d.day}: ${d.hit ? 'all macros in range'
+                    : d.missed.map((m) => `${m} ${d.macros[m].total}${d.macros[m].unit}`).join(', ')}`}
+                  style={{
+                    width: '100%', height: 6, borderRadius: 3,
+                    background: d.hit ? '#34D399' : d.missed.length > 2 ? '#F87171' : '#FBBF24',
+                  }}
+                />
+                <span style={{ fontSize: '0.5625rem', color: '#667085' }}>
+                  {d.day.replace('day_', '')}
+                </span>
+              </div>
+            ))}
           </div>
         </div>
       )}

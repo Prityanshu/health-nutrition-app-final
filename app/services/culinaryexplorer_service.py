@@ -8,6 +8,31 @@ import json
 load_dotenv()
 logger = logging.getLogger(__name__)
 
+
+def _closer(candidate, incumbent) -> bool:
+    """
+    Is the retry actually better than what we already had?
+
+    Compared on how many macros landed, then on total distance. Without this a
+    retry that fixes carbs and blows calories would silently replace a plan
+    that was only slightly off - regeneration has to be an improvement, not
+    just a change.
+    """
+    if not candidate or not candidate.get("checked"):
+        return False
+    if not incumbent or not incumbent.get("checked"):
+        return True
+    if candidate.get("hit"):
+        return True
+
+    def distance(v):
+        return sum(abs(m["delta"]) / max(1, m["target"])
+                   for m in v.get("macros", {}).values())
+
+    if len(candidate.get("missed", [])) != len(incumbent.get("missed", [])):
+        return len(candidate["missed"]) < len(incumbent["missed"])
+    return distance(candidate) < distance(incumbent)
+
 class CulinaryExplorerService:
     def __init__(self):
         self.regional_food_agent = Agent(
@@ -70,19 +95,28 @@ class CulinaryExplorerService:
 
     async def generate_regional_meal_plan(self, cuisine_region: str, meal_type: str = "full_day",
                                         dietary_restrictions: list = None, time_constraint: int = 60,
-                                        cooking_skill: str = "intermediate", available_ingredients: list = None) -> dict:
-        """Generate a regional meal plan using CulinaryExplorer agent"""
+                                        cooking_skill: str = "intermediate", available_ingredients: list = None,
+                                        macro_target=None) -> dict:
+        """
+        Generate a regional meal plan using CulinaryExplorer agent.
+
+        `macro_target` is optional and off by default, so the generic behaviour
+        is unchanged. When given, it goes LAST in the prompt: models weight the
+        end most heavily, and a nutritional requirement buried above four lines
+        about authenticity gets treated as a suggestion.
+        """
         try:
             dietary_str = f"Dietary restrictions: {', '.join(dietary_restrictions)}." if dietary_restrictions else ""
             ingredients_str = f"Available ingredients: {', '.join(available_ingredients)}." if available_ingredients else ""
-            
+            macro_str = f"\n\n            {macro_target.prompt_block()}" if macro_target else ""
+
             prompt = f"""I'm interested in {cuisine_region} cuisine and want a {meal_type} meal plan.
             {dietary_str}
             {ingredients_str}
             I have {time_constraint} minutes for cooking and my skill level is {cooking_skill}.
             
             Please create a healthy, authentic {cuisine_region} meal plan with traditional dishes
-            that have been modified for better health while maintaining cultural authenticity."""
+            that have been modified for better health while maintaining cultural authenticity.{macro_str}"""
 
             logger.info(f"CulinaryExplorer prompt: {prompt}")
             response = self.regional_food_agent.run(prompt)
@@ -91,9 +125,38 @@ class CulinaryExplorerService:
             # Extract content from RunOutput
             meal_plan = response.content if hasattr(response, 'content') else str(response)
 
+            # Check the numbers rather than trusting them. Asking a model to
+            # hit four figures and assuming it did is a hope, not a feature -
+            # and the failure is silent, which is the worst kind.
+            verification = None
+            if macro_target is not None:
+                from app.services import macro_targets as mt
+
+                verification = mt.verify(macro_target, meal_plan)
+
+                # One retry, naming exactly what was wrong and by how much.
+                # "Try again" produces a differently wrong answer at the same
+                # cost; a specific correction usually lands.
+                if verification.get("checked") and not verification.get("hit"):
+                    logger.warning("Macro target missed on %s: %s",
+                                   cuisine_region, verification.get("summary"))
+                    try:
+                        retry = f"{prompt}\n\n            {mt.retry_brief(verification, macro_target)}"
+                        again = self.regional_food_agent.run(retry)
+                        second = again.content if hasattr(again, "content") else str(again)
+                        recheck = mt.verify(macro_target, second)
+                        # Keep the better attempt. A retry that makes things
+                        # worse must not replace a near miss.
+                        if _closer(recheck, verification):
+                            meal_plan, verification = second, recheck
+                            verification["retried"] = True
+                    except Exception as e:
+                        logger.warning("Macro retry failed, keeping first attempt: %s", e)
+
             return {
                 "success": True,
                 "meal_plan": meal_plan,
+                "verification": verification,
                 "cuisine_region": cuisine_region,
                 "meal_type": meal_type,
                 "dietary_restrictions": dietary_restrictions or [],

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { localDateString, syncTimezone, onLocalDayChange } from './localDay';
 import { 
   Utensils, 
   Target, 
@@ -17,8 +18,11 @@ import {
 import './index.css';
 import Auth from './components/Auth';
 import AppShell from './components/AppShell';
+import Profile from './components/Profile';
 import LogMeal from './components/LogMeal';
 import Assistant from './components/Assistant';
+import Challenges from './components/Challenges';
+import InjuryTracker from './components/InjuryTracker';
 import Dashboard from './components/Dashboard';
 import GoalSetup from './components/GoalSetup';
 import WeightCheckIn from './components/WeightCheckIn';
@@ -36,17 +40,30 @@ const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8001/api
 function App() {
   const [currentView, setCurrentView] = useState('login');
   const [user, setUser] = useState(null);
+  // Shown under the name in the sidebar, so the score is visible from
+  // every screen rather than only on the profile.
+  const [totalPoints, setTotalPoints] = useState(null);
+  // Today's training answer and a slice of the board, both shown on the
+  // dashboard so neither needs a trip to the profile.
+  const [workoutToday, setWorkoutToday] = useState(null);
+  const [leaderboard, setLeaderboard] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Sign-in and registration state now lives in <Auth>, which owns both forms.
   const [sessionExpired, setSessionExpired] = useState(false);
+  // Injury summary, so the dashboard can prompt for a check-in when one is due.
+  const [injurySummary, setInjurySummary] = useState(null);
 
   // Dashboard data
   const [dashboardData, setDashboardData] = useState({
     dailyStats: null,
     recentMeals: [],
+    timeline: [],
+    adherenceHistory: [],
+    adherenceSummary: null,
+    todayAdherence: null,
     challenges: [],
     goals: [],
     weight: null
@@ -496,12 +513,29 @@ function App() {
     // Check if user is already logged in
     const token = localStorage.getItem('token');
     if (token) {
+      // Tell the server which timezone we are in before asking it anything,
+      // so "today" means the same thing on both sides. On load rather than
+      // only at login: existing accounts have no timezone stored, and people
+      // travel.
+      syncTimezone(API_BASE_URL);
       // Verify token and get user data
       fetchUserData();
       // Load dashboard data including Smart Challenges
       loadDashboardData();
     }
   }, []);
+
+  // Roll the day over live. Leaving the app open past midnight used to keep
+  // yesterday's totals on screen indefinitely - the numbers only changed when
+  // something else happened to trigger a reload.
+  useEffect(() => {
+    if (!user) return undefined;
+    return onLocalDayChange(() => {
+      syncTimezone(API_BASE_URL);
+      loadDashboardData();
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
   
   // Clear user data when user changes or logs out
   useEffect(() => {
@@ -626,6 +660,10 @@ function App() {
     setDashboardData({
       dailyStats: null,
       recentMeals: [],
+    timeline: [],
+    adherenceHistory: [],
+    adherenceSummary: null,
+    todayAdherence: null,
       challenges: [],
       goals: []
     });
@@ -639,19 +677,59 @@ function App() {
       };
 
       // Fetch daily stats
-      const today = new Date().toISOString().split('T')[0];
+      // The user's local date, not toISOString() - that returns the UTC date,
+      // so before ~05:30 IST this asked the server for yesterday.
+      const today = localDateString();
       const statsResponse = await fetch(`${API_BASE_URL}/tracking/daily/${today}`, { headers });
       if (statsResponse.ok) {
         const stats = await statsResponse.json();
         setDashboardData(prev => ({ ...prev, dailyStats: stats }));
       }
 
-      // Fetch recent meals
-      const mealsResponse = await fetch(`${API_BASE_URL}/meals/history?limit=5`, { headers });
-      if (mealsResponse.ok) {
-        const meals = await mealsResponse.json();
-        setDashboardData(prev => ({ ...prev, recentMeals: meals }));
+      // Today's meals in time order plus the last 7 days of goal adherence.
+      // One request rather than two so the timeline and the streak cannot
+      // straddle a midnight rollover and disagree about which day it is.
+      const dayResponse = await fetch(`${API_BASE_URL}/tracking/day?days=7`, { headers });
+      if (dayResponse.ok) {
+        const day = await dayResponse.json();
+        setDashboardData(prev => ({
+          ...prev,
+          timeline: day.timeline || [],
+          adherenceHistory: day.history || [],
+          adherenceSummary: day.summary || null,
+          todayAdherence: day.today || null,
+          // Kept so older screens still reading recentMeals keep working.
+          // They index `meal.food_item.name` WITHOUT a guard, so the nested
+          // key has to be present or they throw rather than degrade.
+          recentMeals: [...(day.timeline || [])].reverse().map(m => ({
+            ...m,
+            food_item: { id: m.id, name: m.name },
+          })),
+        }));
       }
+
+      // Points for the sidebar, plus today's training answer for the
+      // dashboard card. Best-effort - both degrade to a neutral state.
+      fetch(`${API_BASE_URL}/profile`, { headers })
+        .then(r => (r.ok ? r.json() : null))
+        .then(d => {
+          if (!d) return;
+          if (d.points) setTotalPoints(d.points.total);
+          if (d.workout) setWorkoutToday(d.workout);
+        })
+        .catch(() => {});
+
+      fetch(`${API_BASE_URL}/profile/leaderboard?days=30&limit=20`, { headers })
+        .then(r => (r.ok ? r.json() : null))
+        .then(d => d?.success && setLeaderboard(d))
+        .catch(() => {});
+
+      // Active injuries, so the dashboard can ask for a check-in when one is
+      // due. Failing quietly is fine - the prompt simply does not render.
+      fetch(`${API_BASE_URL}/injuries`, { headers })
+        .then(r => (r.ok ? r.json() : null))
+        .then(d => d && setInjurySummary(d))
+        .catch(() => {});
 
       // Fetch the active goal. Without this the dashboard had no targets to
       // compare against and silently fell back to generic placeholder numbers.
@@ -668,16 +746,35 @@ function App() {
         setDashboardData(prev => ({ ...prev, weight }));
       }
 
-      // Fetch Smart Challenges only if not skipped and not recently updated (to avoid overwriting recently updated challenges)
-      if (!skipChallenges && (!challengesLastUpdated || Date.now() - challengesLastUpdated > 30000)) { // 30 seconds
-        const challengesResponse = await fetch(`${API_BASE_URL}/enhanced-challenges/active-challenges`, { headers });
+      // Challenges. Two things were wrong here and they compounded:
+      //
+      //   1. the response was stored in `enhancedChallenges` while the
+      //      dashboard read `dashboardData.challenges`, which nothing wrote
+      //   2. it hit /enhanced-challenges/active-challenges, which SUMS stored
+      //      progress rows - so every challenge read 0% no matter what had
+      //      been logged
+      //
+      // /challenges is the endpoint the Challenges screen uses: it recomputes
+      // progress from the underlying meals on every read, so it cannot drift.
+      // One source of truth for both screens.
+      if (!skipChallenges && (!challengesLastUpdated || Date.now() - challengesLastUpdated > 30000)) {
+        const challengesResponse = await fetch(`${API_BASE_URL}/challenges`, { headers });
         if (challengesResponse.ok) {
           const challengesData = await challengesResponse.json();
-          // Only update challenges if we got valid data
-          if (challengesData.active_challenges && challengesData.active_challenges.length > 0) {
-            setEnhancedChallenges(challengesData.active_challenges);
-            setChallengesLastUpdated(Date.now());
-          }
+          const active = (challengesData.challenges || []).map(c => ({
+            challenge_id: c.id,
+            title: c.title,
+            current_value: c.current,
+            target_value: c.target,
+            unit: c.unit,
+            progress_percentage: c.percent,
+            days_remaining: c.days_left,
+            completed: c.completed,
+            points: c.points,
+          }));
+          setEnhancedChallenges(active);
+          setDashboardData(prev => ({ ...prev, challenges: active }));
+          setChallengesLastUpdated(Date.now());
         }
       }
 
@@ -1561,7 +1658,9 @@ function App() {
       };
 
       // Fetch daily stats for today
-      const today = new Date().toISOString().split('T')[0];
+      // The user's local date, not toISOString() - that returns the UTC date,
+      // so before ~05:30 IST this asked the server for yesterday.
+      const today = localDateString();
       const dailyResponse = await fetch(`${API_BASE_URL}/tracking/daily/${today}`, { headers });
       
       // Fetch weekly stats
@@ -4686,6 +4785,14 @@ Nutrition Added:
       <div style={{ display: 'grid', gap: '1.25rem' }}>
         <GoalSetup apiBase={API_BASE_URL} onGoalSaved={() => loadDashboardData()} />
         <WeightCheckIn apiBase={API_BASE_URL} onLogged={() => loadDashboardData()} />
+        {/* Always here, injured or not. The dashboard card only appears when
+            something is being tracked, so this is where a new one gets
+            recorded - alongside the other things that shape your plans. */}
+        <InjuryTracker
+          data={injurySummary || { injuries: [] }}
+          apiBase={API_BASE_URL}
+          onChanged={() => loadDashboardData(true)}
+        />
       </div>
     );
 
@@ -4725,7 +4832,14 @@ Nutrition Added:
       chatbot: () => (
         <Assistant apiBase={API_BASE_URL} userName={user?.full_name || user?.username} />
       ),
-      'enhanced-challenges': renderEnhancedChallenges,
+      'enhanced-challenges': () => <Challenges apiBase={API_BASE_URL} />,
+      profile: () => (
+        <Profile
+          apiBase={API_BASE_URL}
+          user={user}
+          onNavigate={setActiveView}
+        />
+      ),
     };
 
     const body =
@@ -4735,6 +4849,12 @@ Nutrition Added:
           dashboardData={dashboardData}
           onNavigate={setActiveView}
           isLoading={isLoading}
+          injuries={injurySummary}
+          apiBase={API_BASE_URL}
+          onInjuryChanged={() => loadDashboardData(true)}
+          workout={workoutToday}
+          board={leaderboard}
+          onWorkoutLogged={() => loadDashboardData(true)}
         />
       ) : (
         legacyViews[activeView]()
@@ -4745,6 +4865,7 @@ Nutrition Added:
         activeView={activeView}
         onNavigate={setActiveView}
         user={user}
+        points={totalPoints}
         onLogout={handleLogout}
         sidebarOpen={sidebarOpen}
         setSidebarOpen={setSidebarOpen}

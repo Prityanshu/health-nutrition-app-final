@@ -39,11 +39,25 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy.orm import Session
 
 from app.database import FoodItem, Goal, MealLog, User, WeightLog
+from app.services import daytime
 
 logger = logging.getLogger(__name__)
 
 # Tags in food_items are inconsistent - "Vegetarian", "vegetarian",
 # "🌱 Vegetarian" and "lacto_vegetarian" all appear. Normalise before matching.
+# How hard a recurring macro miss steers the ranking.
+#
+# Deliberately below the nutritional weights in score_food (protein ratio is
+# worth up to 70 there). This is a re-ranker among comparable options, not an
+# override: a food that is bad for the goal must not be promoted just because
+# it is dense in the macro being missed. The effective weight is scaled by how
+# persistent and how large the shortfall is, then capped.
+CHRONIC_BASE_WEIGHT = 45.0
+CHRONIC_MAX_WEIGHT = 60.0
+# Protein/carb/fat share of calories treated as "neutral". Above it a food
+# helps a shortfall, below it a food makes it worse.
+CHRONIC_PIVOT = 0.25
+
 _NON_VEG_MARKERS = ("non_veg", "meat", "chicken", "fish", "seafood", "pork",
                     "beef", "mutton", "egg", "🍗", "🐟", "🥚")
 _VEG_MARKERS = ("vegetarian", "vegan", "🌱")
@@ -92,7 +106,9 @@ def build_profile(user: User, db: Session, days: int = 365) -> Dict[str, Any]:
     away most of the taste signal. Habit metrics below are computed per
     active day rather than per calendar day, so gaps do not distort them.
     """
-    since = datetime.utcnow() - timedelta(days=days)
+    # Whole local days, so the oldest is not a fragment.
+    tz = daytime.zone_for(user)
+    since = daytime.days_ago_start(days, tz=tz)
 
     rows = (
         db.query(MealLog, FoodItem)
@@ -167,7 +183,10 @@ def build_profile(user: User, db: Session, days: int = 365) -> Dict[str, Any]:
     # --- meal timing: which slots they log, which they skip ---
     slots = Counter((m.meal_type or "unknown").lower() for m in logs)
     profile["meal_slots"] = dict(slots)
-    days_active = len({m.logged_at.date() for m in logs}) or 1
+    # Local days: .date() on a UTC timestamp splits one IST morning
+    # across two days and inflates days_active, which then deflates
+    # logs_per_day and makes everything look 'often skipped'.
+    days_active = len(daytime.local_dates_between(logs, 'logged_at', tz=tz)) or 1
     profile["days_active"] = days_active
     profile["logs_per_day"] = round(len(logs) / days_active, 1)
 
@@ -182,7 +201,7 @@ def build_profile(user: User, db: Session, days: int = 365) -> Dict[str, Any]:
     # --- macro habits (daily averages) ---
     by_day = defaultdict(lambda: {"calories": 0.0, "protein": 0.0, "carbs": 0.0, "fat": 0.0})
     for m in logs:
-        d = m.logged_at.date()
+        d = daytime.local_date(moment=m.logged_at, tz=tz)
         by_day[d]["calories"] += m.calories or 0
         by_day[d]["protein"] += m.protein or 0
         by_day[d]["carbs"] += m.carbs or 0
@@ -218,10 +237,14 @@ def build_profile(user: User, db: Session, days: int = 365) -> Dict[str, Any]:
 
 def todays_gap(user: User, db: Session, goal: Optional[Goal]) -> Dict[str, Any]:
     """What is left of today's targets."""
-    start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    # The user's day, not the UTC day. This one was missed in the timezone
+    # pass: it meant food suggestions were sized against yesterday's remaining
+    # calories for the first few hours of every morning in IST.
+    start, end = daytime.today_bounds(user)
     today = (
         db.query(MealLog)
-        .filter(MealLog.user_id == user.id, MealLog.logged_at >= start)
+        .filter(MealLog.user_id == user.id,
+                MealLog.logged_at >= start, MealLog.logged_at < end)
         .all()
     )
     eaten = {
@@ -382,10 +405,18 @@ def score_food(
 def recommend_foods(
     user: User, db: Session, profile: Dict[str, Any],
     gap: Dict[str, Any], goal_type: Optional[str] = None, limit: int = 8,
+    week: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """
-    Rank foods for this user against their goal, today's remaining macros, and
-    their tastes - in that order of importance.
+    Rank foods for this user against their goal, today's remaining macros, the
+    macro they keep missing across the week, and their tastes - in that order
+    of importance.
+
+    `week` is the summary from `adherence.summarise`. Without it every day was
+    ranked in isolation, so somebody who had been 40g short on protein six days
+    running got exactly the same suggestions as somebody who had hit target all
+    week. The gap that keeps recurring is more informative than today's, which
+    is noisy - at 9am today's "gap" is simply the whole day.
     """
     # Some rows are whole dishes rather than servings (one is 2250 kcal with
     # 120 g protein). Recommending those would be nonsense.
@@ -401,6 +432,38 @@ def recommend_foods(
     remaining = gap.get("remaining") or {}
     need_protein = remaining.get("protein", 0)
     need_calories = remaining.get("calories", 0)
+
+    targets = (week or {}).get("targets") or {}
+    goal_protein = targets.get("protein")
+    goal_carbs = targets.get("carbs")
+    goal_fat = targets.get("fat")
+    goal_calories = targets.get("calories")
+
+    # Which macro they persistently miss, and in which direction. Only the
+    # worst one is acted on: correcting two at once produces incoherent
+    # suggestions that satisfy neither.
+    chronic = None
+    chronic_weight = 0.0
+    weak_points = (week or {}).get("weak_points") or []
+    assessable = (week or {}).get("assessable_days") or 0
+    if weak_points and assessable >= 3:
+        worst = weak_points[0]
+        # Must be a real pattern, not one bad day inside a good week.
+        if worst["days"] >= max(2, assessable * 0.5):
+            chronic = worst
+            # Scale by how bad it actually is. Five days 45g short and three
+            # days 5g short are not the same problem, and a fixed weight
+            # treated them identically - so the correction was either too
+            # timid for the first or too aggressive for the second.
+            persistence = worst["days"] / max(1, worst["of"])          # 0.5 - 1.0
+            target = {"protein": goal_protein, "carbs": goal_carbs,
+                      "fat": goal_fat, "calories": goal_calories}.get(worst["macro"])
+            size = min(1.0, abs(worst["average_delta"]) / target) if target else 0.3
+            # Bounded on both ends: never zero (or the signal is decorative),
+            # never enough to outrank the nutritional score (or it promotes
+            # junk that happens to be high in the missing macro).
+            chronic_weight = CHRONIC_BASE_WEIGHT * (0.6 + persistence) * (0.5 + size)
+            chronic_weight = min(chronic_weight, CHRONIC_MAX_WEIGHT)
 
     budget = profile.get("budget") or {}
     ceiling = budget.get("comfortable_ceiling")
@@ -430,6 +493,36 @@ def recommend_foods(
 
         score = base["score"]
         reasons = list(base["reasons"])
+
+        # --- the macro they keep missing -------------------------------------
+        # Weighted above taste and below the core nutritional score: it should
+        # reorder good options toward the recurring gap, never promote a bad
+        # food because it happens to be high in the missing macro.
+        if chronic:
+            macro = chronic["macro"]
+            short = chronic["direction"] == "short"
+            per_cal = {
+                "protein": (food.protein_g or 0) * 4 / max(1, food.calories or 1),
+                "carbs": (food.carbs_g or 0) * 4 / max(1, food.calories or 1),
+                "fat": (food.fat_g or 0) * 9 / max(1, food.calories or 1),
+            }.get(macro)
+
+            if per_cal is not None:
+                # Short on it -> favour density in it. Over on it -> favour
+                # foods that are low in it, so the correction works both ways.
+                score += (per_cal - CHRONIC_PIVOT) * (chronic_weight if short
+                                                      else -chronic_weight)
+                if short and per_cal >= 0.35 and len(reasons) < 3:
+                    reasons.append(
+                        f"high in {macro}, which you have been short on "
+                        f"{chronic['days']} of the last {chronic['of']} days"
+                    )
+                elif not short and per_cal <= 0.15 and len(reasons) < 3:
+                    reasons.append(f"low in {macro}, which you have been over on lately")
+            elif macro == "calories":
+                light = (food.calories or 0) < 250
+                nudge = chronic_weight * 0.3
+                score += (nudge if (short != light) else -nudge)
 
         # --- taste: a tie-breaker, not a driver ------------------------------
         # Capped low deliberately. Preferring a cuisine should reorder
@@ -499,6 +592,7 @@ def calories_of(food: FoodItem) -> float:
 def build_insights(
     user: User, profile: Dict[str, Any], gap: Dict[str, Any],
     goal: Optional[Goal], weight_change: Optional[float],
+    week: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, str]]:
     """
     Observations about this user's own behaviour.
@@ -508,6 +602,47 @@ def build_insights(
     """
     out: List[Dict[str, str]] = []
     avg = profile.get("daily_average") or {}
+
+    # --- the week against target, first ----------------------------------
+    # Ahead of the long-run averages below, because "4 of 6 days on target"
+    # is what someone actually wants to know, and a 365-day average can hide
+    # a week that has gone badly wrong.
+    if week and week.get("assessable_days"):
+        hits, days = week["hits"], week["assessable_days"]
+        streak = week.get("current_streak") or 0
+        if hits == days and days >= 3:
+            out.append({
+                "kind": "good",
+                "title": f"On target {days} days running",
+                "body": f"Every one of the last {days} logged days hit all four macros. "
+                        "Keep doing whatever this is.",
+            })
+        elif week.get("weak_points"):
+            worst = week["weak_points"][0]
+            unit = "kcal" if worst["macro"] == "calories" else "g"
+            out.append({
+                "kind": "warn" if worst["days"] >= days * 0.5 else "info",
+                "title": f"{worst['macro'].capitalize()} keeps slipping",
+                "body": (
+                    f"{worst['direction'].capitalize()} on {worst['macro']} on "
+                    f"{worst['days']} of your last {days} logged days, by "
+                    f"{abs(worst['average_delta']):.0f}{unit} on average. "
+                    "Today's suggestions are weighted to correct it."
+                ),
+            })
+        if streak >= 3 and hits != days:
+            out.append({
+                "kind": "good",
+                "title": f"{streak}-day streak",
+                "body": f"On target for {streak} days in a row right now.",
+            })
+    elif week and week.get("unlogged_days", 0) >= 5:
+        out.append({
+            "kind": "info",
+            "title": "Not much logged this week",
+            "body": "There isn't enough logged in the last 7 days to tell how it went. "
+                    "A few days of logging is enough to start.",
+        })
 
     # Protein vs target - the most actionable gap for most goals.
     if goal and goal.target_protein and avg.get("protein"):
@@ -632,12 +767,23 @@ def personalised_feed(user: User, db: Session) -> Dict[str, Any]:
         weights[-1].weight_kg - weights[0].weight_kg if len(weights) > 1 else None
     )
 
+    # How the last week went against target. This is what lets the feed
+    # correct a recurring shortfall instead of re-ranking the same foods every
+    # day from the same starting point.
+    week = None
+    try:
+        from app.services import adherence
+        week = adherence.summarise(adherence.history(db, user, days=7))
+    except Exception as e:
+        logger.warning("adherence unavailable for the feed: %s", e)
+
     recommendations = recommend_foods(
         user, db, profile, gap,
         goal_type=goal.goal_type if goal else None,
         limit=8,
+        week=week,
     )
-    insights = build_insights(user, profile, gap, goal, weight_change)
+    insights = build_insights(user, profile, gap, goal, weight_change, week=week)
 
     # Be explicit when there is not enough history to personalise properly,
     # rather than dressing up generic output as tailored.
@@ -656,6 +802,7 @@ def personalised_feed(user: User, db: Session) -> Dict[str, Any]:
             "target_protein": goal.target_protein if goal else None,
         } if goal else None,
         "recommendations": recommendations,
+        "week": week,
         "insights": insights,
         "confidence": confidence,
         "weight_change_kg": round(weight_change, 1) if weight_change is not None else None,

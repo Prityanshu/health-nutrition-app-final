@@ -8,6 +8,8 @@ from pydantic import BaseModel, EmailStr
 from typing import Optional
 from datetime import datetime
 
+from app.services import daytime
+
 router = APIRouter()
 
 class UserCreate(BaseModel):
@@ -24,6 +26,9 @@ class UserCreate(BaseModel):
     sex: Optional[str] = None
     health_conditions: str = "[]"
     dietary_preferences: str = "[]"
+    # IANA name from the browser. Decides when this user's day starts, so
+    # their dashboard rolls over at their midnight rather than UTC's.
+    timezone: Optional[str] = None
 
 class UserResponse(BaseModel):
     id: int
@@ -77,7 +82,8 @@ async def register(user: UserCreate, db: Session = Depends(get_db)):
         activity_level=user.activity_level,
         sex=user.sex,
         health_conditions=user.health_conditions,
-        dietary_preferences=user.dietary_preferences
+        dietary_preferences=user.dietary_preferences,
+        timezone=daytime.normalise_timezone(user.timezone),
     )
     
     db.add(db_user)
@@ -106,3 +112,50 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = 
 async def read_users_me(current_user: User = Depends(get_current_active_user)):
     """Get current user information"""
     return current_user
+
+
+class TimezoneUpdate(BaseModel):
+    timezone: str
+
+
+@router.put("/timezone")
+async def set_timezone(
+    body: TimezoneUpdate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Record the browser's timezone.
+
+    Its own endpoint rather than a login field because login goes through an
+    OAuth2 form, and because this needs to run on every app load, not only at
+    sign-in: people travel, and existing accounts predate the column. Writing
+    it whenever it changes is what keeps "today" correct without asking.
+    """
+    resolved = daytime.normalise_timezone(body.timezone)
+    if not resolved:
+        # Unknown zone: keep whatever we had rather than storing rubbish that
+        # would silently shift every day boundary for this user.
+        return {
+            "success": False,
+            "timezone": current_user.timezone,
+            "message": f"Unrecognised timezone {body.timezone!r}; keeping the previous setting.",
+        }
+
+    changed = current_user.timezone != resolved
+    if changed:
+        current_user.timezone = resolved
+        db.commit()
+
+    start, end = daytime.today_bounds(current_user)
+    return {
+        "success": True,
+        "timezone": resolved,
+        "changed": changed,
+        "local_date": daytime.local_date(current_user).isoformat(),
+        # Lets the client schedule its own refresh exactly on the rollover
+        # rather than polling or waiting for the user to reload.
+        "seconds_until_midnight": daytime.seconds_until_local_midnight(current_user),
+        "day_starts_utc": start.isoformat(),
+        "day_ends_utc": end.isoformat(),
+    }

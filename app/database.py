@@ -1,4 +1,5 @@
-from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, Text, ForeignKey, Enum
+from sqlalchemy import (create_engine, Column, Integer, String, Float, Boolean,
+                        DateTime, Date, Text, ForeignKey, Enum, UniqueConstraint, Index)
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
@@ -49,6 +50,12 @@ class User(Base):
     # constant for men and women (a ~166 kcal/day difference). Nullable so
     # existing accounts keep working; "other" falls back to the midpoint.
     sex = Column(String, nullable=True)  # male, female, other
+    # IANA name, e.g. "Asia/Kolkata", sent by the browser. Decides when this
+    # user's day starts: without it the app used the UTC day, so in IST the
+    # dashboard rolled over at 05:30 and a meal logged at 00:30 counted
+    # against yesterday. Nullable so existing accounts keep working - they
+    # fall back to APP_TIMEZONE.
+    timezone = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     is_active = Column(Boolean, default=True)
     
@@ -275,6 +282,204 @@ class ChatMessage(Base):
 
     # Relationship
     user = relationship("User")
+
+class ChallengeOutcome(Base):
+    """
+    What happened to a challenge once it ended.
+
+    WHY THIS EXISTS
+    ---------------
+    Without it, challenges have no memory. Hit a protein target five days
+    running and you would be offered the identical target again - no
+    progression, no sense of getting anywhere. Fail the same logging streak
+    three weeks in a row and it would keep reappearing unchanged, which reads
+    as the app nagging rather than adapting.
+
+    Recording outcomes turns the challenge list into something that responds:
+    succeed and the next one asks slightly more, struggle and it asks less,
+    and a key that was just attempted moves down the queue so the same thing
+    is not served twice in a row.
+    """
+    __tablename__ = "challenge_outcomes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+
+    # The generator's stable identifier ("protein_step", "logging_streak"),
+    # not the display title - titles contain personalised numbers and change
+    # between runs.
+    challenge_key = Column(String, nullable=False, index=True)
+    challenge_type = Column(String)
+
+    # Difficulty level this attempt was set at. Drives the next target.
+    level = Column(Integer, default=0)
+
+    target_value = Column(Float)
+    achieved_value = Column(Float)
+    completed = Column(Boolean, default=False, index=True)
+    points_awarded = Column(Integer, default=0)
+
+    started_at = Column(DateTime)
+    ended_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    user = relationship("User")
+
+
+class Injury(Base):
+    """
+    An injury the user is currently managing.
+
+    WHY THIS IS A TABLE AND NOT A PROFILE STRING
+    --------------------------------------------
+    An injury is not a static fact - it is a thing that changes week to week,
+    and almost every useful behaviour depends on knowing *how* it is changing:
+
+      * a workout plan should exclude different movements at week 1 and week 6
+      * a recovery challenge only makes sense while it is still healing
+      * "how is the hamstring?" needs a previous answer to compare against
+      * getting worse is a signal to stop training it and see a physio
+
+    Storing it as free text on the user row loses all of that, and loses it
+    silently. The injury also has to outlive the chat window: previously it
+    lived only in conversation history and was forgotten after six turns.
+    """
+    __tablename__ = "injuries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+
+    # Matches a key in contraindications.INJURIES where possible, so exercise
+    # exclusions can be looked up rather than inferred by a language model.
+    body_part = Column(String, nullable=False)
+    # Exactly what the user said, kept verbatim - "upper hamstring, near the
+    # sit bone" carries detail the body_part key cannot.
+    description = Column(String)
+
+    # 0 = fully recovered, 10 = severe. Deliberately the user's own rating:
+    # it is subjective, and their subjective trend is what matters.
+    severity = Column(Integer, default=5)
+
+    status = Column(String, default="active", index=True)   # active | recovered
+    started_at = Column(DateTime, default=datetime.utcnow)
+    last_checked_at = Column(DateTime, default=datetime.utcnow)
+    resolved_at = Column(DateTime, nullable=True)
+
+    # Set when the user reports something that needs a professional rather than
+    # a modified plan - sharp pain, numbness, swelling, giving way.
+    needs_attention = Column(Boolean, default=False)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User")
+    checkins = relationship(
+        "InjuryCheckIn", back_populates="injury", cascade="all, delete-orphan"
+    )
+
+
+class InjuryCheckIn(Base):
+    """
+    One reported update on an injury.
+
+    The history is the point. A single severity number says little; three
+    check-ins trending 7 -> 5 -> 3 say the plan is working, and 4 -> 6 -> 7
+    says it is not and training should back off.
+    """
+    __tablename__ = "injury_checkins"
+
+    id = Column(Integer, primary_key=True, index=True)
+    injury_id = Column(Integer, ForeignKey("injuries.id"), index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+
+    severity = Column(Integer, nullable=False)
+    # better | same | worse - how the user describes the change themselves,
+    # which is not always what the numbers say.
+    trend = Column(String)
+    note = Column(String)
+    logged_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    injury = relationship("Injury", back_populates="checkins")
+
+
+class WorkoutLog(Base):
+    """
+    Did they train today?
+
+    The app has produced workout plans since the beginning and never once asked
+    whether any of them happened. That gap meant three things were impossible:
+    points for training, an honest "you have trained 4 of the last 7 days", and
+    a planner that adapts to what the person actually does rather than what it
+    hoped they would do.
+
+    One row per user per local day - a rest day is a row too, because "I chose
+    to rest" and "I did not answer" are different facts and only one of them
+    should break a streak.
+    """
+    __tablename__ = "workout_logs"
+    __table_args__ = (
+        # One answer per day. Tapping "done" twice must not create two rows,
+        # or the points ledger has two events to reconcile.
+        UniqueConstraint("user_id", "local_date", name="uq_workout_user_day"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+
+    # The USER's calendar day, stored as a date rather than derived from a
+    # timestamp. Everything about points is per-day, and re-deriving the day
+    # from UTC at read time is what caused the whole rollover problem earlier.
+    local_date = Column(Date, nullable=False, index=True)
+
+    # done | rest | skipped
+    status = Column(String, nullable=False, default="done")
+    # strength | cardio | sport | mobility | other - optional, feeds planning.
+    workout_type = Column(String)
+    minutes = Column(Integer)
+    # 1-10 how hard it felt. Cheap to give, and the single most useful number
+    # for deciding whether the next session should progress or hold.
+    intensity = Column(Integer)
+    note = Column(String)
+
+    logged_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User")
+
+
+class PointsLedger(Base):
+    """
+    Every point ever awarded, as an immutable row.
+
+    A single `points` integer on the user row would be faster to read and
+    impossible to trust: no way to answer "where did these come from", no way
+    to re-run the rules after fixing a bug, and any double-fire silently
+    inflates a number nobody can audit. A ledger makes the leaderboard one SUM
+    and every total explainable.
+
+    Idempotency is enforced by the database, not by application care: the
+    unique constraint on (user, day, reason) means awarding the same thing
+    twice is a caught error rather than a quiet duplicate.
+    """
+    __tablename__ = "points_ledger"
+    __table_args__ = (
+        UniqueConstraint("user_id", "local_date", "reason", name="uq_points_user_day_reason"),
+        # The leaderboard query: sum points per user over a date range.
+        Index("ix_points_user_date", "user_id", "local_date"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    local_date = Column(Date, nullable=False, index=True)
+
+    # A key from points_engine.REASONS, e.g. "meal_logged", "day_on_target".
+    reason = Column(String, nullable=False)
+    points = Column(Integer, nullable=False, default=0)
+    # Human sentence shown in the breakdown, written when awarded so the
+    # explanation cannot drift from the rule that produced it.
+    detail = Column(String)
+
+    awarded_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User")
+
 
 # Dependency to get database session
 def get_db():

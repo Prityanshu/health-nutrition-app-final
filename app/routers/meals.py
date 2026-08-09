@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db, User, FoodItem, MealLog
 from app.auth import get_current_active_user
 from app.services.automatic_challenge_updater import automatic_challenge_updater
+from app.services import points_engine
 from pydantic import BaseModel
 from datetime import datetime
 from typing import List, Optional
@@ -26,6 +27,9 @@ class MealLogResponse(BaseModel):
     carbs: float
     fat: float
     logged_at: datetime
+    # How many points that log just earned. Optional so the /history endpoint,
+    # which does not compute them, keeps validating.
+    points_earned: int = 0
 
     class Config:
         from_attributes = True
@@ -77,7 +81,19 @@ async def log_meal(
     except Exception as e:
         logger.error(f"Error auto-updating challenges: {e}")
         # Don't fail the meal logging if challenge update fails
-    
+
+    # Points. Awarded here so they accrue as you log rather than only when the
+    # profile is opened - a total that jumps when you visit a screen reads as
+    # broken. Idempotent, so the extra call on every meal costs nothing.
+    points_earned = 0
+    try:
+        before = points_engine.total_points(db, current_user.id)
+        points_engine.sync(db, current_user, days=1)
+        points_earned = points_engine.total_points(db, current_user.id) - before
+    except Exception as e:
+        logger.error(f"Error awarding points: {e}")
+        db.rollback()
+
     return MealLogResponse(
         id=meal_log_entry.id,
         food_item={
@@ -91,7 +107,8 @@ async def log_meal(
         protein=meal_log_entry.protein,
         carbs=meal_log_entry.carbs,
         fat=meal_log_entry.fat,
-        logged_at=meal_log_entry.logged_at
+        logged_at=meal_log_entry.logged_at,
+        points_earned=points_earned,
     )
 
 @router.get("/history", response_model=List[MealLogResponse])

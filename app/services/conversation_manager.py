@@ -574,6 +574,21 @@ def is_smalltalk(message: str, question_pending: bool = False) -> bool:
     return False
 
 
+def _has_tracked_injury(db, user_id) -> bool:
+    """Whether this user has an active injury on record."""
+    if db is None or user_id is None:
+        return False
+    try:
+        from app.database import Injury
+        return bool(
+            db.query(Injury)
+            .filter(Injury.user_id == user_id, Injury.status == "active")
+            .first()
+        )
+    except Exception:
+        return False
+
+
 def ends_with_question(text: str) -> bool:
     """
     Did the assistant's last turn ask something?
@@ -829,22 +844,30 @@ class ConversationManager:
                     if condition and condition not in constraints:
                         constraints.append(condition)
 
+                # Tracked injuries, with their concrete exercise exclusions.
+                # These carry more weight than anything the model extracted
+                # from the conversation, because they are stored facts with a
+                # curated list of what to avoid - so they go first, and they
+                # apply even if the user did not mention the injury this turn.
+                if db is not None and user_id is not None:
+                    try:
+                        from app.services.injury_service import as_constraints
+                        for line in as_constraints(db, user_id):
+                            if line not in constraints:
+                                constraints.insert(0, line)
+                    except Exception as e:
+                        logger.error("Could not load injury constraints: %s", e)
+
                 # The generator has no sport parameter and the fitness_goal enum
                 # has no sport values, so "footballer" had nowhere to go and the
                 # request silently became general_fitness. Passing it as a
                 # constraint is the honest fix: constraints is free text that
                 # reaches the prompt, and a sport genuinely does constrain what
                 # the plan should contain and when.
-                sport = (args.get("sport") or "").strip()
-                if sport:
-                    constraints.insert(
-                        0,
-                        f"Trains for {sport}. Build the plan around the demands of "
-                        f"{sport} and leave enough recovery for training and matches; "
-                        "this is sport preparation, not a bodybuilding split.",
-                    )
+                sport = (args.get("sport") or "").strip() or None
 
                 result = await self.fitmentor.generate_workout_plan(
+                    sport=sport,
                     activity_level=args.get("activity_level")
                     or ctx.get("activity_level")
                     or "moderately_active",
@@ -1024,7 +1047,11 @@ class ConversationManager:
                 + [m["content"] for m in history[-4:]]
                 + [str(ctx.get("health_conditions", ""))]
             )
-            if mentions_injury(scan):
+            # A tracked injury loads the guidance unconditionally. Waiting for
+            # the user to mention it again means the safety rules are absent
+            # from exactly the conversation where they were most needed - they
+            # told us last week and reasonably expect us to remember.
+            if mentions_injury(scan) or _has_tracked_injury(db, user_id):
                 system += INJURY_GUIDANCE
             if extra_context:
                 system += (

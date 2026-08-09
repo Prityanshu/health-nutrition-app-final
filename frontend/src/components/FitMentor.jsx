@@ -3,13 +3,89 @@ import {
   Dumbbell, Sprout, Activity, Flame, Home, Building2, HandMetal,
   TrendingDown, HeartPulse, Wind, Timer, AlertTriangle,
   MessageSquarePlus, Gauge, Zap, Clock3, Shuffle, Repeat, ShieldAlert, RefreshCw,
+  X, Plus, Download,
 } from 'lucide-react';
 import {
-  PageHero, Section, TileGroup, SliderField, ChipInput,
+  PageHero, Section, TileGroup, SliderField,
   GenerateButton, LoadingSkeleton, ErrorNote, ResultPanel, EmptyState, useGenerator,
   usePersistentPlan, RestoredNote,
 } from './SpecialistUI';
 import renderMarkdown from './markdown';
+import {
+  SEVERITY_LABELS, BLOCKING_SEVERITY, severityColor, stageFor,
+  encodeInjury, decodeInjury,
+} from './severity';
+
+/**
+ * One injury, with its own severity.
+ *
+ * Severity used to be absent here entirely, so every injury was treated as a
+ * default 5/10 - a niggle you'd train through and something that needs three
+ * weeks off produced the same plan. The slider is per injury rather than one
+ * global one because people rarely hurt in only one place, and a 2/10 wrist
+ * alongside a 7/10 knee is a completely different week from both at 7.
+ */
+function InjuryRow({ injury, onChange, onRemove }) {
+  const [, consequence] = stageFor(injury.severity);
+  const colour = severityColor(injury.severity);
+  const blocking = injury.severity >= BLOCKING_SEVERITY;
+
+  return (
+    <div style={{
+      background: 'rgba(255,255,255,0.03)',
+      border: `1px solid ${blocking ? 'rgba(248,113,113,0.4)' : 'rgba(255,255,255,0.08)'}`,
+      borderRadius: '0.75rem', padding: '0.875rem', display: 'grid', gap: '0.625rem',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        <span style={{ flex: 1, fontSize: '0.875rem', fontWeight: 600, textTransform: 'capitalize' }}>
+          {injury.text}
+        </span>
+        {injury.tracked && (
+          <span className="pill pill-muted" style={{ fontSize: '0.625rem' }}>tracked</span>
+        )}
+        <span className="pill tabular" style={{
+          fontSize: '0.6875rem', color: colour,
+          background: `${colour}1A`, border: `1px solid ${colour}44`,
+        }}>
+          {injury.severity}/10 · {SEVERITY_LABELS[injury.severity]}
+        </span>
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label={`Remove ${injury.text}`}
+          style={{
+            background: 'none', border: 'none', cursor: 'pointer',
+            color: '#667085', display: 'flex', padding: 2,
+          }}
+        >
+          <X size={15} />
+        </button>
+      </div>
+
+      <input
+        type="range" min={0} max={10} step={1}
+        value={injury.severity}
+        aria-label={`Severity of ${injury.text}`}
+        onChange={(e) => onChange({ ...injury, severity: Number(e.target.value) })}
+        className="range-slider"
+        style={{ '--pct': `${injury.severity * 10}%`, accentColor: colour }}
+      />
+
+      {/* Showing the consequence before generating matters: severity is not a
+          label, it decides what the plan is allowed to contain, and at 8+ it
+          means no plan at all. Finding that out after a 20-second generation
+          reads like a failure rather than a decision. */}
+      <div style={{
+        fontSize: '0.75rem', lineHeight: 1.5,
+        color: blocking ? '#F87171' : '#98A2B3',
+        display: 'flex', gap: '0.4rem', alignItems: 'flex-start',
+      }}>
+        {blocking && <ShieldAlert size={13} style={{ flexShrink: 0, marginTop: 2 }} />}
+        <span>{consequence}</span>
+      </div>
+    </div>
+  );
+}
 
 /**
  * One-tap adjustments.
@@ -55,6 +131,13 @@ const EQUIPMENT = [
   { key: 'none', label: 'Bodyweight', icon: HandMetal },
   { key: 'home', label: 'Home kit', icon: Home },
   { key: 'gym', label: 'Full gym', icon: Building2 },
+];
+
+// The sports people in this app are most likely to name. Free text still
+// works for anything not listed - these are shortcuts, not a whitelist.
+const SPORTS = [
+  'Football', 'Cricket', 'Running', 'Badminton', 'Basketball',
+  'Swimming', 'Cycling', 'Tennis', 'Volleyball', 'Kabaddi',
 ];
 
 const COMMON_CONSTRAINTS = [
@@ -178,7 +261,16 @@ export default function FitMentor({ apiBase }) {
   const [goal, setGoal] = useState('general_fitness');
   const [minutes, setMinutes] = useState(30);
   const [equipment, setEquipment] = useState('none');
+  // [{ text, severity, tracked? }] - not plain strings any more. Severity is
+  // encoded into the string only at the API boundary.
   const [constraints, setConstraints] = useState([]);
+  const [draft, setDraft] = useState('');
+  const [tracked, setTracked] = useState([]);
+  // What they train FOR. Not a fitness goal - a footballer and someone
+  // chasing general fitness want completely different weeks, and the goal
+  // enum has nowhere to put "football".
+  const [sport, setSport] = useState('');
+  const [preferences, setPreferences] = useState('');
   const [adapted, setAdapted] = useState(null);
   const { result, loading, error, generate } = useGenerator(apiBase, '/fitness/generate-workout-plan');
   const { saved, persist, clear } = usePersistentPlan(apiBase, 'workout');
@@ -189,6 +281,52 @@ export default function FitMentor({ apiBase }) {
   const currentPlan = adapted?.adapted_plan || result?.workout_plan || saved?.content;
   const isRestored = !adapted && !result && Boolean(saved);
   const detected = adapted?.contraindications;
+  const stages = result?.injury_stages;
+
+  // Injuries already being tracked on the dashboard, minus any the user has
+  // added here - offering a duplicate import is just noise.
+  const importable = tracked.filter(
+    (t) => !constraints.some((c) => c.text.toLowerCase() === t.text.toLowerCase()),
+  );
+  const suggestions = COMMON_CONSTRAINTS.filter(
+    (s) => !constraints.some((c) => c.text.toLowerCase() === s.toLowerCase()),
+  ).slice(0, 8);
+
+  // Generation is blocked client-side at 8+ because the backend refuses it
+  // anyway. Better to say so next to the slider than after a 20-second wait.
+  const blocked = constraints.filter((c) => c.severity >= BLOCKING_SEVERITY);
+
+  const addInjury = (text) => {
+    const clean = (text || '').trim().toLowerCase();
+    if (!clean || constraints.some((c) => c.text === clean)) return;
+    setConstraints([...constraints, { text: clean, severity: 5 }]);
+    setDraft('');
+  };
+
+  // Pull whatever the user is already tracking. Best-effort: FitMentor has
+  // always worked without this endpoint and must keep doing so.
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      try {
+        const res = await fetch(`${apiBase}/challenges/injuries`, {
+          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+        });
+        const data = await res.json();
+        if (!live || !data?.injuries) return;
+        setTracked(
+          data.injuries.map((i) => ({
+            text: String(i.label || i.body_part || '').toLowerCase(),
+            severity: Math.max(0, Math.min(10, Number(i.severity ?? 5))),
+            tracked: true,
+          })).filter((i) => i.text),
+        );
+      } catch {
+        /* dashboard injuries are a convenience, not a dependency */
+      }
+    })();
+    return () => { live = false; };
+  }, [apiBase]);
 
   // Persist every new or adapted plan so it survives the app closing.
   useEffect(() => {
@@ -196,20 +334,37 @@ export default function FitMentor({ apiBase }) {
     if (text) {
       persist(text, {
         fitness_goal: goal, activity_level: level,
-        equipment, time_per_day: minutes, constraints,
+        equipment, time_per_day: minutes,
+        constraints: constraints.map(encodeInjury), sport, preferences,
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [result, adapted]);
 
+  // Restore severities from a saved plan rather than resetting everyone to 5.
+  useEffect(() => {
+    // `params`, not `parameters` - that is the key /plans/current returns.
+    const saved_constraints = saved?.params?.constraints;
+    if (saved_constraints?.length && !constraints.length) {
+      setConstraints(saved_constraints.map(decodeInjury));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [saved]);
+
   const run = () => {
+    if (blocked.length) return;
     setAdapted(null);
     generate({
       activity_level: level,
       fitness_goal: goal,
       time_per_day: minutes,
       equipment,
-      constraints,
+      // Severity travels inside the string: the backend parser, the severity
+      // refusal and injury_service.as_constraints all already speak this
+      // format. A parallel structured field would be a second source of truth.
+      constraints: constraints.map(encodeInjury),
+      sport: sport.trim() || null,
+      preferences: preferences.trim() || null,
       age: null,
       weight: null,
     });
@@ -249,17 +404,129 @@ export default function FitMentor({ apiBase }) {
         />
       </Section>
 
+      {/* Sport is separate from the fitness goal on purpose. Training FOR
+          something has different demands from training in general, and it has
+          to leave enough in the legs to actually play. */}
+      <Section
+        title="Training for a sport?"
+        hint="Optional — the plan is built around its demands and your match days"
+      >
+        <div style={{ display: 'grid', gap: '0.6rem' }}>
+          <input
+            className="form-input"
+            placeholder="e.g. football, cricket, running, swimming"
+            value={sport}
+            onChange={(e) => setSport(e.target.value)}
+          />
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+            {SPORTS.map((s) => (
+              <button
+                key={s}
+                type="button"
+                className={`suggest-chip ${sport.toLowerCase() === s.toLowerCase() ? 'is-active' : ''}`}
+                onClick={() => setSport(sport.toLowerCase() === s.toLowerCase() ? '' : s)}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
+      </Section>
+
+      <Section
+        title="Anything else?"
+        hint="Exercises you hate, days you can't train, equipment quirks"
+      >
+        <input
+          className="form-input"
+          placeholder="e.g. no burpees, mornings only, matches on Sundays"
+          value={preferences}
+          onChange={(e) => setPreferences(e.target.value)}
+        />
+      </Section>
+
       <Section
         title="Any injuries or limitations?"
-        hint="Named injuries are excluded from the plan — worth being specific"
+        hint="Rate each one — how bad it is decides what the plan may contain"
       >
-        <ChipInput
-          values={constraints}
-          onChange={setConstraints}
-          placeholder="e.g. upper hamstring injury"
-          suggestions={COMMON_CONSTRAINTS}
-          suggestLabel="Common ones"
-        />
+        {/* Anything already being tracked on the dashboard, offered rather
+            than imposed: the user may want a plan that ignores a niggle they
+            are still logging. Importing carries the severity across, so a
+            check-in on the dashboard changes the next workout without anyone
+            retyping anything. */}
+        {importable.length > 0 && (
+          <div style={{
+            display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center',
+            background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.25)',
+            borderRadius: '0.625rem', padding: '0.75rem',
+          }}>
+            <HeartPulse size={14} color="#A78BFA" style={{ flexShrink: 0 }} />
+            <span style={{ fontSize: '0.75rem', color: '#C4B5FD', flex: 1, minWidth: 160 }}>
+              You're tracking {importable.length === 1 ? 'an injury' : `${importable.length} injuries`} on your dashboard.
+            </span>
+            {importable.map((inj) => (
+              <button
+                key={inj.text}
+                type="button"
+                className="suggest-chip"
+                onClick={() => setConstraints([...constraints, inj])}
+              >
+                <Download size={12} /> {inj.text} · {inj.severity}/10
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <input
+            className="form-input"
+            style={{ flex: 1 }}
+            placeholder="e.g. upper hamstring injury"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addInjury(draft); } }}
+          />
+          <button
+            className="btn btn-primary"
+            onClick={() => addInjury(draft)}
+            disabled={!draft.trim()}
+            style={{ opacity: draft.trim() ? 1 : 0.45 }}
+          >
+            <Plus size={16} />
+          </button>
+        </div>
+
+        {constraints.length > 0 && (
+          <div style={{ display: 'grid', gap: '0.625rem' }}>
+            {constraints.map((inj, i) => (
+              <InjuryRow
+                key={`${inj.text}-${i}`}
+                injury={inj}
+                onChange={(next) => setConstraints(constraints.map((c, j) => (j === i ? next : c)))}
+                onRemove={() => setConstraints(constraints.filter((_, j) => j !== i))}
+              />
+            ))}
+          </div>
+        )}
+
+        {suggestions.length > 0 && (
+          <div>
+            <div style={{
+              fontSize: '0.6875rem', color: '#667085', marginBottom: '0.5rem',
+              fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+            }}>
+              Common ones
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+              {suggestions.map((s) => (
+                <button key={s} type="button" className="suggest-chip" onClick={() => addInjury(s)}>
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {constraints.length > 0 && (
           <div style={{
             display: 'flex', gap: '0.5rem', alignItems: 'flex-start',
@@ -278,10 +545,28 @@ export default function FitMentor({ apiBase }) {
 
       <ErrorNote>{error}</ErrorNote>
 
+      {blocked.length > 0 && (
+        <div style={{
+          display: 'flex', gap: '0.625rem', alignItems: 'flex-start',
+          background: 'rgba(248,113,113,0.09)', border: '1px solid rgba(248,113,113,0.3)',
+          borderRadius: '0.75rem', padding: '1rem', fontSize: '0.8125rem',
+          color: '#F87171', lineHeight: 1.55,
+        }}>
+          <ShieldAlert size={16} style={{ flexShrink: 0, marginTop: 2 }} />
+          <span>
+            You've rated {blocked.map((c) => c.text).join(' and ')} at{' '}
+            {blocked.map((c) => `${c.severity}/10`).join(' and ')}. That's past the point where a
+            training plan is the right answer — it needs looking at properly before you load it
+            again. Lower the rating once it settles and I'll build you a week.
+          </span>
+        </div>
+      )}
+
       <GenerateButton
         onClick={run}
         loading={loading}
-        label={`Build my ${minutes}-minute plan`}
+        disabled={blocked.length > 0}
+        label={blocked.length ? 'Rated too high to train around' : `Build my ${minutes}-minute plan`}
         stages={STAGES}
       />
 
@@ -290,6 +575,35 @@ export default function FitMentor({ apiBase }) {
       {currentPlan && !loading && (
         <>
           {isRestored && <RestoredNote createdAt={saved?.created_at} onDismiss={clear} />}
+
+          {/* How the rating shaped the week. Without this, severity is a
+              slider that appears to do nothing - the plan just quietly comes
+              back different, and there's no way to tell whether it was the
+              rating or the model's mood. */}
+          {stages?.length > 0 && !adapted && (
+            <div style={{
+              background: 'rgba(139,92,246,0.07)', border: '1px solid rgba(139,92,246,0.22)',
+              borderRadius: '0.75rem', padding: '1rem', display: 'grid', gap: '0.75rem',
+            }}>
+              {stages.map((s, i) => (
+                <div key={i} style={{ display: 'flex', gap: '0.625rem', alignItems: 'flex-start' }}>
+                  <Gauge size={15} color={severityColor(s.severity)} style={{ flexShrink: 0, marginTop: 2 }} />
+                  <div>
+                    <div style={{ fontSize: '0.8125rem', fontWeight: 600, textTransform: 'capitalize' }}>
+                      {s.side && s.side !== 'bilateral' ? `${s.side} ` : ''}{s.label}
+                      {s.side === 'bilateral' ? ' (both sides)' : ''}
+                      <span style={{ color: severityColor(s.severity), marginLeft: 6 }}>
+                        {s.severity}/10
+                      </span>
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: '#98A2B3', marginTop: 3, lineHeight: 1.5 }}>
+                      {s.stage_label} — {s.guidance}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
           {/* What the injury detector removed, so it isn't taken on trust */}
           {detected && (
             <div style={{
@@ -329,13 +643,19 @@ export default function FitMentor({ apiBase }) {
             apiBase={apiBase}
             savedPlan={saved}
             planType="workout"
-            params={{ fitness_goal: goal, activity_level: level, equipment, time_per_day: minutes, constraints }}
+            params={{
+              fitness_goal: goal, activity_level: level, equipment,
+              time_per_day: minutes, constraints: constraints.map(encodeInjury),
+            }}
             pills={[
               { label: LEVELS.find((l) => l.key === level)?.label, tone: 'pill-muted' },
               { label: GOALS.find((g) => g.key === goal)?.label, tone: 'pill-brand' },
               { label: `${minutes} min/day`, tone: 'pill-muted' },
               ...(adapted ? [{ label: 'adjusted', tone: 'pill-good' }] : []),
-              ...constraints.map((c) => ({ label: c, tone: 'pill-warn' })),
+              // Severity on the pill, so the plan carries the rating it was
+              // built for - useful when you come back to a restored plan and
+              // your knee is a 3 now rather than the 6 it was on Monday.
+              ...constraints.map((c) => ({ label: `${c.text} ${c.severity}/10`, tone: 'pill-warn' })),
             ]}
           />
 

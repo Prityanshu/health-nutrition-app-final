@@ -10,6 +10,7 @@ from sqlalchemy import and_, func
 from typing import Dict, Any, Optional
 
 from app.database import MealLog, FoodItem
+from app.services import daytime
 from app.models.enhanced_challenge_models import (
     PersonalizedChallenge, UserChallengeProgress, ChallengeType
 )
@@ -40,15 +41,23 @@ class AutomaticChallengeUpdater:
         """
         try:
             updated_challenges = []
-            today = date.today()
-            
+            # date.today() is the server's day and datetime.now() is the
+            # server's clock, but start_date/end_date are stored in UTC. On a
+            # server running in any non-UTC zone the window was shifted by the
+            # offset - challenges activated and expired at the wrong moment,
+            # and progress rows were stamped with the wrong date.
+            from app.database import User
+            user = db.query(User).filter(User.id == user_id).first()
+            today = daytime.local_date(user)
+            now_utc = daytime.utcnow()
+
             # Get all active challenges for this user
             active_challenges = db.query(PersonalizedChallenge).filter(
                 and_(
                     PersonalizedChallenge.user_id == user_id,
                     PersonalizedChallenge.is_active == True,
-                    PersonalizedChallenge.start_date <= datetime.now(),
-                    PersonalizedChallenge.end_date >= datetime.now()
+                    PersonalizedChallenge.start_date <= now_utc,
+                    PersonalizedChallenge.end_date >= now_utc
                 )
             ).all()
             
@@ -173,7 +182,7 @@ class AutomaticChallengeUpdater:
                 existing_progress.nutrition_data['last_meal'] = {
                     'food': food_item.name,
                     'value': daily_value,
-                    'timestamp': datetime.now().isoformat()
+                    'timestamp': daytime.utcnow().isoformat()
                 }
             else:
                 # Create new progress entry
@@ -181,14 +190,14 @@ class AutomaticChallengeUpdater:
                 progress = UserChallengeProgress(
                     user_id=user_id,
                     challenge_id=challenge.id,
-                    progress_date=datetime.now(),
+                    progress_date=daytime.utcnow(),
                     daily_value=daily_value,
                     daily_target=daily_target,
                     completion_percentage=(daily_value / daily_target) * 100 if daily_target > 0 else 0,
                     nutrition_data={
                         'first_meal': food_item.name,
                         'value': daily_value,
-                        'timestamp': datetime.now().isoformat()
+                        'timestamp': daytime.utcnow().isoformat()
                     }
                 )
                 db.add(progress)
@@ -203,7 +212,7 @@ class AutomaticChallengeUpdater:
             # Check if challenge is completed
             if challenge.completion_percentage >= 100:
                 challenge.is_active = False
-                challenge.completion_date = datetime.now()
+                challenge.completion_date = daytime.utcnow()
                 logger.info(f"Challenge {challenge.id} completed!")
             
             return True, daily_value
@@ -244,7 +253,7 @@ class AutomaticChallengeUpdater:
                         MealLog.user_id == user_id,
                         MealLog.food_item_id == food_item.id,
                         MealLog.logged_at >= challenge.start_date,
-                        MealLog.logged_at < datetime.now()
+                        MealLog.logged_at < daytime.utcnow()
                     )
                 ).count()
                 
@@ -272,7 +281,7 @@ class AutomaticChallengeUpdater:
                         progress = UserChallengeProgress(
                             user_id=user_id,
                             challenge_id=challenge.id,
-                            progress_date=datetime.now(),
+                            progress_date=daytime.utcnow(),
                             daily_value=daily_value,
                             daily_target=daily_target,
                             completion_percentage=(daily_value / daily_target) * 100 if daily_target > 0 else 0,
@@ -290,7 +299,7 @@ class AutomaticChallengeUpdater:
                     # Check if challenge is completed
                     if challenge.completion_percentage >= 100:
                         challenge.is_active = False
-                        challenge.completion_date = datetime.now()
+                        challenge.completion_date = daytime.utcnow()
                     
                     return True, daily_value
             
@@ -333,7 +342,7 @@ class AutomaticChallengeUpdater:
                     progress = UserChallengeProgress(
                         user_id=user_id,
                         challenge_id=challenge.id,
-                        progress_date=datetime.now(),
+                        progress_date=daytime.utcnow(),
                         daily_value=daily_value,
                         daily_target=daily_target,
                         completion_percentage=100.0,  # 100% for the day
@@ -351,7 +360,7 @@ class AutomaticChallengeUpdater:
                     # Check if challenge is completed
                     if challenge.completion_percentage >= 100:
                         challenge.is_active = False
-                        challenge.completion_date = datetime.now()
+                        challenge.completion_date = daytime.utcnow()
                     
                     return True, daily_value
             
