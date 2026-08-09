@@ -1,9 +1,10 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   LayoutDashboard, UtensilsCrossed, TrendingUp, Target,
   MessageSquare, Sparkles, ChefHat, Dumbbell, Wallet,
   Globe, CalendarDays, Trophy, Menu, X, LogOut,
 } from 'lucide-react';
+import ToastHost from '../Toast';
 
 /**
  * Persistent application shell.
@@ -70,6 +71,24 @@ export default function AppShell({
     return () => document.body.classList.remove('theme-dark');
   }, []);
 
+  // A hairline under the sticky top bar, but only once the page has actually
+  // scrolled. Always-on reads as a boxed-in header; never-on makes content
+  // appear to slide under nothing.
+  const [stuck, setStuck] = useState(false);
+  useEffect(() => {
+    const onScroll = () => setStuck(window.scrollY > 4);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  // Lock the page behind the drawer. Without this the dashboard scrolls under
+  // the open menu, which feels like two screens fighting each other.
+  useEffect(() => {
+    document.body.classList.toggle('drawer-open', Boolean(sidebarOpen));
+    return () => document.body.classList.remove('drawer-open');
+  }, [sidebarOpen]);
+
   // Close the mobile drawer whenever the destination changes.
   useEffect(() => {
     setSidebarOpen(false);
@@ -87,16 +106,16 @@ export default function AppShell({
 
   return (
     <div className="app-shell">
-      {/* Backdrop for the mobile drawer */}
-      {sidebarOpen && (
-        <div
-          onClick={() => setSidebarOpen(false)}
-          style={{
-            position: 'fixed', inset: 0, zIndex: 35,
-            background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(2px)',
-          }}
-        />
-      )}
+      {/* Backdrop for the mobile drawer.
+          z-index 55 puts it above the bottom nav (45): at 35 the tab bar
+          stayed bright over the dimmed page, so the drawer looked half-open.
+          Kept mounted and faded rather than unmounted, so closing animates
+          out instead of vanishing. */}
+      <div
+        onClick={() => setSidebarOpen(false)}
+        aria-hidden={!sidebarOpen}
+        className={`nav-scrim ${sidebarOpen ? 'is-open' : ''}`}
+      />
 
       <aside className={`nav-rail ${sidebarOpen ? 'nav-rail-open' : ''}`}>
         <div className="flex items-center justify-between" style={{ padding: '0 0.75rem 1.25rem' }}>
@@ -182,19 +201,20 @@ export default function AppShell({
 
       <main className="shell-main">
         {/* Mobile top bar */}
-        <div
-          className="flex items-center justify-between mobile-topbar"
-          style={{ marginBottom: '1.25rem' }}
-        >
+        {/* The menu button was a bare 22px icon flush against the status bar:
+            a small target in the hardest corner of the screen to reach. It is
+            now a 44px tapable surface - the smallest size that is comfortable
+            with a thumb - with the title beside it rather than centred, so the
+            row reads left to right like the rest of the app. */}
+        <div className={`mobile-topbar ${stuck ? "is-stuck" : ""}`}>
           <button
             onClick={() => setSidebarOpen(true)}
             aria-label="Open navigation"
-            style={{ background: 'none', border: 'none', color: '#EEF2F7', cursor: 'pointer', padding: 4 }}
+            className="topbar-menu"
           >
-            <Menu size={22} />
+            <Menu size={20} />
           </button>
-          <span style={{ fontWeight: 600, fontSize: '0.9375rem' }}>{current?.label || 'NutriPlan'}</span>
-          <div style={{ width: 22 }} />
+          <span className="topbar-title">{current?.label || 'NutriPlan'}</span>
         </div>
 
         {children}
@@ -213,6 +233,10 @@ export default function AppShell({
           </button>
         ))}
       </nav>
+
+      {/* Mounted once, for the whole app. Any module can call toast() without
+          threading a callback down through every screen. */}
+      <ToastHost />
     </div>
   );
 }

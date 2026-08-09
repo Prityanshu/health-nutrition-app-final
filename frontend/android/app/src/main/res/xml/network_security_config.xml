@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android has blocked plain http:// since API 28. Without this the app fails
+  every request to a laptop on the LAN and simply looks broken, because there
+  is no useful error surfaced to the webview.
+
+  Why this allows cleartext everywhere:
+  the obvious tighter version, listing private ranges like 192.168.0.0/16,
+  does not work. A <domain> entry matches one exact hostname or IP, not a CIDR
+  block, so "192.168.0.0" would match that single literal address and nothing
+  else. The only ways to narrow it are to hardcode the exact laptop IP, which
+  changes with every network and every DHCP lease, or to allow cleartext
+  generally.
+
+  This is a debug and testing build, so cleartext is on. It stops mattering
+  once the backend moves to a hosted HTTPS URL: at that point delete this file
+  and the two attributes in AndroidManifest.xml that reference it, and the app
+  is HTTPS only again.
+
+  Note for future edits: XML comments cannot contain a double hyphen anywhere,
+  which is exactly what broke the first version of this file.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

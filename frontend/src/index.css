@@ -5,6 +5,15 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  /* Height of the mobile tab bar, excluding the safe-area inset. Declared once
+     so every screen that must keep content clear of it agrees on the number -
+     a hardcoded guess in one place is how the last card ends up half-hidden. */
+  --tabbar-h: 4rem;
+  /* Height of the fixed mobile header, excluding the status-bar inset. */
+  --topbar-h: 3.25rem;
+}
+
 /* ===================================================================
    NOTE ON ORDERING
    Tailwind is loaded above and the project's original hand-written CSS
@@ -957,10 +966,64 @@ body.theme-dark .chat-typing { color: #98A2B3; }
 /* Mobile: rail collapses to a bottom tab bar */
 .bottom-nav { display: none; }
 
-@media (max-width: 900px) {
-  .nav-rail { transform: translateX(-100%); transition: transform 0.25s ease; }
+/* ===================================================================
+   THE PHONE SHELL BREAKPOINT: 760px
+   -------------------------------------------------------------------
+   Below this the sidebar becomes a drawer and a bottom tab bar appears.
+   Above it, the rail is permanent and there is no tab bar.
+
+   This used to be 900px, and that was wrong for two reasons.
+
+   First, it disagreed with the JS. useIsPhone.js decides grid column counts
+   at 760px, because inline `style={{ gridTemplateColumns }}` cannot be
+   overridden by a stylesheet. So between 761 and 900 the app rendered the
+   PHONE shell around DESKTOP grids - a combination nobody designed and
+   nobody had looked at.
+
+   Second, 900px catches a desktop browser. A half-width window on a laptop,
+   or a normal window at 150% zoom, is under 900 CSS pixels - and the website
+   would turn into a phone, sidebar collapsing into a drawer and a tab bar
+   appearing along the bottom. That is what "you added mobile features to the
+   website" meant.
+
+   760 is now the single number. scripts/test_mobile_layout.py asserts that
+   this file and useIsPhone.js still agree on it, because the two drifting
+   apart is exactly the bug above.
+   =================================================================== */
+
+@media (max-width: 760px) {
+  .nav-rail {
+    transform: translateX(-100%);
+    /* Decelerating curve rather than plain ease: the drawer arrives fast and
+       settles, which is what a native drawer does. */
+    transition: transform 0.28s cubic-bezier(0.32, 0.72, 0, 1);
+    width: min(19rem, 84vw);
+    /* The bottom nav sits at z-index 45 and was rendering ON TOP of the open
+       drawer, burying the profile row under the tab bar where it could not be
+       tapped. An open drawer is a modal surface, so it goes above. */
+    z-index: 60;
+    padding-bottom: calc(1.25rem + env(safe-area-inset-bottom));
+  }
   .nav-rail-open { transform: translateX(0); }
-  .shell-main { margin-left: 0; padding: 1rem 1rem 5.5rem; }
+
+  /* Stop the page scrolling behind an open drawer - two surfaces moving at
+     once reads as a glitch. */
+  body.drawer-open { overflow: hidden; }
+
+  .shell-main {
+    /* WITHOUT THIS the desktop rail's 15rem margin still applies on a phone
+       and the whole app is squeezed into the strip to the right of it. An
+       earlier edit accidentally closed this media query above these rules and
+       reopened a min-width one, which is exactly what happened. */
+    margin-left: 0;
+    /* Top padding clears the fixed header; bottom clears the tab bar and the
+       gesture bar, so the last card is never half-hidden. */
+    padding:
+      calc(var(--topbar-h) + env(safe-area-inset-top) + 0.75rem)
+      1rem
+      calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 1.5rem);
+  }
+
   .bottom-nav {
     display: flex;
     position: fixed;
@@ -986,6 +1049,24 @@ body.theme-dark .chat-typing { color: #98A2B3; }
     cursor: pointer;
   }
   .bottom-nav-item-active { color: #A78BFA; }
+}
+
+.nav-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  background: rgba(0, 0, 0, 0.62);
+  backdrop-filter: blur(3px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.28s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.nav-scrim.is-open { opacity: 1; pointer-events: auto; }
+
+/* Above the breakpoint the drawer is a permanent rail, so a scrim would just
+   be a dark sheet over the whole app. */
+@media (min-width: 761px) {
+  .nav-scrim { display: none; }
 }
 
 /* --- Surfaces ----------------------------------------------------- */
@@ -1063,8 +1144,61 @@ body.theme-dark .chat-typing { color: #98A2B3; }
 /* Mobile top bar / drawer close button: rail is permanent on desktop */
 .mobile-topbar { display: none; }
 .nav-close { display: none; }
-@media (max-width: 900px) {
-  .mobile-topbar { display: flex; }
+
+@media (max-width: 760px) {
+  /* Sticky, so navigation is reachable without scrolling back to the top of
+     a long dashboard. */
+  .mobile-topbar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    /* `fixed`, not `sticky`. Sticky pins vertically only, so while the page
+       could still scroll sideways the bar slid off with it and the title
+       appeared cut in half at the top-left. Fixed is anchored to the viewport
+       whatever the content does. */
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
+    z-index: 50;
+    margin: 0;
+    padding: 0.5rem 0.75rem;
+    padding-top: calc(0.5rem + env(safe-area-inset-top));
+    background: rgba(11, 14, 20, 0.88);
+    backdrop-filter: blur(16px);
+    border-bottom: 1px solid transparent;
+    transition: border-color 0.2s ease;
+  }
+  /* A hairline appears only once the page has scrolled, so the bar separates
+     from content that has moved under it rather than always looking boxed in. */
+  .mobile-topbar.is-stuck { border-bottom-color: #2A3240; }
+
+  .topbar-menu {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    flex-shrink: 0;
+    border: none;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.05);
+    color: #EEF2F7;
+    cursor: pointer;
+    transition: background 0.15s ease, transform 0.1s ease;
+  }
+  .topbar-menu:active { background: rgba(255, 255, 255, 0.12); transform: scale(0.94); }
+
+  .topbar-title {
+    font-weight: 600;
+    font-size: 1rem;
+    letter-spacing: -0.01em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
   .nav-close { display: block; }
 }
 
@@ -1300,6 +1434,35 @@ body.theme-dark .chat-typing { color: #98A2B3; }
   transition: all 0.18s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .choice-tile:hover { color: #EEF2F7; transform: translateY(-2px); }
+
+/* The label must be allowed to wrap rather than force the tile wider. */
+.choice-tile span {
+  text-align: center;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.hero-title { font-size: 1.75rem; }
+.hero-sub { font-size: 0.875rem; }
+
+@media (max-width: 760px) {
+  /* Two columns means each tile has real width, so it can be taller and the
+     label sits comfortably instead of being squeezed to 6pt. */
+  .choice-tile {
+    padding: 0.875rem 0.625rem;
+    font-size: 0.8125rem;
+    min-height: 68px;
+    justify-content: center;
+  }
+  /* Hover lift on a touch screen fires on tap and sticks until you tap
+     elsewhere, which reads as a stuck button. */
+  .choice-tile:hover { transform: none; }
+  .choice-tile:active { transform: scale(0.97); }
+
+  /* 1.75rem eats a third of the width on a title like "Meal Planner". */
+  .hero-title { font-size: 1.375rem; }
+  .hero-sub { font-size: 0.8125rem; line-height: 1.45; }
+}
 .choice-tile.is-active {
   color: #fff;
   background: linear-gradient(160deg, rgba(139,92,246,0.28), rgba(34,211,238,0.10));
@@ -2031,8 +2194,58 @@ body.theme-dark .chat-typing { color: #98A2B3; }
 .scroll-down:hover { background: #262E3A; }
 
 @media (max-width: 768px) {
-  .chat-page { height: calc(100vh - 8rem); }
-  .msg-bubble { max-width: 88%; }
+  /* CHAT ON A PHONE
+     The old rule was `100vh - 8rem`, which is wrong twice over: 100vh on a
+     mobile browser is the viewport WITHOUT the address bar, so the page was
+     taller than the screen and the composer sat under the tab bar; and the
+     8rem was a guess unrelated to the actual bar height.
+
+     dvh is the dynamic viewport height, which accounts for browser chrome and
+     is exact inside the Capacitor webview. The rest is measured from the
+     shell's own variables so the composer lands directly above the tab bar. */
+  .chat-page {
+    /* Every fixed chrome element subtracted explicitly, so the composer lands
+       exactly above the tab bar rather than under it. */
+    height: calc(
+      100dvh
+      - var(--topbar-h) - env(safe-area-inset-top)
+      - var(--tabbar-h) - env(safe-area-inset-bottom)
+      - 2.25rem
+    );
+    /* min-height forced the page taller than a small screen, pushing the
+       composer off the bottom entirely on a 5.5" phone. */
+    min-height: 20rem;
+    margin-bottom: 0;
+  }
+
+  /* The header was three stacked things - name, tagline, New chat - eating
+     about a fifth of the screen before a single message. */
+  .chat-head { padding-bottom: 0.75rem; margin-bottom: 0.75rem; }
+  .chat-head .section-sub { display: none; }
+  .chat-head-mark { width: 32px; height: 32px; }
+
+  /* Nearly full width: an 88% cap wastes the margin that a phone does not
+     have, and long plan text wraps into a narrow ribbon. */
+  .msg-bubble { max-width: 94%; font-size: 0.9375rem; }
+  .msg-row { gap: 0.5rem; }
+
+  /* Sticky so the composer stays reachable while the thread scrolls, and the
+     keyboard does not push it out of view. */
+  .chat-composer {
+    position: sticky;
+    bottom: 0;
+    padding: 0.5rem;
+    border-radius: 0.875rem;
+  }
+
+  /* Icon only. "New chat" wrapped onto two lines in the header. */
+  .chat-new-label { display: none; }
+  .chat-new {
+    width: 40px; height: 40px;
+    padding: 0;
+    justify-content: center;
+    flex-shrink: 0;
+  }
 }
 
 /* ===================================================================
@@ -2131,4 +2344,273 @@ body.theme-dark .chat-typing { color: #98A2B3; }
 @media (prefers-reduced-motion: reduce) {
   .auth-orb { animation: none; }
   .auth-card, .auth-form { animation: none; }
+}
+
+/* --------------------------------------------------------------------------
+   Native app shell
+   --------------------------------------------------------------------------
+   Only bites inside the Android build. `body.native-app` is set by App on
+   startup, so none of this affects the site in a browser.
+
+   The status bar is NOT overlaid (see src/index.js), so the top inset is
+   usually 0 here - these rules matter for the bottom gesture bar and for
+   notched phones in landscape, where a side inset does appear. */
+
+body.native-app {
+  /* Rubber-band scrolling past the end of a page reveals the white page
+     behind the app, which looks like a rendering fault on a dark UI. */
+  overscroll-behavior-y: none;
+}
+
+body.native-app .shell-main {
+  padding-left: max(1rem, env(safe-area-inset-left));
+  padding-right: max(1rem, env(safe-area-inset-right));
+}
+
+/* The bottom nav already handles env(safe-area-inset-bottom) - see the
+   .bottom-nav rule above. Nothing to add here. */
+
+/* A note on landscape, since the breakpoint moved from 900px to 760px.
+   A phone turned sideways is around 850 CSS pixels, so it now gets the rail
+   rather than the tab bar. That degrades cleanly - the rail is permanent and
+   every destination is still reachable - it is just not the phone shell.
+   Making the app force the phone shell at any width means duplicating the
+   whole block (CSS cannot say "this media query OR this class") or moving the
+   shell onto a JS-toggled body class. Neither is worth it for landscape. */
+
+/* Tap targets. 44px is the smallest comfortably hittable size on a phone;
+   several controls were sized for a mouse pointer. */
+@media (pointer: coarse) {
+  .toggle-chip,
+  .suggest-chip,
+  .btn {
+    min-height: 44px;
+  }
+  /* A range thumb sized for a cursor is very hard to grab with a thumb. */
+  .range-slider::-webkit-slider-thumb { width: 26px; height: 26px; }
+}
+
+/* Text inputs under 16px make iOS zoom on focus and Android sometimes shift
+   the layout. Cheaper to set the floor than to fight the behaviour. */
+@media (pointer: coarse) {
+  input, select, textarea { font-size: 16px; }
+}
+
+/* ===================================================================
+   NATIVE FEEL
+   -------------------------------------------------------------------
+   What separates "an app" from "a webpage in a shell" is mostly touch
+   response and scrolling physics. None of it is decorative: a tap with no
+   visible reaction reads as a missed tap, and people press again.
+   =================================================================== */
+
+@media (pointer: coarse) {
+  /* Every interactive surface acknowledges a press. 0.97 is small enough not
+     to look like a bounce and large enough to be felt. */
+  .surface.lift:active,
+  .btn:active,
+  .toggle-chip:active,
+  .suggest-chip:active,
+  .bottom-nav-item:active,
+  .ingredient-chip:active {
+    transform: scale(0.97);
+    transition: transform 0.08s ease;
+  }
+
+  /* The grey flash Android paints over tapped elements fights the app's own
+     press states and looks like a rendering artefact on dark surfaces. */
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Long-press text selection on buttons and labels triggers the copy/paste
+     menu mid-scroll. Inputs keep selection, obviously. */
+  .bottom-nav-item, .btn, .toggle-chip, .suggest-chip,
+  .section-title, .metric-label, .pill {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+}
+
+body.native-app {
+  /* Momentum scrolling. Without it the page stops dead when your finger
+     leaves the glass, which is the single most "this is a website" tell. */
+  -webkit-overflow-scrolling: touch;
+}
+
+body.native-app .shell-main {
+  /* Screen changes get a short rise. Long enough to read as a transition,
+     short enough that it never delays interaction. */
+  animation: screen-in 0.26s cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
+@keyframes screen-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* The active tab should be obvious without reading the label. */
+.bottom-nav-item svg { transition: transform 0.2s cubic-bezier(0.32, 0.72, 0, 1); }
+.bottom-nav-item-active svg { transform: translateY(-2px) scale(1.08); }
+
+/* Cards arrive in sequence rather than all at once. Capped at six: beyond
+   that the last card waits long enough to feel like a slow page. */
+body.native-app .stagger > * { animation: fade-up 0.32s cubic-bezier(0.32, 0.72, 0, 1) both; }
+body.native-app .stagger > *:nth-child(1) { animation-delay: 0.02s; }
+body.native-app .stagger > *:nth-child(2) { animation-delay: 0.06s; }
+body.native-app .stagger > *:nth-child(3) { animation-delay: 0.10s; }
+body.native-app .stagger > *:nth-child(4) { animation-delay: 0.14s; }
+body.native-app .stagger > *:nth-child(5) { animation-delay: 0.18s; }
+body.native-app .stagger > *:nth-child(n+6) { animation-delay: 0.20s; }
+
+/* Everything above collapses for anyone who has asked for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  body.native-app .shell-main,
+  body.native-app .stagger > * { animation: none; }
+  .nav-rail { transition: none; }
+  .nav-scrim { transition: none; }
+}
+
+/* ===================================================================
+   TOASTS
+   -------------------------------------------------------------------
+   Logging a meal used to confirm itself with a card rendered *above* the
+   analysis panel the user had just tapped. On a phone that panel is the
+   bottom of a long page - so the moment it collapsed, the page got shorter
+   and the confirmation landed somewhere off-screen above the fold. The
+   action worked and looked like it had done nothing.
+
+   Fixed positioning is the only thing that puts a message where the user is
+   actually looking, whatever the scroll position. It portals to <body>, so
+   the entry animations elsewhere (which leave a permanent transform on their
+   card, and would make any fixed child position against that card instead of
+   the viewport) cannot capture it.
+
+   z-index 80 clears the whole navigation stack: bottom nav 45, drawer scrim
+   55, rail 60. A confirmation hidden behind the tab bar is not one.
+   =================================================================== */
+
+.toast-stack {
+  position: fixed;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  pointer-events: none;   /* never blocks the button that raised it */
+  /* Desktop: out of the way, bottom right, clear of the rail. */
+  right: 1.25rem;
+  bottom: 1.25rem;
+  left: auto;
+  max-width: min(24rem, calc(100vw - 2.5rem));
+}
+
+@media (max-width: 760px) {
+  .toast-stack {
+    /* Above the tab bar and the home indicator, not underneath them. */
+    left: 0.75rem;
+    right: 0.75rem;
+    bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 0.75rem);
+    max-width: none;
+  }
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.625rem;
+  padding: 0.75rem 0.875rem;
+  border-radius: 0.75rem;
+  background: #161A22;
+  border: 1px solid #2A3240;
+  /* Two shadows: a tight one for the edge, a wide soft one so it reads as
+     floating above the page rather than pasted onto it. */
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4), 0 14px 40px -12px rgba(0, 0, 0, 0.75);
+  color: #EEF2F7;
+  font-size: 0.875rem;
+  animation: toast-in 0.28s cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
+.toast-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.toast-success { border-color: rgba(52, 211, 153, 0.38); }
+.toast-success .toast-icon { background: rgba(52, 211, 153, 0.16); color: #34D399; }
+.toast-error { border-color: rgba(248, 113, 113, 0.38); }
+.toast-error .toast-icon { background: rgba(248, 113, 113, 0.16); color: #FCA5A5; }
+.toast-info { border-color: rgba(139, 92, 246, 0.38); }
+.toast-info .toast-icon { background: rgba(139, 92, 246, 0.16); color: #A78BFA; }
+
+.toast-message { display: block; font-weight: 600; line-height: 1.35; }
+
+.toast-detail {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.8125rem;
+  font-weight: 400;
+  color: #98A2B3;
+  line-height: 1.4;
+  /* A file path or a long food name must wrap, not widen the toast past the
+     screen - the exact mistake that caused the sideways scroll elsewhere. */
+  overflow-wrap: anywhere;
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast { animation: none; }
+}
+
+/* ===================================================================
+   NOTHING SCROLLS SIDEWAYS
+   -------------------------------------------------------------------
+   A page wider than the screen is the single cheapest-feeling bug there is:
+   the whole app slides under your thumb, the sticky header scrolls out of
+   frame, and every card looks cut off.
+
+   The cause here was `repeat(N, 1fr)`. `1fr` is `minmax(auto, 1fr)`, and
+   `auto` resolves to MIN-CONTENT - so a tile containing the word
+   "Intermediate" could not shrink below that word, and four of them
+   overflowed a 360px screen. Those are fixed at the source with
+   minmax(0, 1fr); this is the backstop so a future one cannot reach a user.
+
+   `clip` rather than `hidden`: `hidden` makes the element a scroll container,
+   which silently breaks `position: sticky` on the top bar. `clip` just
+   clips.
+   =================================================================== */
+
+html, body {
+  overflow-x: clip;
+  max-width: 100%;
+}
+
+@supports not (overflow: clip) {
+  html, body { overflow-x: hidden; }
+}
+
+/* Cards must never exceed their column, whatever is inside them. */
+.surface, .surface-hero, .chat-page, .msg-bubble {
+  max-width: 100%;
+}
+
+/* Long unbroken strings - a pasted URL, a 40-character food name - are the
+   other way a layout gets pushed wide. */
+.surface, .surface-hero, .msg-bubble, .section-title, .section-sub {
+  overflow-wrap: anywhere;
+}
+
+/* Grid and flex children default to min-width:auto, which is what lets their
+   content push a track wider than its share. This is the global version of
+   the minmax(0, 1fr) fix. */
+.stagger > *, .surface > * {
+  min-width: 0;
 }

@@ -250,6 +250,127 @@ def _number(value: Any) -> float:
 
 
 # ---------------------------------------------------------------------------
+# barcodes
+# ---------------------------------------------------------------------------
+#
+# The same physical product is filed under more than one number, and which one
+# you get depends on the scanner.
+#
+#   * A UPC-A packet is 12 digits printed on the box. Open Food Facts stores
+#     most of them as 13, with a leading zero, because that is the EAN-13 form
+#     of the same product. Asking for the 12-digit version misses.
+#   * UPC-E is the short 8-digit form printed on small packets - a *compressed*
+#     UPC-A, not a number in its own right. No database holds the compressed
+#     form. It has to be expanded before it means anything, and the expansion
+#     is not something a user can be asked to do by hand.
+#
+# So a barcode miss is only real once every equivalent form has missed.
+
+
+def gtin_check_digit(body: str) -> int:
+    """
+    The GS1 mod-10 check digit for everything but the last position.
+
+    Weights alternate 3 and 1 counting from the RIGHT, which is why one routine
+    covers EAN-8 through GTIN-14. Weighting from the left instead still passes
+    about one code in ten by luck, so it would look like it worked.
+    """
+    total = 0
+    for i, ch in enumerate(reversed(body)):
+        total += int(ch) * (3 if i % 2 == 0 else 1)
+    return (10 - total % 10) % 10
+
+
+def is_valid_gtin(code: str) -> bool:
+    """
+    Does the last digit agree with the arithmetic of the others?
+
+    UPC-E is the exception and it is not a small one. Its check digit is the
+    check digit of the UPC-A it was compressed from, NOT a mod-10 over the
+    eight digits as printed - so running the plain routine on a UPC-E rejects
+    it about nine times in ten. Validating the expansion instead is the only
+    correct test, and without it the scanner would have called every small
+    packet in the shop a misread.
+
+    An 8-digit code beginning 0 or 1 is ambiguous: it can be a UPC-E or a
+    genuine EAN-8, and nothing in the digits distinguishes them. Both readings
+    are tried rather than guessing.
+    """
+    digits = "".join(c for c in str(code or "") if c.isdigit())
+    if len(digits) not in (8, 12, 13, 14) or set(digits) == {"0"}:
+        return False
+
+    if len(digits) == 8 and digits[0] in ("0", "1"):
+        expanded = expand_upc_e(digits)
+        if expanded and gtin_check_digit(expanded[:-1]) == int(expanded[-1]):
+            return True
+
+    return gtin_check_digit(digits[:-1]) == int(digits[-1])
+
+
+def expand_upc_e(code: str) -> Optional[str]:
+    """
+    UPC-E (8 digits) back to the UPC-A (12) it was compressed from.
+
+    The last of the six middle digits says where the zeroes were removed. This
+    is a fixed GS1 table, not a heuristic.
+    """
+    digits = "".join(c for c in str(code or "") if c.isdigit())
+    if len(digits) != 8:
+        return None
+    system, middle, check = digits[0], digits[1:7], digits[7]
+    # Only number systems 0 and 1 have a UPC-E form. An 8-digit code starting
+    # with anything else is an EAN-8, which is already a complete number.
+    if system not in ("0", "1"):
+        return None
+
+    a, b, c, d, e, f = middle
+    if f in ("0", "1", "2"):
+        body = f"{system}{a}{b}{f}0000{c}{d}{e}"
+    elif f == "3":
+        body = f"{system}{a}{b}{c}00000{d}{e}"
+    elif f == "4":
+        body = f"{system}{a}{b}{c}{d}00000{e}"
+    else:
+        body = f"{system}{a}{b}{c}{d}{e}0000{f}"
+
+    return f"{body}{check}"
+
+
+def gtin_variants(code: str) -> List[str]:
+    """
+    Every number this barcode could be filed under, best guess first.
+
+    Order matters: the code as printed is tried first, so an exact hit never
+    pays for the alternatives.
+    """
+    digits = "".join(c for c in str(code or "") if c.isdigit())
+    if not digits:
+        return []
+
+    found = [digits]
+
+    if len(digits) == 8:
+        expanded = expand_upc_e(digits)
+        if expanded:
+            found.append(expanded)              # UPC-A
+            found.append("0" + expanded)        # ...and its EAN-13 form
+    elif len(digits) == 12:
+        found.append("0" + digits)
+    elif len(digits) == 13 and digits[0] == "0":
+        found.append(digits[1:])
+    elif len(digits) == 14:
+        trimmed = digits.lstrip("0")
+        # Pad back to a real length rather than handing over a stub.
+        for length in (13, 12):
+            if len(trimmed) <= length:
+                found.append(trimmed.rjust(length, "0"))
+
+    # Ordered, unique.
+    return list(dict.fromkeys(found))
+
+
+# ---------------------------------------------------------------------------
 # Open Food Facts - packaged and branded products
 # ---------------------------------------------------------------------------
 
@@ -539,10 +660,18 @@ def lookup(query: str, barcode: Optional[str] = None) -> Optional[NutritionFacts
     back to an estimate and to label it as one. Never invent a result here.
     """
     if barcode:
-        found = lookup_open_food_facts(query or "", barcode=barcode)
-        if found:
-            logger.info("Barcode %s resolved to %r", barcode, found.matched_name)
-            return found
+        # The printed number first, then the equivalent forms. A UPC-A packet
+        # is filed under its 13-digit EAN, and a UPC-E is a compressed number
+        # that no database holds at all - so stopping after one attempt
+        # reported perfectly ordinary products as "not in the database".
+        for variant in gtin_variants(barcode):
+            found = lookup_open_food_facts(query or "", barcode=variant)
+            if found:
+                if variant != barcode:
+                    logger.info("Barcode %s matched under its %s form", barcode, variant)
+                logger.info("Barcode %s resolved to %r", variant, found.matched_name)
+                return found
+        logger.info("Barcode %s missed under all of %s", barcode, gtin_variants(barcode))
 
     if not query or not query.strip():
         return None

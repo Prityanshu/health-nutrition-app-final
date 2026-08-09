@@ -6,6 +6,7 @@ import {
 import useCountUp from './useCountUp';
 import InjuryTracker from './InjuryTracker';
 import WorkoutCheckIn from './WorkoutCheckIn';
+import useIsPhone from '../useIsPhone';
 
 /**
  * Dashboard - today at a glance, measured against the active goal.
@@ -291,19 +292,38 @@ function StatTile({ icon: Icon, label, value, sub, accent, onClick }) {
 const MACRO_UNIT = (m) => (m === 'calories' ? 'kcal' : 'g');
 
 /** A compact labelled figure for the right-hand side of the week band. */
-function WeekMetric({ icon: Icon, label, value, sub, accent = '#A78BFA' }) {
+function WeekMetric({ icon: Icon, label, value, sub, accent = '#A78BFA', stacked = false }) {
+  // Side by side on a wide screen; stacked into a narrow column on a phone,
+  // where an icon beside two lines of text leaves no room for either.
   return (
-    <div style={{ display: 'flex', gap: '0.625rem', alignItems: 'flex-start', minWidth: 0 }}>
-      <Icon size={15} color={accent} style={{ flexShrink: 0, marginTop: 3 }} />
-      <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: '0.6875rem', color: '#667085', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+    <div style={{
+      display: 'flex',
+      flexDirection: stacked ? 'column' : 'row',
+      gap: stacked ? '0.2rem' : '0.625rem',
+      alignItems: stacked ? 'flex-start' : 'flex-start',
+      minWidth: 0,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', minWidth: 0 }}>
+        <Icon size={stacked ? 13 : 15} color={accent} style={{ flexShrink: 0 }} />
+        <span style={{
+          fontSize: stacked ? '0.625rem' : '0.6875rem', color: '#667085',
+          letterSpacing: '0.04em', textTransform: 'uppercase',
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+        }}>
           {label}
-        </div>
-        <div className="tabular" style={{ fontSize: '1.0625rem', fontWeight: 700, marginTop: 1 }}>
+        </span>
+      </div>
+      <div style={{ minWidth: 0, width: '100%' }}>
+        <div className="tabular" style={{
+          fontSize: stacked ? '0.9375rem' : '1.0625rem', fontWeight: 700, marginTop: 1,
+        }}>
           {value}
         </div>
         {sub && (
-          <div style={{ fontSize: '0.6875rem', color: '#667085', marginTop: 1, lineHeight: 1.4 }}>
+          <div style={{
+            fontSize: stacked ? '0.625rem' : '0.6875rem', color: '#667085',
+            marginTop: 1, lineHeight: 1.35,
+          }}>
             {sub}
           </div>
         )}
@@ -330,7 +350,7 @@ function WeekMetric({ icon: Icon, label, value, sub, accent = '#A78BFA' }) {
  * uninformative for everyone in it - the useful question is "who is just
  * ahead of me", which is the only gap you can actually close.
  */
-function MiniBoard({ board, onNavigate }) {
+function MiniBoard({ board, onNavigate, isPhone = false }) {
   const entries = board?.entries || [];
   if (entries.length < 2) return null;
 
@@ -342,7 +362,10 @@ function MiniBoard({ board, onNavigate }) {
     : entries.slice(0, 3);
 
   return (
-    <div style={{ display: 'grid', gap: '0.45rem', minWidth: 0 }}>
+    <div style={{
+      display: 'grid', gap: '0.45rem', minWidth: 0,
+      ...(isPhone ? { paddingTop: '1rem', borderTop: '1px solid #2A3240' } : {}),
+    }}>
       <div className="flex items-center justify-between" style={{ marginBottom: '0.15rem' }}>
         <span style={{ fontSize: '0.6875rem', color: '#667085', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
           Leaderboard
@@ -397,6 +420,7 @@ function MiniBoard({ board, onNavigate }) {
 }
 
 function WeekBand({ challenges, summary, history, board, onNavigate }) {
+  const isPhone = useIsPhone();
   // Unfinished first - a completed challenge is nice to see but it is not
   // what you can still act on today.
   const active = [...(challenges || [])]
@@ -452,12 +476,15 @@ function WeekBand({ challenges, summary, history, board, onNavigate }) {
 
       <div style={{
         display: 'grid',
-        // Three regions when there is a board to show, two when there is not -
-        // an empty third column reads as something failing to load.
-        gridTemplateColumns: board?.entries?.length > 1
-          ? 'minmax(0,1.3fr) minmax(0,1fr) minmax(0,0.9fr)'
-          : 'minmax(0,1.4fr) minmax(0,1fr)',
-        gap: '1.5rem', alignItems: 'start',
+        // On a phone everything stacks. Three columns at 360px is not a tight
+        // layout, it is overlapping text - which is exactly what shipped.
+        gridTemplateColumns: isPhone
+          ? '1fr'
+          : board?.entries?.length > 1
+            ? 'minmax(0,1.3fr) minmax(0,1fr) minmax(0,0.9fr)'
+            : 'minmax(0,1.4fr) minmax(0,1fr)',
+        gap: isPhone ? '1.25rem' : '1.5rem',
+        alignItems: 'start',
       }}>
         {/* --- challenges, with progress rather than just a count --------- */}
         <div style={{ display: 'grid', gap: '0.7rem', minWidth: 0 }}>
@@ -536,14 +563,24 @@ function WeekBand({ challenges, summary, history, board, onNavigate }) {
         </div>
 
         {/* --- the week in three figures ---------------------------------- */}
-        <div style={{ display: 'grid', gap: '0.875rem', minWidth: 0 }}>
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: isPhone ? 'repeat(3, minmax(0,1fr))' : '1fr',
+          gap: isPhone ? '0.75rem' : '0.875rem',
+          minWidth: 0,
+          ...(isPhone ? {
+            paddingTop: '1rem', borderTop: '1px solid #2A3240',
+          } : {}),
+        }}>
           <WeekMetric
             icon={Flame} accent="#FBBF24" label="Streak"
+            stacked={isPhone}
             value={streak ? `${streak} day${streak === 1 ? '' : 's'}` : '—'}
             sub={streak ? 'on target in a row' : 'no run going yet'}
           />
           <WeekMetric
             icon={UtensilsCrossed} accent="#22D3EE" label="Logged"
+            stacked={isPhone}
             value={history?.length ? `${logged}/${history.length}` : '—'}
             sub="days with meals recorded"
           />
@@ -551,6 +588,7 @@ function WeekBand({ challenges, summary, history, board, onNavigate }) {
               missed", but which macro, how often, and by how much. */}
           <WeekMetric
             icon={Target} accent={worst ? '#F87171' : '#34D399'} label="To fix"
+            stacked={isPhone}
             value={worst
               ? `${worst.direction === 'short' ? '−' : '+'}${Math.abs(worst.average_delta).toFixed(0)}${MACRO_UNIT(worst.macro)}`
               : 'nothing'}
@@ -560,7 +598,7 @@ function WeekBand({ challenges, summary, history, board, onNavigate }) {
           />
         </div>
 
-        <MiniBoard board={board} onNavigate={onNavigate} />
+        <MiniBoard board={board} onNavigate={onNavigate} isPhone={isPhone} />
       </div>
 
       {summary?.headline && (

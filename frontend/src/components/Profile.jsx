@@ -4,6 +4,8 @@ import {
   ChevronRight, Info,
 } from 'lucide-react';
 import WorkoutCheckIn from './WorkoutCheckIn';
+import ServerSetup from './ServerSetup';
+import { isNativeApp } from '../apiBase';
 
 /**
  * Profile - who you are, what you have done, and what it earned.
@@ -184,7 +186,7 @@ function BodyStats({ user, bmi, apiBase, onSaved }) {
             className="form-input" placeholder="Full name" value={form.full_name}
             onChange={(e) => setForm({ ...form, full_name: e.target.value })}
           />
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '0.5rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '0.5rem' }}>
             <input className="form-input" type="number" placeholder="Age" value={form.age}
                    onChange={(e) => setForm({ ...form, age: e.target.value })} />
             <input className="form-input" type="number" placeholder="Height cm" value={form.height}
@@ -422,6 +424,10 @@ export default function Profile({ apiBase, user: authUser, onNavigate }) {
           </div>
         </div>
       )}
+
+      {/* Only in the app. On the web the API is on the same origin, so a
+          server picker would be a setting with exactly one correct value. */}
+      {isNativeApp() && <ServerSetup embedded />}
 
       <button
         onClick={() => onNavigate?.('view-progress')}

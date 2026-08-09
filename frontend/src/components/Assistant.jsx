@@ -193,8 +193,11 @@ export default function Assistant({ apiBase, userName }) {
           </div>
         </div>
         {!empty && (
-          <button className="ghost-btn" onClick={clearHistory} title="Start a new conversation">
-            <Trash2 size={14} /> New chat
+          <button className="ghost-btn chat-new" onClick={clearHistory} title="Start a new conversation">
+            {/* The label is hidden on a phone by CSS, leaving a square icon
+                button - the two-word label wrapped onto two lines and made the
+                header taller than the first message. */}
+            <Trash2 size={14} /> <span className="chat-new-label">New chat</span>
           </button>
         )}
       </div>

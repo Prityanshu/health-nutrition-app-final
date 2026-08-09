@@ -271,7 +271,7 @@ export default function GoalSetup({ apiBase, onGoalSaved }) {
             </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '0.75rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '0.75rem' }}>
             {MACROS.map((m) => (
               <div key={m.key} style={{ background: '#12151B', border: '1px solid #2A3240', borderRadius: '0.75rem', padding: '0.875rem' }}>
                 <div style={{ fontSize: '0.6875rem', color: '#667085', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600 }}>

@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { PageHero } from './SpecialistUI';
 import BarcodeScanner from './BarcodeScanner';
+import { toast, toastError } from '../Toast';
 
 /**
  * Log a meal.
@@ -191,21 +192,46 @@ export default function LogMeal({ apiBase, onLogged, calorieTarget = 0, consumed
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.success) {
-        setLogged({
-          name: foodName.trim(),
-          calories: num(analysis?.parsed_nutrients?.calories),
-          mealType,
-        });
+        const name = foodName.trim();
+        const calories = num(analysis?.parsed_nutrients?.calories);
+
+        setLogged({ name, calories, mealType });
         setAnalysis(null);
         setFoodName('');
         setServing('');
         onLogged?.();
         nameRef.current?.focus();
+
+        /*
+         * Say so where the user is actually looking.
+         *
+         * The green card below confirms this too, but it renders ABOVE the
+         * analysis panel that was just tapped - and that panel is the bottom
+         * of the page on a phone. Removing it shortens the page, so the
+         * confirmation ends up off-screen above the fold and the whole thing
+         * reads as "nothing happened". A fixed toast cannot miss.
+         */
+        // Computed from the props rather than the `remaining` const below, so
+        // this does not depend on declaration order inside the component.
+        const left = calorieTarget > 0
+          ? calorieTarget - consumedToday - calories
+          : null;
+        toast(`${name || 'Meal'} logged`, {
+          detail: [
+            `${Math.round(calories)} kcal · ${mealType}`,
+            left !== null && (left >= 0
+              ? `${Math.round(left)} kcal left today`
+              : `${Math.abs(Math.round(left))} kcal over today`),
+          ].filter(Boolean).join(' · '),
+        });
       } else {
-        setError(readError(data.detail, 'Could not log that meal.'));
+        const message = readError(data.detail, 'Could not log that meal.');
+        setError(message);
+        toastError('Could not log that meal', message);
       }
     } catch {
       setError('Could not reach the server. Is the backend running?');
+      toastError('Could not log that meal', 'The server did not answer.');
     } finally {
       setSaving(false);
     }
@@ -282,7 +308,7 @@ export default function LogMeal({ apiBase, onLogged, calorieTarget = 0, consumed
             <div className="section-title">Which meal?</div>
             <div className="section-sub">Set from the time of day — change it if that's wrong</div>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '0.5rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '0.5rem' }}>
             {MEAL_TYPES.map(({ key, label, icon: Icon }) => (
               <button
                 key={key}
@@ -422,7 +448,7 @@ export default function LogMeal({ apiBase, onLogged, calorieTarget = 0, consumed
                 />
               ))}
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '0.5rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '0.5rem' }}>
               {MACROS.map((m) => (
                 <div key={m.key} style={{
                   padding: '0.625rem 0.75rem', borderRadius: '0.625rem',

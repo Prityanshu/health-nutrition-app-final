@@ -4,6 +4,9 @@ import {
   Plus, X, Sparkles, RefreshCw, Copy, Check, Download, Share2, History, Mail,
 } from 'lucide-react';
 import renderMarkdown from './markdown';
+import useIsPhone from '../useIsPhone';
+import { saveFile, shareFile } from '../nativeFiles';
+import { toast, toastError } from '../Toast';
 
 /**
  * Shared building blocks for the specialist pages (FitMentor, BudgetChef,
@@ -30,9 +33,12 @@ export function PageHero({ icon: Icon, title, subtitle, gradient = '#8B5CF6,#22D
       >
         <Icon size={25} color="#fff" />
       </div>
-      <div>
-        <h1 style={{ fontSize: '1.75rem', fontWeight: 700, letterSpacing: '-0.02em' }}>{title}</h1>
-        <p className="section-sub" style={{ fontSize: '0.875rem' }}>{subtitle}</p>
+      {/* min-width:0 is what lets the text wrap instead of pushing the flex
+          row wider than the screen - a long subtitle was overflowing the
+          viewport and making the whole page swipe sideways. */}
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <h1 className="hero-title" style={{ fontWeight: 700, letterSpacing: '-0.02em' }}>{title}</h1>
+        <p className="section-sub hero-sub">{subtitle}</p>
       </div>
     </div>
   );
@@ -59,9 +65,18 @@ export function Section({ title, hint, children, right, hero = false }) {
 
 /** Icon tiles for a single choice - replaces a <select>. */
 export function TileGroup({ options, value, onChange, columns }) {
-  const cols = columns || Math.min(options.length, 4);
+  const isPhone = useIsPhone();
+  // Four tiles across a 360px screen leaves ~75px each - not enough for
+  // "Intermediate" or "Bodyweight" at a readable size. Two columns on a
+  // phone, so the label has room and the tile is a comfortable tap target.
+  const requested = columns || Math.min(options.length, 4);
+  const cols = isPhone ? Math.min(requested, 2) : requested;
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols},1fr)`, gap: '0.4375rem' }}>
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+      gap: isPhone ? '0.5rem' : '0.4375rem',
+    }}>
       {options.map(({ key, label, icon: Icon, sub }) => (
         <button
           key={key}
@@ -440,23 +455,37 @@ export function PlanActions({
     return { blob: await res.blob(), filename: match ? match[1] : 'plan.pdf' };
   };
 
+  /*
+   * Both buttons go through nativeFiles rather than touching the DOM.
+   *
+   * They used to create an <a download> and call navigator.share directly.
+   * Neither exists in the Android WebView, and neither throws when it is
+   * missing - so in the APK the anchor click did nothing, the share check fell
+   * through to that same dead anchor, and the app then displayed "Downloaded".
+   * A button that reports success while doing nothing is worse than one that
+   * is visibly broken, because there is nothing to report.
+   */
+
   const download = async () => {
     setBusy(true); setDone('');
     try {
       const { blob, filename } = await fetchPdf();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = filename;
-      document.body.appendChild(a); a.click(); a.remove();
-      URL.revokeObjectURL(url);
-      setDone('Downloaded');
+      const { native, where, cancelled } = await saveFile(blob, filename);
+      // The Documents folder was refused and the share sheet came up instead,
+      // and the user backed out of it. Nothing was saved, so say nothing.
+      if (cancelled) { setDone(''); return; }
+      const message = native ? `Saved to ${where}` : 'Downloaded';
+      setDone(message);
+      toast(message, { detail: filename });
     } catch (e) {
       // Surface the actual reason - a missing reportlab install is the most
       // likely cause and is not something the user can guess at.
       const msg = String(e?.message || '');
-      setDone(msg.includes('reportlab') ? 'Server needs: pip install reportlab'
+      const failure = msg.includes('reportlab') ? 'Server needs: pip install reportlab'
         : msg === 'save' ? 'Could not save the plan'
-        : 'Download failed');
+        : 'Download failed';
+      setDone(failure);
+      toastError(failure, msg.includes('reportlab') ? '' : msg.slice(0, 120));
     } finally {
       setBusy(false);
       setTimeout(() => setDone(''), 4000);
@@ -467,25 +496,22 @@ export function PlanActions({
     setBusy(true); setDone('');
     try {
       const { blob, filename } = await fetchPdf();
-      const file = new File([blob], filename, { type: 'application/pdf' });
+      const { method, cancelled } = await shareFile(
+        blob, filename, effective?.title || title || 'My plan',
+      );
+      if (cancelled) { setDone(''); return; }
 
-      // Native share sheet, where the platform supports sharing files. This is
-      // how the plan reaches WhatsApp, Mail, AirDrop and so on without the app
-      // needing to implement any of them.
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file], title: plan.title || 'My plan' });
-        setDone('Shared');
-      } else {
-        // Desktop browsers mostly cannot share files - fall back to download.
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = filename;
-        document.body.appendChild(a); a.click(); a.remove();
-        URL.revokeObjectURL(url);
-        setDone('Downloaded — sharing needs a phone');
-      }
+      const message = method === 'download'
+        // Only ever shown in a desktop browser now, which genuinely cannot
+        // share a file. In the app this branch is unreachable.
+        ? 'Downloaded — this browser cannot share files'
+        : 'Shared';
+      setDone(message);
+      if (method === 'download') toast(message, { detail: filename });
     } catch (e) {
-      if (e?.name !== 'AbortError') setDone('Share failed');
+      if (e?.name === 'AbortError') { setDone(''); return; }
+      setDone('Share failed');
+      toastError('Share failed', String(e?.message || '').slice(0, 120));
     } finally {
       setBusy(false);
       setTimeout(() => setDone(''), 2600);

@@ -257,7 +257,7 @@ export default function ChefGenius({ apiBase, onNavigate }) {
         {/* Meal type */}
         <div className="surface" style={{ padding: '1.25rem' }}>
           <div className="section-title" style={{ marginBottom: '0.875rem' }}>Meal</div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '0.4375rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '0.4375rem' }}>
             {MEAL_TYPES.map(({ key, label, icon: Icon }) => (
               <button
                 key={key}

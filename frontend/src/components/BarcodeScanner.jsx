@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Camera, Keyboard, AlertCircle, ScanLine } from 'lucide-react';
+import { digitsOnly, isValidGtin, describeGtinProblem } from '../barcode';
 
 /**
  * Barcode scanner for packaged food.
@@ -27,8 +28,14 @@ export default function BarcodeScanner({ onDetected, onClose }) {
   const [error, setError] = useState('');
   const [manual, setManual] = useState('');
   const [starting, setStarting] = useState(true);
+  // A rejected read is not an error - it is the scanner doing its job. It gets
+  // its own quiet line under the frame rather than the red error box.
+  const [hint, setHint] = useState('');
   const scannerRef = useRef(null);
   const handledRef = useRef(false);   // a barcode in view fires repeatedly
+  // The last code that passed validation. A code has to be read twice in a row
+  // before it is accepted; see the callback below for why.
+  const pendingRef = useRef('');
 
   useEffect(() => {
     if (mode !== 'camera') return undefined;
@@ -71,14 +78,21 @@ export default function BarcodeScanner({ onDetected, onClose }) {
         if (cancelled) return;
 
         instance = new Html5Qrcode(READER_ID, {
-          // Retail barcodes only. Including QR would let the scanner lock onto
-          // any random code in frame.
+          // Retail product codes only. Including QR would let the scanner lock
+          // onto any random code in frame.
+          //
+          // CODE_128 used to be in this list and had to come out. It is not a
+          // retail product code: it has no fixed length, no check digit anyone
+          // can verify, and no meaning in a food database. Most Indian food
+          // packaging carries a second Code 128 barcode beside the EAN-13
+          // holding the batch number, MRP or packing date - and the scanner
+          // would happily lock onto whichever crossed the frame first, then
+          // report the batch number as "not in the food database".
           formatsToSupport: [
             Html5QrcodeSupportedFormats.EAN_13,
             Html5QrcodeSupportedFormats.EAN_8,
             Html5QrcodeSupportedFormats.UPC_A,
             Html5QrcodeSupportedFormats.UPC_E,
-            Html5QrcodeSupportedFormats.CODE_128,
           ],
         });
         scannerRef.current = instance;
@@ -89,8 +103,46 @@ export default function BarcodeScanner({ onDetected, onClose }) {
           (decoded) => {
             // The camera keeps decoding the same code many times a second.
             if (handledRef.current) return;
+
+            const code = digitsOnly(decoded);
+
+            /*
+             * Check the code before trusting it.
+             *
+             * Every retail barcode ends in a check digit computed from the
+             * digits before it, so a partial or smeared read is detectable
+             * right here - on the phone, before any request goes out. This
+             * used to be missing entirely: whatever the decoder returned was
+             * sent straight to the server, missed, and came back as "that
+             * product is not in the database". Which blamed the database for
+             * a camera problem, and is exactly why typing the same number by
+             * hand worked.
+             *
+             * Rejecting means keep scanning. That is what a scanner should do
+             * with a bad frame - not give up and accuse the user.
+             */
+            if (!isValidGtin(code)) {
+              pendingRef.current = '';
+              setHint(describeGtinProblem(code));
+              return;
+            }
+
+            /*
+             * And require the same code twice running.
+             *
+             * A checksum catches a mangled read, but roughly one bad read in
+             * ten passes it by chance. Two independent frames agreeing takes
+             * that to one in a hundred, and costs about a tenth of a second at
+             * 10fps - which nobody notices, because the code is still in view.
+             */
+            if (pendingRef.current !== code) {
+              pendingRef.current = code;
+              setHint('');
+              return;
+            }
+
             handledRef.current = true;
-            onDetected(String(decoded).replace(/\D/g, ''));
+            onDetected(code);
           },
           () => {}   // per-frame misses are normal; ignore them
         );
@@ -134,13 +186,25 @@ export default function BarcodeScanner({ onDetected, onClose }) {
 
   const submitManual = (e) => {
     e.preventDefault();
-    const digits = manual.replace(/\D/g, '');
+    const digits = digitsOnly(manual);
     if (digits.length < 8 || digits.length > 14) {
       setError('Barcodes are 8 to 14 digits. Check the number under the bars.');
       return;
     }
+    // Deliberately a warning and not a block. A failed check digit here is
+    // almost always a typo, so it is worth saying - but this path is the
+    // fallback for when the camera cannot cope, and a fallback that refuses
+    // input is not a fallback. Let it through and let the lookup decide.
     onDetected(digits);
   };
+
+  // Live feedback while typing, so a transposed digit is caught before the
+  // round trip rather than after it.
+  const manualDigits = digitsOnly(manual);
+  const manualWarning =
+    manualDigits.length >= 8 && !isValidGtin(manualDigits)
+      ? "Those digits don't match the barcode's own check digit — worth a second look."
+      : '';
 
   return createPortal(
     <div
@@ -161,14 +225,14 @@ export default function BarcodeScanner({ onDetected, onClose }) {
         <div className="segmented" style={{ marginBottom: '1rem' }}>
           <button
             className={mode === 'camera' ? 'is-active' : ''}
-            onClick={() => { setMode('camera'); setError(''); }}
+            onClick={() => { setMode('camera'); setError(''); setHint(''); pendingRef.current = ''; }}
             style={{ flex: 1 }}
           >
             <Camera size={14} /> Camera
           </button>
           <button
             className={mode === 'manual' ? 'is-active' : ''}
-            onClick={() => { setMode('manual'); setError(''); }}
+            onClick={() => { setMode('manual'); setError(''); setHint(''); pendingRef.current = ''; }}
             style={{ flex: 1 }}
           >
             <Keyboard size={14} /> Type it
@@ -187,8 +251,16 @@ export default function BarcodeScanner({ onDetected, onClose }) {
               )}
             </div>
             {!error && (
-              <div className="section-sub" style={{ textAlign: 'center', marginTop: '0.75rem' }}>
-                Hold the barcode inside the frame
+              <div
+                className="section-sub"
+                style={{
+                  textAlign: 'center', marginTop: '0.75rem',
+                  // A rejected read is normal. It gets a colour change, not
+                  // the red error box - that box means "this has stopped".
+                  color: hint ? '#FBBF24' : undefined,
+                }}
+              >
+                {hint || 'Hold the barcode inside the frame'}
               </div>
             )}
           </div>
@@ -208,6 +280,11 @@ export default function BarcodeScanner({ onDetected, onClose }) {
                 onChange={(e) => { setManual(e.target.value); setError(''); }}
               />
             </div>
+            {manualWarning && (
+              <div className="section-sub" style={{ color: '#FBBF24', fontSize: '0.75rem' }}>
+                {manualWarning}
+              </div>
+            )}
             <button type="submit" className="generate-btn" disabled={!manual.trim()}>
               Look it up
             </button>

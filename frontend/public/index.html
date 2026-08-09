@@ -3,8 +3,14 @@
   <head>
     <meta charset="utf-8" />
     <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#8A2BE2" />
+    <!-- viewport-fit=cover lets the layout reach under a notch, which the
+         safe-area insets in index.css then compensate for. Without it there
+         are black bars on notched phones.
+         Zoom is disabled because this is an app shell: a double-tap that
+         zooms the whole UI is a bug here, not a feature. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#0B0E14" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta
       name="description"
       content="Nutrition App - Track your meals and nutrition with MyFitnessPal data"

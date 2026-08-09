@@ -34,8 +34,15 @@ import BudgetChef from './components/BudgetChef';
 import Explorer from './components/Explorer';
 import MealPlanner from './components/MealPlanner';
 import renderMarkdown from './components/markdown';
+import { apiBase, isNativeApp } from './apiBase';
+import ServerSetup from './components/ServerSetup';
+import { toast, toastError } from './Toast';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8001/api';
+// Resolved at runtime rather than baked in at build time: inside an APK the
+// backend address changes constantly during testing (LAN IP, tunnel URL, a
+// friend's network), and a build-time constant would mean a rebuild and a
+// fresh install for every one of those. See src/apiBase.js.
+const API_BASE_URL = apiBase();
 
 function App() {
   const [currentView, setCurrentView] = useState('login');
@@ -53,6 +60,10 @@ function App() {
 
   // Sign-in and registration state now lives in <Auth>, which owns both forms.
   const [sessionExpired, setSessionExpired] = useState(false);
+  // Only ever true in the native app: in a browser the API is on the same
+  // machine, so an unreachable backend means the server is down rather than
+  // misconfigured, and a "set your server address" screen would be noise.
+  const [needsServer, setNeedsServer] = useState(false);
   // Injury summary, so the dashboard can prompt for a check-in when one is due.
   const [injurySummary, setInjurySummary] = useState(null);
 
@@ -508,6 +519,19 @@ function App() {
       localStorage.removeItem('token');
     }
   };
+
+  // Can we see the backend at all? Runs before anything else so a connection
+  // problem is reported as a connection problem.
+  useEffect(() => {
+    if (!isNativeApp()) return;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 6000);
+    fetch(`${API_BASE_URL.replace(/\/api$/, '')}/health`, { signal: controller.signal })
+      .then((r) => { if (!r.ok) setNeedsServer(true); })
+      .catch(() => setNeedsServer(true))
+      .finally(() => clearTimeout(timer));
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, []);
 
   useEffect(() => {
     // Check if user is already logged in
@@ -1745,7 +1769,7 @@ function App() {
   const handleQuickLogMeal = async () => {
     if (!selectedRecommendation) {
       console.error('No recommendation selected');
-      alert('⚠️ No food selected. Please try again.');
+      toastError('No food selected', 'Pick something from the list and try again.');
       return;
     }
 
@@ -1799,16 +1823,16 @@ function App() {
         setSelectedRecommendation(null);
         setError('');
         
-        // Show success message
-        const successMessage = `✅ Successfully logged ${selectedRecommendation.name} as ${quickLogForm.meal_type}!
+        // A toast, not alert(). In the Android app alert() renders the system
+        // dialog - a grey box with the origin URL in the title - which stops
+        // the app dead until it is dismissed and looks nothing like the rest
+        // of the interface.
+        toast(`${selectedRecommendation.name} logged`, {
+          detail: `${(selectedRecommendation.calories * quickLogForm.quantity).toFixed(0)} kcal`
+                + ` · ${(selectedRecommendation.protein_g * quickLogForm.quantity).toFixed(1)}g protein`
+                + ` · ${quickLogForm.meal_type}`,
+        });
 
-Nutrition Added:
-• Calories: ${(selectedRecommendation.calories * quickLogForm.quantity).toFixed(0)} cal
-• Protein: ${(selectedRecommendation.protein_g * quickLogForm.quantity).toFixed(1)}g
-• Carbs: ${(selectedRecommendation.carbs_g * quickLogForm.quantity).toFixed(1)}g`;
-        
-        alert(successMessage);
-        
         // Refresh dashboard data to show the new meal but skip challenges to avoid overwriting them
         console.log('Refreshing dashboard data...');
         await loadDashboardData(true);
@@ -1817,13 +1841,14 @@ Nutrition Added:
         const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
         console.error('❌ Error response:', errorData);
         setError(errorData.detail || `Failed to log meal (Status: ${response.status})`);
-        alert(`❌ Failed to log meal: ${errorData.detail || 'Unknown error'}`);
+        toastError('Could not log that meal',
+          typeof errorData.detail === 'string' ? errorData.detail : `Server returned ${response.status}.`);
       }
     } catch (error) {
       console.error('❌ Exception while logging meal:', error);
       console.error('Error stack:', error.stack);
       setError('Network error: ' + error.message);
-      alert(`❌ Error logging meal: ${error.message}\n\nCheck console for details.`);
+      toastError('Could not reach the server', error.message);
     } finally {
       setIsLoading(false);
       console.log('=== Quick Meal Log Complete ===');
@@ -4754,6 +4779,13 @@ Nutrition Added:
       </div>
     </div>
   );
+
+  // On a phone the commonest failure by far is "the backend is not reachable
+  // from here" - wrong IP, laptop asleep, different WiFi. Without this the app
+  // renders an empty dashboard and looks broken, with the real cause invisible.
+  if (needsServer) {
+    return <ServerSetup onSaved={() => window.location.reload()} />;
+  }
 
   // Auth owns both sign-in and registration, including the switch between
   // them, so `currentView` no longer needs a separate 'register' branch.

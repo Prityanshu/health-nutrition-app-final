@@ -95,3 +95,14 @@ datasets/
 # generated reports
 comprehensive_endpoints_report.json
 endpoints_performance_report_30days_*.json
+
+# --- Capacitor / Android ---------------------------------------------------
+# The android/ project itself IS committed (it carries the manifest and
+# network-security edits), but its build output is not.
+frontend/android/.gradle/
+frontend/android/build/
+frontend/android/app/build/
+frontend/android/local.properties
+frontend/android/capacitor-cordova-android-plugins/
+*.apk
+*.aab

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Which directories FileProvider is allowed to hand out URIs for.
+
+    An Android share intent carries a URI, never bytes, so a PDF has to be on
+    disk before it can be shared - and FileProvider will only grant a URI for a
+    path listed here. A file written outside these entries throws
+    IllegalArgumentException the moment the share sheet is opened, which reads
+    to the user as the Share button simply not working.
+
+    The list therefore covers every directory Capacitor's Filesystem plugin can
+    write to, not just the ones in use today.
+
+    Note for future edits: an XML comment may not contain a double hyphen
+    anywhere inside it. That is what broke the network security config and cost
+    a Gradle build.
+-->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Directory.Cache - where a file goes purely so an intent can point at it. -->
+    <cache-path name="app_cache" path="." />
+    <!-- Directory.Data - internal app storage. -->
+    <files-path name="app_files" path="." />
+    <!-- Directory.External - the app's own folder on external storage. -->
+    <external-files-path name="external_files" path="." />
+    <external-cache-path name="external_cache" path="." />
+    <!-- Directory.Documents and Directory.ExternalStorage - the public folders
+         a file manager shows, which is where a download has to land for anyone
+         to find it. -->
+    <external-path name="external" path="." />
+</paths>

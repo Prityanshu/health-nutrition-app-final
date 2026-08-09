@@ -13,6 +13,36 @@ from app.database import FoodItem, MealLog
 load_dotenv()
 logger = logging.getLogger(__name__)
 
+
+def _run_coroutine(coro):
+    """
+    Run a coroutine from sync code, whether or not a loop is already running.
+
+    `asyncio.run()` refuses to start a second loop inside a running one, which
+    is exactly the situation here: this service is synchronous but is called
+    from an async FastAPI endpoint. Every call raised
+
+        RuntimeError: asyncio.run() cannot be called from a running event loop
+
+    and the coroutine was never awaited.
+
+    With no loop running (a script, a test) asyncio.run is correct. With one
+    running, the coroutine goes to a worker thread that owns its own loop, so
+    the caller still gets a result and the outer loop is never blocked by a
+    nested run.
+    """
+    import asyncio
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)          # no loop - the simple case
+
+    import concurrent.futures
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
+
 # Import automatic challenge updater
 try:
     from app.services.automatic_challenge_updater import automatic_challenge_updater
@@ -578,6 +608,11 @@ class NutrientAnalyzerService:
                 "fiber": float(nutrients.get("fiber") or 0),
                 "sugar": float(nutrients.get("sugar") or 0),
                 "sodium": float(nutrients.get("sodium") or 0),
+                # Omitting this is what made every log from the UI return 500.
+                # The meal was written to the database first, so the failure
+                # was a lie: the data was saved and only the RESPONSE blew up,
+                # which is why it appeared on the dashboard a minute later.
+                "cholesterol": float(nutrients.get("cholesterol") or 0),
             }
         except (KeyError, TypeError, ValueError):
             return None
@@ -685,11 +720,15 @@ class NutrientAnalyzerService:
             
             logger.info(f"Logged meal: {food_name} for user {user_id}")
             
-            # Automatically update smart challenges
+            # Automatically update smart challenges.
+            #
+            # This is a sync method called from an async endpoint, so
+            # asyncio.run() raised "cannot be called from a running event
+            # loop" every single time and the coroutine was never awaited.
+            # _run_coroutine handles both cases - see its docstring.
             if automatic_challenge_updater:
                 try:
-                    import asyncio
-                    challenge_update_result = asyncio.run(
+                    challenge_update_result = _run_coroutine(
                         automatic_challenge_updater.update_challenges_on_meal_log(
                             user_id=user_id,
                             meal_log=meal_log,
@@ -697,11 +736,25 @@ class NutrientAnalyzerService:
                             db=db
                         )
                     )
-                    if challenge_update_result.get('success'):
+                    if (challenge_update_result or {}).get('success'):
                         logger.info(f"Automatically updated {challenge_update_result.get('count', 0)} challenges")
                 except Exception as e:
                     logger.error(f"Error auto-updating challenges: {e}")
                     # Don't fail the meal logging if challenge update fails
+
+            # Points. The other logging route (/meals/log) has always done
+            # this; this one never did, so a meal logged through the analyser -
+            # which is what the UI actually uses - earned nothing.
+            try:
+                from app.database import User as _User
+                from app.services import points_engine
+
+                user = db.query(_User).filter(_User.id == user_id).first()
+                if user:
+                    points_engine.sync(db, user, days=1)
+            except Exception as e:
+                logger.error(f"Error awarding points: {e}")
+                db.rollback()
 
             # Return the logged meal data using actual database values
             meal_log_data = {
@@ -713,11 +766,14 @@ class NutrientAnalyzerService:
                 "protein": meal_log.protein,
                 "carbs": meal_log.carbs,
                 "fat": meal_log.fat,
-                "fiber": parsed_nutrients["fiber"],
-                "sugar": parsed_nutrients["sugar"],
-                "sodium": parsed_nutrients["sodium"],
-                "cholesterol": parsed_nutrients["cholesterol"],
-                "health_tags": parsed_nutrients["health_tags"],
+                # .get() rather than [] on every optional field. The meal is
+                # already committed by this point, so a missing key here can
+                # only turn a success into a spurious error.
+                "fiber": parsed_nutrients.get("fiber", 0),
+                "sugar": parsed_nutrients.get("sugar", 0),
+                "sodium": parsed_nutrients.get("sodium", 0),
+                "cholesterol": parsed_nutrients.get("cholesterol", 0),
+                "health_tags": parsed_nutrients.get("health_tags", []),
                 "logged_at": meal_log.logged_at.isoformat(),
                 "food_item_id": food_item.id
             }

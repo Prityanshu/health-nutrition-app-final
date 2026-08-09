@@ -22,13 +22,32 @@ app = FastAPI(
 app.add_middleware(PerformanceTrackerMiddleware)
 
 # Configure CORS
+#
+# The Android app is served from inside the Capacitor webview, whose origin is
+# not any of the localhost dev-server ports - it is http://localhost with no
+# port, or capacitor://localhost depending on the scheme. Without those in the
+# list every request from the phone is blocked by the browser before it is
+# sent, and the app looks broken with nothing useful in the server log.
+#
+# The regex covers phones on the LAN reaching the laptop directly. It is a
+# development convenience: for anything public, replace it with the specific
+# deployed origin.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-    "http://localhost:3000", "http://localhost:3001", "http://localhost:3002",
-    "http://127.0.0.1:3000", "http://127.0.0.1:3001", "http://127.0.0.1:3002",
-    "https://health-nutrition-app-final.vercel.app",  # your actual Vercel domain
-],
+        "http://localhost:3000", "http://localhost:3001", "http://localhost:3002",
+        "http://127.0.0.1:3000", "http://127.0.0.1:3001", "http://127.0.0.1:3002",
+        "https://health-nutrition-app-final.vercel.app",  # your actual Vercel domain
+        # Capacitor's webview origins
+        "http://localhost",
+        "https://localhost",
+        "capacitor://localhost",
+        "ionic://localhost",
+    ],
+    # Private-network origins, for a phone hitting the laptop over WiFi. A
+    # laptop's LAN address changes with every network, so listing them
+    # individually would mean editing this file constantly.
+    allow_origin_regex=r"^https?://(192\.168|10|172\.(1[6-9]|2\d|3[01]))\.[\d.]+(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

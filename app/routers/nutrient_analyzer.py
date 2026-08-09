@@ -120,7 +120,7 @@ async def analyze_by_barcode(
     either without branching, plus a `source` block describing where the
     numbers came from.
     """
-    from app.services.food_lookup import lookup
+    from app.services.food_lookup import is_valid_gtin, lookup
     from app.services.nutrient_analyzer_service import nutrient_analyzer_service
 
     digits = "".join(c for c in request.barcode if c.isdigit())
@@ -132,10 +132,19 @@ async def analyze_by_barcode(
 
     facts = lookup(query="", barcode=digits)
     if not facts:
+        # Two very different failures used to share one message, and the wrong
+        # one was almost always shown. "Not in the database" told people their
+        # perfectly ordinary packet did not exist, when the real problem was a
+        # bad camera read. Say which it is, and quote the digits - so if the
+        # number on screen is not the number on the box, that is visible.
+        misread = not is_valid_gtin(digits)
         raise HTTPException(
             status_code=404,
             detail=(
-                "That barcode is not in the food database yet. "
+                f"Read {digits}, but that is not a valid barcode — likely a "
+                "misread. Try again, or type the number under the bars."
+                if misread else
+                f"Barcode {digits} is not in the food database yet. "
                 "Type the food name instead and I'll estimate it."
             ),
         )
