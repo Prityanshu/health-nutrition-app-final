@@ -119,10 +119,25 @@ bold "Starting the backend on port $PORT"
 #
 # It cannot defeat clamshell sleep on battery; nothing in userspace can. Keep
 # it plugged in if people are relying on it.
+# --reload is OFF by default here, and that is a deliberate change.
+#
+# It is a development flag: it watches the filesystem and restarts the server
+# on any file change, dropping every in-flight request when it does. Fine while
+# you are editing. Not fine while other people are using the app - saving a
+# file mid-session logs them out of whatever they were doing, and the cause is
+# invisible from their end.
+#
+# Set RELOAD=1 when you are working on the backend and nobody else is on it.
+RELOAD_FLAG=""
+if [ "${RELOAD:-0}" = "1" ]; then
+  RELOAD_FLAG="--reload"
+  dim "Auto-reload ON - restarts on file changes, which drops live requests."
+fi
+
 if command -v caffeinate >/dev/null 2>&1; then
-  caffeinate -is uvicorn main:app --host "${HOST:-127.0.0.1}" --port "$PORT" --reload &
+  caffeinate -is uvicorn main:app --host "${HOST:-127.0.0.1}" --port "$PORT" $RELOAD_FLAG &
 else
-  uvicorn main:app --host "${HOST:-127.0.0.1}" --port "$PORT" --reload &
+  uvicorn main:app --host "${HOST:-127.0.0.1}" --port "$PORT" $RELOAD_FLAG &
 fi
 SERVER_PID=$!
 

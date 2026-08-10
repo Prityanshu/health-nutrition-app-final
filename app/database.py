@@ -12,8 +12,59 @@ load_dotenv()
 # Database URL - falls back to SQLite for local development
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./nutrition_app.db")
 
-# Create engine
-engine = create_engine(DATABASE_URL)
+_IS_SQLITE = DATABASE_URL.startswith("sqlite")
+
+# SQLite needs one connection argument to be usable from FastAPI at all.
+#
+# Requests are served from a thread pool, and an endpoint that hands its
+# Session to a worker thread (see asyncio.to_thread in the routers) touches the
+# connection from a different thread than the one that opened it. SQLite's
+# default guard rejects that outright. Turning the check off is safe here
+# because SQLAlchemy's pool hands any one connection to a single thread at a
+# time - the guard is protecting against a situation the pool already prevents.
+_CONNECT_ARGS = {"check_same_thread": False} if _IS_SQLITE else {}
+
+engine = create_engine(DATABASE_URL, connect_args=_CONNECT_ARGS)
+
+
+if _IS_SQLITE:
+    from sqlalchemy import event
+
+    @event.listens_for(engine, "connect")
+    def _tune_sqlite(dbapi_connection, _connection_record):
+        """
+        Make SQLite behave under concurrent use.
+
+        WAL (write-ahead logging) is the one that matters. In the default
+        `delete` journal mode a writer takes a lock over the whole database and
+        readers are blocked until it commits - so one person logging a meal
+        stalls everyone else's dashboard. Under WAL, readers carry on against
+        the last committed state while a write is in progress.
+
+        WAL is a property of the database FILE, not the connection: setting it
+        once is permanent, and it adds `-wal` and `-shm` files beside the `.db`
+        (both gitignored). It is the right default for a local file database
+        and the wrong one only on a network share, which this is not.
+
+        busy_timeout replaces an instant "database is locked" error with a
+        wait. Five seconds is far longer than any write here takes, so
+        contention becomes a slight delay rather than a failed request.
+        """
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA busy_timeout=5000")
+            # NORMAL still survives an application crash; only an OS-level
+            # crash or power loss can lose the most recent commits, which is
+            # the accepted trade for not fsyncing on every single write.
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            # Enforce the ForeignKey declarations below, which SQLite ignores
+            # unless asked. Off by default is a footgun, not a feature.
+            cursor.execute("PRAGMA foreign_keys=ON")
+        finally:
+            cursor.close()
+
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()

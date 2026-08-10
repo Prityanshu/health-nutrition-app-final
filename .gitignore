@@ -106,3 +106,11 @@ frontend/android/local.properties
 frontend/android/capacitor-cordova-android-plugins/
 *.apk
 *.aab
+
+# SQLite write-ahead log sidecars. These sit beside the .db and are not
+# matched by *.db, because that pattern requires the name to end in .db.
+*.db-wal
+*.db-shm
+
+# Personal share templates - these contain the live tunnel URL.
+SHARE.md

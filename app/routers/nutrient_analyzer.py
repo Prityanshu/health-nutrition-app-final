@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
@@ -53,9 +54,16 @@ async def analyze_food_nutrition(
     not be open to anonymous traffic.
     """
     try:
-        result = nutrient_analyzer_service.analyze_food_nutrition(
+        # Off the event loop. This call reaches Open Food Facts and USDA over
+        # `requests`, which is synchronous, and then the model - so on the loop
+        # it holds up EVERY other user's request for as long as it runs. The
+        # lookup alone tries up to four search phrasings at a 6s timeout each.
+        # asyncio.to_thread is the pattern already used in plans.py and
+        # conversation_manager.py.
+        result = await asyncio.to_thread(
+            nutrient_analyzer_service.analyze_food_nutrition,
             food_name=request.food_name,
-            serving_size=request.serving_size
+            serving_size=request.serving_size,
         )
         
         if result["success"]:
@@ -81,7 +89,12 @@ async def log_meal_with_analysis(
     Analyze nutrition and log meal to database using NutrientAnalyzer AI agent.
     """
     try:
-        result = nutrient_analyzer_service.log_meal_with_analysis(
+        # Also off the loop: with no `nutrients` supplied this re-analyses the
+        # food, which is the same blocking network work as /nutrient/analyze.
+        # Passing the Session across threads is why check_same_thread is off in
+        # database.py - only this coroutine touches it, and it is awaiting.
+        result = await asyncio.to_thread(
+            nutrient_analyzer_service.log_meal_with_analysis,
             food_name=request.food_name,
             serving_size=request.serving_size,
             meal_type=request.meal_type.value,
@@ -130,7 +143,11 @@ async def analyze_by_barcode(
             detail="That does not look like a barcode. They are 8 to 14 digits.",
         )
 
-    facts = lookup(query="", barcode=digits)
+    # Open Food Facts over synchronous `requests`, with up to three GTIN
+    # variants at a 6s timeout each. On the event loop that is up to 18s during
+    # which nobody else's request is served - one person scanning a packet
+    # stalls the whole app.
+    facts = await asyncio.to_thread(lookup, query="", barcode=digits)
     if not facts:
         # Two very different failures used to share one message, and the wrong
         # one was almost always shown. "Not in the database" told people their

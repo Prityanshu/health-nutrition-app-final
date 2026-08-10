@@ -26,7 +26,7 @@ laptop a permanent public HTTPS address derived from the machine name and your
 account, something like:
 
 ```
-https://nutriplan.tailec8bdf.ts.net
+https://your-machine.tailXXXXXX.ts.net
 ```
 
 That name never changes. When your laptop is off, the address stops answering;
@@ -86,7 +86,7 @@ Create `frontend/.env.production.local` — it is gitignored, so your address is
 not published:
 
 ```
-REACT_APP_API_URL=https://nutriplan.tailec8bdf.ts.net/api
+REACT_APP_API_URL=https://your-machine.tailXXXXXX.ts.net/api
 ```
 
 **5. Build the APK**
@@ -108,9 +108,9 @@ The same address serves the site, not just the API:
 
 | | |
 | --- | --- |
-| `https://nutriplan.tailec8bdf.ts.net` | the app, in any browser |
-| `https://nutriplan.tailec8bdf.ts.net/api/...` | what the installed APK calls |
-| `https://nutriplan.tailec8bdf.ts.net/health` | what the serve script checks |
+| `https://your-machine.tailXXXXXX.ts.net` | the app, in any browser |
+| `https://your-machine.tailXXXXXX.ts.net/api/...` | what the installed APK calls |
+| `https://your-machine.tailXXXXXX.ts.net/health` | what the serve script checks |
 
 So friends have two options and neither involves you sending anything twice:
 open the link, or install the APK. **The link is the one that works on an
@@ -202,7 +202,7 @@ meaningless in the wrong sequence.
 2. **Has public DNS caught up?**
 
    ```bash
-   curl -s 'https://dns.google/resolve?name=nutriplan.tailec8bdf.ts.net&type=A'
+   curl -s 'https://dns.google/resolve?name=your-machine.tailXXXXXX.ts.net&type=A'
    ```
 
    You want an `"Answer"` key. `"Authority"` alone means the name exists but
@@ -238,7 +238,7 @@ propagating. Each run appended a challenge token to the same record and none
 were ever cleaned up:
 
 ```bash
-curl -s 'https://dns.google/resolve?name=_acme-challenge.YOUR-HOST.tailec8bdf.ts.net&type=TXT'
+curl -s 'https://dns.google/resolve?name=_acme-challenge.YOUR-HOST.tailXXXXXX.ts.net&type=TXT'
 ```
 
 ```
@@ -289,7 +289,7 @@ Addresses are interpreted by kind, so both of these work as typed:
 
 | You type | It becomes |
 | --- | --- |
-| `x.tailec8bdf.ts.net` | `https://x.tailec8bdf.ts.net/api` |
+| `x.tailXXXXXX.ts.net` | `https://x.tailXXXXXX.ts.net/api` |
 | `192.168.1.5` | `http://192.168.1.5:8001/api` |
 
 A name gets HTTPS and no port; a LAN address gets HTTP and port 8001. Assuming
