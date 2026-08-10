@@ -31,23 +31,71 @@ export const isNativeApp = () =>
   typeof window !== 'undefined' &&
   Boolean(window.Capacitor?.isNativePlatform?.());
 
+/** A dotted quad, i.e. something on the local network rather than a domain. */
+const looksLikeIp = (host) => /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
+
+/**
+ * Is this address on this network, as opposed to out on the internet?
+ *
+ * The distinction decides two defaults - scheme and port - and getting it
+ * wrong produces a connection error that looks exactly like a dead server.
+ */
+const isLocalHost = (host) => {
+  const name = host.toLowerCase();
+  return name === 'localhost'
+      || name.endsWith('.local')          // Bonjour, e.g. macbook.local
+      || looksLikeIp(name);
+};
+
 /**
  * Normalise whatever the user typed into something fetchable.
  *
  * People type "192.168.1.5", "192.168.1.5:8001", or paste a URL with a
  * trailing slash. All three should work rather than failing with a network
  * error that looks like the server is down.
+ *
+ * THE TUNNEL BUG
+ * --------------
+ * This used to append :8001 to any bare hostname, because a bare hostname
+ * meant a laptop on the WiFi. Once the backend moved behind a tunnel that
+ * stopped being true: pasting
+ *
+ *     laptop.tail1234.ts.net
+ *
+ * became `http://laptop.tail1234.ts.net:8001`, which is wrong three times
+ * over - the tunnel is HTTPS, it listens on 443, and port 8001 is not open to
+ * the internet at all. The request just hung until it timed out, and the app
+ * reported that the server could not be reached.
+ *
+ * So the two defaults now follow from what kind of address it is. A LAN
+ * address keeps http and :8001. A public hostname gets https and no port,
+ * because that is what every tunnel and every host serves.
  */
 export const normaliseBase = (raw) => {
   let value = String(raw || '').trim();
   if (!value) return '';
 
-  if (!/^https?:\/\//i.test(value)) value = `http://${value}`;
+  const hadScheme = /^https?:\/\//i.test(value);
+  // Everything up to the first slash, minus any scheme: host and maybe :port.
+  const authority = value.replace(/^https?:\/\//i, '').split('/')[0];
+  const host = authority.split(':')[0];
+  const hasPort = /:\d+$/.test(authority);
+
+  if (!hadScheme) {
+    // A bare LAN address is a development server and speaks http. A bare
+    // domain is on the internet and speaks https - assuming otherwise means
+    // the request is refused or silently downgraded.
+    value = `${isLocalHost(host) ? 'http' : 'https'}://${value}`;
+  }
+
   value = value.replace(/\/+$/, '');
 
-  // A bare host with no port almost certainly means the dev server. A hosted
-  // URL will have a port or be on 443 via https, so only assume for http.
-  if (/^http:\/\/[^/:]+$/i.test(value)) value = `${value}:8001`;
+  // The port default applies only where 8001 is plausible: an http LAN
+  // address with no port of its own. A public host is on 443.
+  if (!hasPort && /^http:\/\//i.test(value) && isLocalHost(host)) {
+    value = value.replace(/^(http:\/\/[^/]+)/i, `$1:8001`);
+  }
+
   // The API is mounted under /api; forgetting it is the most common mistake
   // and produces 404s on every call.
   if (!/\/api$/i.test(value)) value = `${value}/api`;
@@ -74,8 +122,40 @@ export const setStoredBase = (raw) => {
   return value;
 };
 
+/**
+ * The address baked in at build time, if there is one.
+ *
+ * With a permanent tunnel URL this is finally worth setting: it is what makes
+ * the APK work the moment a friend opens it, with nothing to type. Put it in
+ * frontend/.env.production.local (which is gitignored) as
+ *
+ *     REACT_APP_API_URL=https://your-laptop.tailXXXX.ts.net/api
+ *
+ * See TUNNEL.md.
+ */
+export const builtInBase = () => (BUILD_TIME ? normaliseBase(BUILD_TIME) : '');
+
+/** Is the app pointed somewhere other than the address it shipped with? */
+export const isOverridden = () => {
+  const stored = getStoredBase();
+  return Boolean(stored) && stored !== builtInBase();
+};
+
+/**
+ * Forget a manual override and go back to the built-in address.
+ *
+ * Needed because localStorage wins over the build-time default, permanently.
+ * Someone who typed a laptop's LAN IP once would keep pointing at it after a
+ * rebuild moved everyone to the tunnel, and would have no idea why the app
+ * only worked at home.
+ */
+export const resetToBuiltIn = () => {
+  setStoredBase('');
+  return builtInBase() || WEB_DEFAULT;
+};
+
 /** The address to use right now. */
-export const apiBase = () => getStoredBase() || BUILD_TIME || WEB_DEFAULT;
+export const apiBase = () => getStoredBase() || builtInBase() || WEB_DEFAULT;
 
 /**
  * Is this address actually reachable?

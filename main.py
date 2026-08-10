@@ -44,10 +44,25 @@ app.add_middleware(
         "capacitor://localhost",
         "ionic://localhost",
     ],
-    # Private-network origins, for a phone hitting the laptop over WiFi. A
-    # laptop's LAN address changes with every network, so listing them
-    # individually would mean editing this file constantly.
-    allow_origin_regex=r"^https?://(192\.168|10|172\.(1[6-9]|2\d|3[01]))\.[\d.]+(:\d+)?$",
+    # Two families of origin, neither of which can be listed literally.
+    #
+    #   1. Private-network addresses, for a phone hitting the laptop over WiFi.
+    #      A laptop's LAN address changes with every network, so listing them
+    #      would mean editing this file constantly.
+    #   2. Tailscale Funnel hostnames (*.ts.net), which is how the backend is
+    #      reached from outside the house. The APK itself does not need this -
+    #      its origin is http://localhost, listed above - but anything served
+    #      from the tunnel on a second port is a different origin and would be
+    #      blocked before the request was ever sent.
+    #
+    # Both are anchored at both ends. An unanchored pattern would match
+    # `https://ts.net.attacker.com`, which is the classic way this goes wrong.
+    allow_origin_regex=(
+        r"^https?://("
+        r"(192\.168|10|172\.(1[6-9]|2\d|3[01]))\.[\d.]+"
+        r"|[a-z0-9-]+\.[a-z0-9-]+\.ts\.net"
+        r")(:\d+)?$"
+    ),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -82,13 +97,54 @@ app.include_router(plans_router, prefix="/api/plans", tags=["saved-plans"])
 app.include_router(challenges_router, prefix="/api", tags=["challenges-and-injuries"])
 app.include_router(profile_router, prefix="/api/profile", tags=["profile-and-points"])
 
-@app.get("/")
-async def root():
-    return {"message": "Welcome to the Nutrition App API", "docs": "/docs"}
-
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "service": "nutrition-app"}
+
+
+# ---------------------------------------------------------------------------
+# The website
+# ---------------------------------------------------------------------------
+#
+# The built React app is served by this same process, so one address gives you
+# both: https://your-host/ is the site, https://your-host/api/... is the API.
+#
+# Why here and not a second tunnel: Funnel can only listen on 443, 8443 and
+# 10000, so a separate frontend would need an ugly :8443 in the URL AND would
+# be a different origin from the API - which means CORS, cookies and mixed
+# content all become problems that do not otherwise exist. Same origin avoids
+# every one of them.
+#
+# ORDER IS LOAD-BEARING. A StaticFiles mount at "/" matches everything, so it
+# must be registered AFTER every router or it swallows the entire API. That is
+# why this block sits at the bottom of the file rather than beside the other
+# app.* calls, and why moving it up would break the app in a way that looks
+# like the routes vanished.
+
+import os
+
+from fastapi.staticfiles import StaticFiles
+
+FRONTEND_BUILD = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "frontend", "build")
+
+if os.path.isdir(FRONTEND_BUILD) and os.path.isfile(
+        os.path.join(FRONTEND_BUILD, "index.html")):
+    # html=True serves index.html for "/" and for any directory request.
+    app.mount("/", StaticFiles(directory=FRONTEND_BUILD, html=True),
+              name="frontend")
+else:
+    # No build yet - `cd frontend && npm run build`. Falling back to the old
+    # JSON greeting rather than a 404, so hitting the root still tells you
+    # something true about what is running.
+    @app.get("/")
+    async def root():
+        return {
+            "message": "Welcome to the Nutrition App API",
+            "docs": "/docs",
+            "note": "No frontend build found. Run: cd frontend && npm run build",
+        }
+
 
 if __name__ == "__main__":
     import uvicorn

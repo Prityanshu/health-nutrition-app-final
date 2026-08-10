@@ -107,8 +107,9 @@ A comprehensive full-stack nutrition tracking and meal planning application with
 2. **Create virtual environment:**
    ```bash
    python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   source venv/bin/activate
    ```
+   On Windows the activate step is `venv\Scripts\activate` instead.
 
 3. **Install Python dependencies:**
    ```bash

@@ -20,7 +20,7 @@ REACT_APP_API_URL=http://192.168.1.5:8001/api
 Find your laptop's address with:
 
 ```bash
-ipconfig getifaddr en0        # WiFi on macOS
+ipconfig getifaddr en0
 ```
 
 This is only the *default*. The address can be changed from inside the app

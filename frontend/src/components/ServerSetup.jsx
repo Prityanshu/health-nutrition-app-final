@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Wifi, Loader2, Check, AlertCircle, Server } from 'lucide-react';
-import { apiBase, getStoredBase, setStoredBase, testBase, isNativeApp } from '../apiBase';
+import { Wifi, Loader2, Check, AlertCircle, Server, RotateCcw } from 'lucide-react';
+import {
+  apiBase, getStoredBase, setStoredBase, testBase, isNativeApp,
+  builtInBase, isOverridden, resetToBuiltIn,
+} from '../apiBase';
 
 /**
  * Where should the app look for the backend?
@@ -8,10 +11,16 @@ import { apiBase, getStoredBase, setStoredBase, testBase, isNativeApp } from '..
  * Shown automatically on the phone when nothing is reachable, and reachable
  * on purpose from the profile screen.
  *
- * The alternative - baking the address in at build time - means a rebuild and
- * a fresh APK every time the laptop's IP changes, every time a tunnel restarts
- * and hands out a new URL, and for every friend on a different network. That
- * is a lot of re-installing to avoid one text box.
+ * This used to be the ONLY way to set an address, because there was nothing
+ * stable to bake in: a laptop's LAN IP changes with every network and a quick
+ * tunnel hands out a new URL on every restart, so a compiled-in address meant
+ * a rebuild and a re-install each time.
+ *
+ * A named tunnel has a permanent hostname, so the address is now compiled in
+ * and this screen is the override rather than the only route. It still earns
+ * its place - the tunnel goes down, someone tests against their own laptop,
+ * the URL changes when the project moves - but nobody has to use it to get
+ * started.
  */
 export default function ServerSetup({ onSaved, embedded = false }) {
   const [value, setValue] = useState('');
@@ -44,8 +53,8 @@ export default function ServerSetup({ onSaved, embedded = false }) {
     <div style={{ display: 'grid', gap: '0.875rem' }}>
       <div>
         <div style={{ fontSize: '0.75rem', color: '#98A2B3', marginBottom: '0.5rem', lineHeight: 1.5 }}>
-          The address of the machine running the backend. On the same WiFi this
-          is your laptop's local IP — find it with{' '}
+          The address of the machine running the backend. A tunnel hostname
+          works here, and so does a laptop on the same WiFi — find that with{' '}
           <code style={{ color: '#A78BFA' }}>ipconfig getifaddr en0</code>.
         </div>
         <input
@@ -53,18 +62,42 @@ export default function ServerSetup({ onSaved, embedded = false }) {
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && save()}
-          placeholder="192.168.1.5:8001"
+          placeholder="my-laptop.tail1234.ts.net"
           autoCapitalize="none"
           autoCorrect="off"
           spellCheck={false}
           inputMode="url"
         />
-        {/* Typing a bare IP is the common case, so say what it becomes rather
-            than silently rewriting it. */}
+        {/* Typing a bare address is the common case, so say what it becomes
+            rather than silently rewriting it. The two defaults differ, and a
+            surprised user cannot tell why one worked and the other did not. */}
         <div style={{ fontSize: '0.6875rem', color: '#667085', marginTop: 5 }}>
-          http:// and /api are added automatically if you leave them out.
+          <code style={{ color: '#98A2B3' }}>/api</code> is added for you. A
+          name like <code style={{ color: '#98A2B3' }}>x.ts.net</code> is
+          assumed to be https; an address like{' '}
+          <code style={{ color: '#98A2B3' }}>192.168.1.5</code> is assumed to be
+          http on port 8001.
         </div>
       </div>
+
+      {/* A manual address is stored forever and outranks the one the app was
+          built with. Without a way back, someone who typed a LAN IP once keeps
+          pointing at it after everyone else has moved to the tunnel - and the
+          app simply stops working away from home with no clue why. */}
+      {isOverridden() && builtInBase() && (
+        <button
+          className="ghost-btn"
+          style={{ justifyContent: 'center' }}
+          onClick={() => {
+            const restored = resetToBuiltIn();
+            setValue(restored);
+            setState({ ok: true, message: `Back to the built-in address: ${restored}` });
+            setTimeout(() => window.location.reload(), 800);
+          }}
+        >
+          <RotateCcw size={14} /> Use the built-in address
+        </button>
+      )}
 
       {state && (
         <div style={{
@@ -91,10 +124,11 @@ export default function ServerSetup({ onSaved, embedded = false }) {
       </button>
 
       <div style={{ fontSize: '0.6875rem', color: '#667085', lineHeight: 1.6 }}>
-        Not connecting? The laptop must be running{' '}
-        <code style={{ color: '#98A2B3' }}>uvicorn main:app --host 0.0.0.0 --port 8001</code>
-        {' '}— without <code style={{ color: '#98A2B3' }}>--host 0.0.0.0</code> it only
-        accepts connections from the laptop itself.
+        Not connecting? The laptop has to be awake with the server running —{' '}
+        <code style={{ color: '#98A2B3' }}>./scripts/serve-public.sh</code>{' '}
+        starts it and opens the tunnel. On the same WiFi instead, it must be{' '}
+        <code style={{ color: '#98A2B3' }}>--host 0.0.0.0</code>: without that it
+        only accepts connections from the laptop itself.
       </div>
     </div>
   );
