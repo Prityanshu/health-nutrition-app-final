@@ -165,8 +165,8 @@ export default function ChefGenius({ apiBase, onNavigate }) {
           className="flex items-center justify-center"
           style={{
             width: 52, height: 52, borderRadius: 15, flexShrink: 0,
-            background: 'linear-gradient(135deg,#8B5CF6,#22D3EE)',
-            boxShadow: '0 0 28px -6px rgba(139,92,246,0.7)',
+            background: 'linear-gradient(135deg,var(--accent),var(--cyan))',
+            boxShadow: '0 0 28px -6px rgba(var(--accent-rgb),0.7)',
           }}
         >
           <ChefHat size={25} color="#fff" />
@@ -238,7 +238,7 @@ export default function ChefGenius({ apiBase, onNavigate }) {
         {/* Suggestions */}
         {suggestions.length > 0 && (
           <div>
-            <div style={{ fontSize: '0.6875rem', color: '#667085', marginBottom: '0.5rem', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+            <div style={{ fontSize: '0.6875rem', color: 'var(--text-faint)', marginBottom: '0.5rem', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
               {regulars.length ? 'From your regulars & staples' : 'Common staples'}
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4375rem' }}>
@@ -319,7 +319,7 @@ export default function ChefGenius({ apiBase, onNavigate }) {
       </div>
 
       {error && (
-        <div className="surface" style={{ padding: '0.9375rem', borderColor: '#F87171', color: '#F87171', fontSize: '0.875rem' }}>
+        <div className="surface" style={{ padding: '0.9375rem', borderColor: 'var(--danger)', color: 'var(--danger)', fontSize: '0.875rem' }}>
           {error}
         </div>
       )}
@@ -361,7 +361,7 @@ export default function ChefGenius({ apiBase, onNavigate }) {
         <div className="surface-hero" style={{ padding: '1.5rem', display: 'grid', gap: '1.125rem' }}>
           <div className="flex items-center justify-between" style={{ flexWrap: 'wrap', gap: '0.75rem' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem' }}>
-              <Flame size={18} color="#FBBF24" />
+              <Flame size={18} color="var(--warning)" />
               <span style={{ fontWeight: 700, fontSize: '1.0625rem' }}>Your recipe</span>
             </div>
             <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -403,11 +403,11 @@ export default function ChefGenius({ apiBase, onNavigate }) {
       {/* Empty state */}
       {!shown && !loading && ingredients.length === 0 && (
         <div className="surface" style={{ padding: '2.5rem 1.5rem', textAlign: 'center' }}>
-          <ChefHat size={30} color="#3A4453" style={{ marginBottom: '0.75rem' }} />
-          <div style={{ color: '#98A2B3', fontSize: '0.9375rem', fontWeight: 600 }}>
+          <ChefHat size={30} color="var(--border-strong)" style={{ marginBottom: '0.75rem' }} />
+          <div style={{ color: 'var(--text-muted)', fontSize: '0.9375rem', fontWeight: 600 }}>
             Nothing in the pan yet
           </div>
-          <div style={{ color: '#667085', fontSize: '0.8125rem', marginTop: 5 }}>
+          <div style={{ color: 'var(--text-faint)', fontSize: '0.8125rem', marginTop: 5 }}>
             Add a couple of ingredients above and ChefGenius will build something around them.
           </div>
         </div>

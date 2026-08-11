@@ -689,7 +689,7 @@ class ConversationManager:
 
             ctx = {
                 "name": user.full_name or "there",
-                "age": user.age,
+                "age": user.current_age,
                 "weight_kg": user.weight,
                 "height_cm": user.height,
                 "activity_level": user.activity_level,

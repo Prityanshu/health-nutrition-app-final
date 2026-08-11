@@ -29,7 +29,7 @@ const WORKOUT_TYPES = [
   { key: 'mobility', label: 'Mobility', icon: TrendingUp },
 ];
 
-const STATUS_COLOUR = { done: '#F87171', rest: '#A78BFA', skipped: '#2A3240' };
+const STATUS_COLOUR = { done: 'var(--danger)', rest: 'var(--accent-soft)', skipped: 'var(--border)' };
 
 /** Mon…Sun initial for a YYYY-MM-DD string, parsed as a local date. */
 const dayInitial = (iso) => {
@@ -82,10 +82,10 @@ export default function WorkoutCheckIn({ apiBase, workout, onLogged, compact = f
             title={`${w.date} — ${w.status}${w.minutes ? `, ${w.minutes} min` : ''}`}
             style={{
               width: '100%', height: 5, borderRadius: 3,
-              background: STATUS_COLOUR[w.status] || '#2A3240',
+              background: STATUS_COLOUR[w.status] || 'var(--border)',
             }}
           />
-          <span style={{ fontSize: '0.5625rem', color: '#667085' }}>
+          <span style={{ fontSize: '0.5625rem', color: 'var(--text-faint)' }}>
             {dayInitial(w.date)}
           </span>
         </div>
@@ -105,7 +105,7 @@ export default function WorkoutCheckIn({ apiBase, workout, onLogged, compact = f
               {workout.done_this_week} this week
             </span>
           )}
-          <Dumbbell size={15} color="#F87171" />
+          <Dumbbell size={15} color="var(--danger)" />
         </div>
       </div>
 
@@ -114,13 +114,13 @@ export default function WorkoutCheckIn({ apiBase, workout, onLogged, compact = f
           display: 'flex', alignItems: 'center', gap: '0.625rem',
           padding: '0.75rem', borderRadius: '0.625rem',
           background: already.status === 'done'
-            ? 'rgba(248,113,113,0.09)' : 'rgba(167,139,250,0.09)',
+            ? 'rgba(var(--danger-rgb),0.09)' : 'rgba(167,139,250,0.09)',
           border: `1px solid ${already.status === 'done'
-            ? 'rgba(248,113,113,0.28)' : 'rgba(167,139,250,0.28)'}`,
+            ? 'rgba(var(--danger-rgb),0.28)' : 'rgba(167,139,250,0.28)'}`,
         }}>
           {already.status === 'done'
-            ? <Check size={15} color="#F87171" />
-            : <Moon size={15} color="#A78BFA" />}
+            ? <Check size={15} color="var(--danger)" />
+            : <Moon size={15} color="var(--accent-soft)" />}
           <div style={{ flex: 1, fontSize: '0.8125rem', minWidth: 0 }}>
             {already.status === 'done' ? (
               <>
@@ -133,7 +133,7 @@ export default function WorkoutCheckIn({ apiBase, workout, onLogged, compact = f
           <button
             onClick={() => setExpanded(true)}
             style={{
-              background: 'none', border: 'none', color: '#A78BFA',
+              background: 'none', border: 'none', color: 'var(--accent-soft)',
               fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', flexShrink: 0,
             }}
           >
@@ -175,7 +175,7 @@ export default function WorkoutCheckIn({ apiBase, workout, onLogged, compact = f
               <div style={{ display: 'grid', gap: '0.75rem' }}>
                 <div>
                   <div className="flex items-center justify-between" style={{ marginBottom: '0.4rem' }}>
-                    <span style={{ fontSize: '0.75rem', color: '#98A2B3' }}>How long</span>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>How long</span>
                     <span className="pill pill-muted tabular" style={{ fontSize: '0.6875rem' }}>
                       {minutes} min
                     </span>
@@ -189,7 +189,7 @@ export default function WorkoutCheckIn({ apiBase, workout, onLogged, compact = f
                 </div>
                 <div>
                   <div className="flex items-center justify-between" style={{ marginBottom: '0.4rem' }}>
-                    <span style={{ fontSize: '0.75rem', color: '#98A2B3' }}>How hard it felt</span>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>How hard it felt</span>
                     <span className="pill pill-muted tabular" style={{ fontSize: '0.6875rem' }}>
                       {intensity}/10
                     </span>
@@ -215,7 +215,7 @@ export default function WorkoutCheckIn({ apiBase, workout, onLogged, compact = f
                 <button
                   className="btn"
                   onClick={() => setExpanded(false)}
-                  style={{ border: '1px solid #2A3240' }}
+                  style={{ border: '1px solid var(--border)' }}
                 >
                   Cancel
                 </button>
@@ -226,7 +226,7 @@ export default function WorkoutCheckIn({ apiBase, workout, onLogged, compact = f
       )}
 
       {result && (
-        <div style={{ fontSize: '0.8125rem', color: '#34D399', marginTop: '0.75rem' }}>
+        <div style={{ fontSize: '0.8125rem', color: 'var(--success)', marginTop: '0.75rem' }}>
           {result}
         </div>
       )}

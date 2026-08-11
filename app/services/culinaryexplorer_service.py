@@ -96,7 +96,7 @@ class CulinaryExplorerService:
     async def generate_regional_meal_plan(self, cuisine_region: str, meal_type: str = "full_day",
                                         dietary_restrictions: list = None, time_constraint: int = 60,
                                         cooking_skill: str = "intermediate", available_ingredients: list = None,
-                                        macro_target=None) -> dict:
+                                        macro_target=None, goal_context: str = "") -> dict:
         """
         Generate a regional meal plan using CulinaryExplorer agent.
 
@@ -109,6 +109,10 @@ class CulinaryExplorerService:
             dietary_str = f"Dietary restrictions: {', '.join(dietary_restrictions)}." if dietary_restrictions else ""
             ingredients_str = f"Available ingredients: {', '.join(available_ingredients)}." if available_ingredients else ""
             macro_str = f"\n\n            {macro_target.prompt_block()}" if macro_target else ""
+            # Before the macro block, not after: the macro numbers are the hard
+            # requirement and must stay last, where the model weights most
+            # heavily. The goal is context that shapes the choices within them.
+            goal_str = f"\n\n            {goal_context.strip()}" if goal_context else ""
 
             prompt = f"""I'm interested in {cuisine_region} cuisine and want a {meal_type} meal plan.
             {dietary_str}
@@ -116,7 +120,7 @@ class CulinaryExplorerService:
             I have {time_constraint} minutes for cooking and my skill level is {cooking_skill}.
             
             Please create a healthy, authentic {cuisine_region} meal plan with traditional dishes
-            that have been modified for better health while maintaining cultural authenticity.{macro_str}"""
+            that have been modified for better health while maintaining cultural authenticity.{goal_str}{macro_str}"""
 
             logger.info(f"CulinaryExplorer prompt: {prompt}")
             response = self.regional_food_agent.run(prompt)

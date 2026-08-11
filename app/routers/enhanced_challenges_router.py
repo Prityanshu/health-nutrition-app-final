@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from pydantic import BaseModel
 import logging
 
-from app.services import daytime
+from app.services import daytime, streaks
 from app.database import get_db, User
 from app.auth import get_current_active_user
 from app.services.data_driven_challenge_generator import DataDrivenChallengeGenerator
@@ -434,20 +434,30 @@ async def get_challenge_analytics(
         # Calculate average completion percentage
         avg_completion = sum(c.completion_percentage for c in all_challenges) / total_challenges if total_challenges > 0 else 0
         
-        # Calculate streak data
-        current_streak = 0
-        longest_streak = 0
-        temp_streak = 0
-        
-        for progress in sorted(all_progress, key=lambda x: x.progress_date):
-            if progress.completion_percentage >= 100:
-                temp_streak += 1
-                longest_streak = max(longest_streak, temp_streak)
-            else:
-                temp_streak = 0
-        
-        current_streak = temp_streak
-        
+        # Streaks, in DAYS.
+        #
+        # This used to count consecutive ROWS of user_challenge_progress, which
+        # is a different and much friendlier number. progress_date is a
+        # DateTime, so no two rows share a value and each one counted on its
+        # own: three challenges finished in a single evening was reported as a
+        # three-day streak. Missing days could not break the run either, because
+        # a row that does not exist cannot be seen - so one account had a
+        # "current" streak spanning September to November, still being reported
+        # months after the last entry.
+        #
+        # Collapsing to distinct local dates and walking a contiguous range
+        # fixes both, and shares its definition with the adherence streak on
+        # the dashboard rather than inventing a second one.
+        tz = daytime.zone_for(current_user)
+        completed_dates = {
+            daytime.local_date(current_user, p.progress_date)
+            for p in all_progress
+            if p.completion_percentage >= 100 and p.progress_date
+        }
+        run = streaks.from_dates(completed_dates, today=daytime.local_date(tz=tz))
+        current_streak = run.current
+        longest_streak = run.best
+
         # Calculate points earned
         total_points = sum(c.points_reward for c in all_challenges if c.completion_percentage >= 100)
         

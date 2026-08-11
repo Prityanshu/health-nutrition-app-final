@@ -21,7 +21,7 @@ import { digitsOnly, isValidGtin, describeGtinProblem } from '../barcode';
  *    threw the email popover off screen.
  */
 
-const READER_ID = 'nutriplan-barcode-reader';
+const READER_ID = 'kayosha-barcode-reader';
 
 export default function BarcodeScanner({ onDetected, onClose }) {
   const [mode, setMode] = useState('camera');   // camera | manual
@@ -257,7 +257,7 @@ export default function BarcodeScanner({ onDetected, onClose }) {
                   textAlign: 'center', marginTop: '0.75rem',
                   // A rejected read is normal. It gets a colour change, not
                   // the red error box - that box means "this has stopped".
-                  color: hint ? '#FBBF24' : undefined,
+                  color: hint ? 'var(--warning)' : undefined,
                 }}
               >
                 {hint || 'Hold the barcode inside the frame'}
@@ -281,7 +281,7 @@ export default function BarcodeScanner({ onDetected, onClose }) {
               />
             </div>
             {manualWarning && (
-              <div className="section-sub" style={{ color: '#FBBF24', fontSize: '0.75rem' }}>
+              <div className="section-sub" style={{ color: 'var(--warning)', fontSize: '0.75rem' }}>
                 {manualWarning}
               </div>
             )}

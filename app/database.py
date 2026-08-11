@@ -2,12 +2,33 @@ from sqlalchemy import (create_engine, Column, Integer, String, Float, Boolean,
                         DateTime, Date, Text, ForeignKey, Enum, UniqueConstraint, Index)
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
-from datetime import datetime
+from datetime import date, datetime
+from typing import Optional
 import enum
 import os
 from dotenv import load_dotenv
 
 load_dotenv()
+
+
+def age_on(dob: date, today: Optional[date] = None) -> int:
+    """
+    Completed years between a birth date and today.
+
+    The subtraction has to account for whether the birthday has happened yet
+    this year, or everyone is a year too old for up to eleven months. Comparing
+    (month, day) tuples does that in one step and, unlike arithmetic on day
+    counts, gets 29 February right for free: on 28 February of a non-leap year
+    (2, 28) < (2, 29), so a leap-day birthday has correctly not yet occurred.
+
+    Uses the server's date rather than the user's timezone. Age changes once a
+    year, so being on the wrong side of midnight for a few hours is a rounding
+    error - not worth importing the timezone machinery here and risking a
+    circular import for.
+    """
+    today = today or date.today()
+    had_birthday = (today.month, today.day) >= (dob.month, dob.day)
+    return today.year - dob.year - (0 if had_birthday else 1)
 
 # Database URL - falls back to SQLite for local development
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./nutrition_app.db")
@@ -90,6 +111,11 @@ class User(Base):
     username = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
     full_name = Column(String)
+    # A birth date beats a stored age, which is wrong within a year of being
+    # entered and then keeps drifting - and age feeds the BMR calculation, so
+    # it drifts into every calorie target the app produces. `age` is kept for
+    # accounts created before this existed; see `current_age` below.
+    date_of_birth = Column(Date, nullable=True)
     age = Column(Integer)
     weight = Column(Float)  # in kg
     height = Column(Float)  # in cm
@@ -109,7 +135,27 @@ class User(Base):
     timezone = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     is_active = Column(Boolean, default=True)
-    
+
+    @property
+    def current_age(self) -> Optional[int]:
+        """
+        How old this user is TODAY.
+
+        Prefers the birth date, because a stored age is a snapshot: correct on
+        the day it was typed and wrong from the next birthday onwards. That
+        matters more than it sounds - age is an input to the Mifflin-St Jeor
+        BMR equation, so a stale age quietly biases every calorie target the
+        app produces, for as long as the account exists.
+
+        Falls back to the stored `age` for accounts created before birth dates
+        were collected, so nothing breaks for them and they can add one later.
+        Returns None when neither is known, and callers keep their own default
+        rather than having one invented here.
+        """
+        if self.date_of_birth:
+            return age_on(self.date_of_birth)
+        return self.age
+
     # Relationships
     meal_plans = relationship("MealPlan", back_populates="user")
     meal_logs = relationship("MealLog", back_populates="user")
@@ -208,6 +254,56 @@ class SavedPlan(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     user = relationship("User")
+
+
+class PasswordResetToken(Base):
+    """
+    A one-shot ticket to set a new password.
+
+    WHAT IS STORED IS A HASH, NOT THE TOKEN
+    ---------------------------------------
+    The token itself only ever exists in the email. What lands here is its
+    SHA-256, so anyone who reads this table - a stolen backup, a careless log,
+    a `SELECT *` in a screenshare - still cannot reset anybody's password. It
+    is the same reasoning that makes the passwords themselves unreadable, and
+    it would be odd to protect the password and then leave the thing that can
+    replace it lying in the clear.
+
+    SHA-256 rather than bcrypt here on purpose: these tokens are 256 bits of
+    `secrets` output, so there is no dictionary to attack and nothing for a
+    slow hash to buy. Password hashing is slow because human passwords are
+    guessable; this is not.
+
+    `used_at` rather than deleting the row: a reset attempt with an
+    already-spent token should be able to say "that link has already been
+    used", which is a different and more useful message than "invalid link".
+    """
+
+    __tablename__ = "password_reset_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    # SHA-256 hex of the token that was emailed.
+    token_hash = Column(String(64), nullable=False, unique=True, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    used_at = Column(DateTime, nullable=True)
+    # Recorded to make abuse visible in the logs. Not used for any decision -
+    # an address proves nothing and blocking on it would lock out anyone
+    # behind the same NAT.
+    requested_from = Column(String, nullable=True)
+
+    user = relationship("User")
+
+    @property
+    def is_spent(self) -> bool:
+        return self.used_at is not None
+
+    def is_expired(self, now: Optional[datetime] = None) -> bool:
+        return (now or datetime.utcnow()) >= self.expires_at
+
+    def is_usable(self, now: Optional[datetime] = None) -> bool:
+        return not self.is_spent and not self.is_expired(now)
 
 
 class WeightLog(Base):

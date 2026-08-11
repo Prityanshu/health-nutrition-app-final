@@ -36,7 +36,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy.orm import Session
 
 from app.database import Goal, MealLog, User
-from app.services import daytime
+from app.services import daytime, streaks
 
 logger = logging.getLogger(__name__)
 
@@ -339,21 +339,17 @@ def _streaks(results: List[DayResult]) -> Streak:
     Unlogged days BREAK the streak rather than being skipped. A streak claims
     consecutive days of hitting targets, and a gap means we do not know - so
     carrying the count across it would be asserting something unevidenced.
+
+    The counting itself lives in services/streaks.py, shared with the challenge
+    analytics endpoint. That endpoint used to have its own inline version which
+    counted table ROWS rather than days, and reported three challenges finished
+    in one evening as a three-day streak. One implementation, one definition.
+
+    `history()` returns a contiguous range of days, which is what `over()`
+    requires - every day in the window is present, hit or not.
     """
-    streak = Streak()
-    run = 0
-    for result in results:
-        if result.hit:
-            run += 1
-            streak.best = max(streak.best, run)
-        else:
-            run = 0
-    for result in reversed(results):
-        if result.hit:
-            streak.current += 1
-        else:
-            break
-    return streak
+    counted = streaks.over([(r.day, r.hit) for r in results])
+    return Streak(current=counted.current, best=counted.best)
 
 
 def summarise(results: List[DayResult]) -> Dict[str, Any]:

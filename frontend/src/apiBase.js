@@ -21,7 +21,7 @@
  *   3. localhost, for running in a desktop browser
  */
 
-const STORAGE_KEY = 'nutriplan.apiBase';
+const STORAGE_KEY = 'kayosha.apiBase';
 
 const BUILD_TIME = process.env.REACT_APP_API_URL || '';
 const WEB_DEFAULT = 'http://localhost:8001/api';

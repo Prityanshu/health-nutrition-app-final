@@ -28,7 +28,7 @@ class EnhancedRecipeGenerator:
             'health_conditions': user.health_conditions or {},
             'cuisine_pref': getattr(user, 'cuisine_pref', 'mixed'),
             'activity_level': user.activity_level or 'moderately_active',
-            'age': user.age,
+            'age': user.current_age,
             'weight': user.weight,
             'height': user.height
         }

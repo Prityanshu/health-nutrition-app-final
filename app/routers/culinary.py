@@ -162,6 +162,23 @@ async def generate_regional_meal_plan(
                             "'my daily targets' instead of what's left."),
                 )
 
+        # The weight goal, independent of `personalised`. Macro matching is
+        # opt-in because it constrains the food hard; knowing what the person
+        # is working towards costs nothing and shapes the choices either way.
+        from app.database import Goal
+        from app.services import weight_progress
+
+        active_goal = (
+            db.query(Goal)
+            .filter(Goal.user_id == current_user.id, Goal.is_active == True)  # noqa: E712
+            .order_by(Goal.created_at.desc())
+            .first()
+        )
+        goal_context = weight_progress.prompt_block(
+            weight_progress.for_user(db, current_user, goal=active_goal),
+            getattr(active_goal, "goal_type", None),
+        )
+
         result = await culinaryexplorer_service.generate_regional_meal_plan(
             cuisine_region=request.cuisine_region.value,
             meal_type=request.meal_type.value,
@@ -170,6 +187,7 @@ async def generate_regional_meal_plan(
             cooking_skill=request.cooking_skill.value,
             available_ingredients=request.available_ingredients,
             macro_target=target,
+            goal_context=goal_context,
         )
         if result["success"]:
             if target:

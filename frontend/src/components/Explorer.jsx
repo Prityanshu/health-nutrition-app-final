@@ -180,7 +180,7 @@ export default function Explorer({ apiBase }) {
         icon={Globe}
         title="Explorer"
         subtitle="Cook something from somewhere else, adapted to your kitchen."
-        gradient="#22D3EE,#8B5CF6"
+        from="--cyan-rgb" to="--accent-rgb"
       />
 
       {/* Mode selector - the same two-card pattern as the meal planner, so
@@ -207,18 +207,18 @@ export default function Explorer({ apiBase }) {
             style={{
               padding: '1.125rem', textAlign: 'left', cursor: disabled ? 'not-allowed' : 'pointer',
               opacity: disabled ? 0.5 : 1,
-              borderColor: personalised === key ? '#8B5CF6' : undefined,
+              borderColor: personalised === key ? 'var(--accent)' : undefined,
               background: personalised === key
-                ? 'linear-gradient(135deg, rgba(139,92,246,0.16), rgba(34,211,238,0.05))'
+                ? 'linear-gradient(135deg, rgba(var(--accent-rgb),0.16), rgba(var(--cyan-rgb),0.05))'
                 : undefined,
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-              <Icon size={17} color={personalised === key ? '#A78BFA' : '#667085'} />
+              <Icon size={17} color={personalised === key ? 'var(--accent-soft)' : 'var(--text-faint)'} />
               <span style={{ fontWeight: 600, fontSize: '0.9375rem' }}>{title}</span>
-              {personalised === key && <Check size={15} color="#34D399" style={{ marginLeft: 'auto' }} />}
+              {personalised === key && <Check size={15} color="var(--success)" style={{ marginLeft: 'auto' }} />}
             </div>
-            <div style={{ fontSize: '0.75rem', color: '#98A2B3', lineHeight: 1.5 }}>{body}</div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>{body}</div>
           </button>
         ))}
       </div>
@@ -228,11 +228,11 @@ export default function Explorer({ apiBase }) {
           see is indistinguishable from no target at all. */}
       {personalised && hasGoal && (
         <div style={{
-          background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.25)',
+          background: 'rgba(var(--accent-rgb),0.08)', border: '1px solid rgba(var(--accent-rgb),0.25)',
           borderRadius: '0.75rem', padding: '1rem', display: 'grid', gap: '0.875rem',
         }}>
           <div style={{ display: 'flex', gap: '0.625rem', alignItems: 'flex-start' }}>
-            <Target size={15} color="#A78BFA" style={{ flexShrink: 0, marginTop: 2 }} />
+            <Target size={15} color="var(--accent-soft)" style={{ flexShrink: 0, marginTop: 2 }} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: '0.8125rem', fontWeight: 600, marginBottom: '0.5rem' }}>
                 Build the food to hit
@@ -262,20 +262,20 @@ export default function Explorer({ apiBase }) {
           {activeTarget && (
             <div style={{
               display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(90px,1fr))',
-              gap: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid rgba(139,92,246,0.2)',
+              gap: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid rgba(var(--accent-rgb),0.2)',
             }}>
               {[
-                ['Calories', `${activeTarget.calories}`, 'kcal', '#FBBF24'],
-                ['Protein', `${activeTarget.protein}`, 'g', '#22D3EE'],
-                ['Carbs', `${activeTarget.carbs}`, 'g', '#A78BFA'],
-                ['Fat', `${activeTarget.fat}`, 'g', '#F87171'],
+                ['Calories', `${activeTarget.calories}`, 'kcal', 'var(--warning)'],
+                ['Protein', `${activeTarget.protein}`, 'g', 'var(--cyan)'],
+                ['Carbs', `${activeTarget.carbs}`, 'g', 'var(--accent-soft)'],
+                ['Fat', `${activeTarget.fat}`, 'g', 'var(--danger)'],
               ].map(([label, value, unit, colour]) => (
                 <div key={label}>
-                  <div style={{ fontSize: '0.625rem', color: '#667085', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  <div style={{ fontSize: '0.625rem', color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                     {label}
                   </div>
                   <div className="tabular" style={{ fontSize: '1.0625rem', fontWeight: 700, color: colour, marginTop: 2 }}>
-                    {value}<span style={{ fontSize: '0.6875rem', color: '#667085', fontWeight: 500 }}> {unit}</span>
+                    {value}<span style={{ fontSize: '0.6875rem', color: 'var(--text-faint)', fontWeight: 500 }}> {unit}</span>
                   </div>
                 </div>
               ))}
@@ -285,13 +285,13 @@ export default function Explorer({ apiBase }) {
           {/* "Remaining" is meaningless before anything is logged, so say so
               rather than quietly answering a different question. */}
           {basis === 'remaining' && targets?.remaining?.fell_back && (
-            <div style={{ fontSize: '0.75rem', color: '#FBBF24', lineHeight: 1.5 }}>
+            <div style={{ fontSize: '0.75rem', color: 'var(--warning)', lineHeight: 1.5 }}>
               Nothing logged today yet, so nothing is used up — this is the same as
               your daily target.
             </div>
           )}
           {!remainingUsable && (
-            <div style={{ fontSize: '0.75rem', color: '#98A2B3', lineHeight: 1.5 }}>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
               You've already met today's targets — "what's left" has nothing to work with.
             </div>
           )}
@@ -321,7 +321,7 @@ export default function Explorer({ apiBase }) {
         />
 
         {visibleRegions.length === 0 ? (
-          <div style={{ fontSize: '0.8125rem', color: '#98A2B3', padding: '0.5rem 0' }}>
+          <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', padding: '0.5rem 0' }}>
             No region matches “{search}”. Try a state name, or one of: Indian,
             Mediterranean, Japanese, Thai, Chinese, Italian, Mexican, French.
           </div>
@@ -399,15 +399,15 @@ export default function Explorer({ apiBase }) {
           {result?.verification && (
             <div style={{
               background: result.verification.hit
-                ? 'rgba(52,211,153,0.08)' : 'rgba(251,191,36,0.08)',
+                ? 'rgba(var(--success-rgb),0.08)' : 'rgba(var(--warning-rgb),0.08)',
               border: `1px solid ${result.verification.hit
-                ? 'rgba(52,211,153,0.28)' : 'rgba(251,191,36,0.28)'}`,
+                ? 'rgba(var(--success-rgb),0.28)' : 'rgba(var(--warning-rgb),0.28)'}`,
               borderRadius: '0.75rem', padding: '1rem', display: 'grid', gap: '0.875rem',
             }}>
               <div style={{ display: 'flex', gap: '0.625rem', alignItems: 'flex-start' }}>
                 {result.verification.hit
-                  ? <Check size={15} color="#34D399" style={{ flexShrink: 0, marginTop: 2 }} />
-                  : <Target size={15} color="#FBBF24" style={{ flexShrink: 0, marginTop: 2 }} />}
+                  ? <Check size={15} color="var(--success)" style={{ flexShrink: 0, marginTop: 2 }} />
+                  : <Target size={15} color="var(--warning)" style={{ flexShrink: 0, marginTop: 2 }} />}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: '0.8125rem', fontWeight: 600 }}>
                     {result.verification.checked
@@ -416,7 +416,7 @@ export default function Explorer({ apiBase }) {
                           : 'Close, but not everything landed')
                       : 'Could not verify the totals'}
                   </div>
-                  <div style={{ fontSize: '0.75rem', color: '#98A2B3', marginTop: 2, lineHeight: 1.5 }}>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2, lineHeight: 1.5 }}>
                     {result.verification.summary || result.verification.reason}
                     {result.verification.retried && ' (regenerated once to get closer.)'}
                   </div>
@@ -427,7 +427,7 @@ export default function Explorer({ apiBase }) {
                 <div style={{
                   display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(110px,1fr))',
                   gap: '0.75rem', paddingTop: '0.75rem',
-                  borderTop: '1px solid rgba(255,255,255,0.07)',
+                  borderTop: '1px solid rgba(var(--white-rgb),0.07)',
                 }}>
                   {['calories', 'protein', 'carbs', 'fat'].map((macro) => {
                     const m = result.verification.macros[macro];
@@ -435,16 +435,16 @@ export default function Explorer({ apiBase }) {
                     const ok = m.status === 'on_target';
                     return (
                       <div key={macro}>
-                        <div style={{ fontSize: '0.625rem', color: '#667085', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                        <div style={{ fontSize: '0.625rem', color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                           {macro}
                         </div>
                         <div className="tabular" style={{
                           fontSize: '1.0625rem', fontWeight: 700, marginTop: 2,
-                          color: ok ? '#34D399' : '#FBBF24',
+                          color: ok ? 'var(--success)' : 'var(--warning)',
                         }}>
-                          {m.stated}<span style={{ fontSize: '0.6875rem', color: '#667085', fontWeight: 500 }}> {m.unit}</span>
+                          {m.stated}<span style={{ fontSize: '0.6875rem', color: 'var(--text-faint)', fontWeight: 500 }}> {m.unit}</span>
                         </div>
-                        <div style={{ fontSize: '0.625rem', color: '#667085', marginTop: 1 }}>
+                        <div style={{ fontSize: '0.625rem', color: 'var(--text-faint)', marginTop: 1 }}>
                           {ok ? `target ${m.target}` : `${m.delta > 0 ? '+' : ''}${m.delta} vs range`}
                         </div>
                       </div>
@@ -458,7 +458,7 @@ export default function Explorer({ apiBase }) {
           <ResultPanel
             title={`${selectedLabel} kitchen`}
             icon={Globe}
-            accent="#22D3EE"
+            accent="var(--cyan)"
             markdown={activeContent}
             onRegenerate={run}
             apiBase={apiBase}

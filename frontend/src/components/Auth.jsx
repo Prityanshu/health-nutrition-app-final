@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  Activity, ArrowLeft, ArrowRight, Check, ChefHat, Eye, EyeOff,
+  ArrowLeft, ArrowRight, Check, ChefHat, Eye, EyeOff,
   Loader2, Lock, Mail, Sparkles, Target, User as UserIcon, AlertCircle,
 } from 'lucide-react';
 import { browserTimezone, syncTimezone } from '../localDay';
+import { ageFrom, isoYearsAgo } from '../age';
+import Lotus from './Lotus';
 
 /**
  * Sign in / create account.
@@ -11,7 +13,7 @@ import { browserTimezone, syncTimezone } from '../localDay';
  * This is the first screen anyone sees, and it was the last one still on the
  * original light theme - a white page with three stacked inputs that then
  * dropped the user into a dark app. Now it uses the same surface, type and
- * motion language as the rest of NutriPlan.
+ * motion language as the rest of Kayosha.
  *
  * Two decisions worth noting:
  *
@@ -107,9 +109,11 @@ export default function Auth({ apiBase, onAuthenticated, notice: initialNotice =
   const firstField = useRef(null);
 
   const [login, setLogin] = useState({ username: '', password: '' });
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotSent, setForgotSent] = useState('');
   const [reg, setReg] = useState({
     email: '', username: '', password: '', full_name: '',
-    age: '', weight: '', height: '',
+    date_of_birth: '', weight: '', height: '',
     activity_level: 'moderately_active', sex: '',
   });
 
@@ -132,6 +136,33 @@ export default function Auth({ apiBase, onAuthenticated, notice: initialNotice =
     setStep(1);
     setError('');
     setNotice('');
+    setForgotSent('');
+  };
+
+  const submitForgot = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetch(`${apiBase}/auth/forgot-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: forgotEmail.trim() }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        // Whatever happened server-side, the answer is the same - see the
+        // endpoint. Repeating it verbatim keeps the client from inventing a
+        // more specific claim than the server was willing to make.
+        setForgotSent(data.message || 'If that address has an account, a link is on its way.');
+      } else {
+        setError(readError(data.detail, 'Could not send a reset link. Try again shortly.'));
+      }
+    } catch {
+      setError('Could not reach the server. Is the backend running?');
+    } finally {
+      setLoading(false);
+    }
   };
 
   // FastAPI validation errors arrive as a list of objects; rendering that
@@ -199,11 +230,22 @@ export default function Auth({ apiBase, onAuthenticated, notice: initialNotice =
     // These start empty rather than pre-filled, so a blank field would send
     // NaN and come back as an opaque 422. `required` on the inputs normally
     // catches it; this is the backstop for autofill and browser quirks.
-    const age = parseInt(reg.age, 10);
     const weight = parseFloat(reg.weight);
     const height = parseFloat(reg.height);
-    if (!Number.isFinite(age) || !Number.isFinite(weight) || !Number.isFinite(height)) {
-      setError('Age, weight and height are all needed to work out your targets.');
+    if (!reg.date_of_birth || !Number.isFinite(weight) || !Number.isFinite(height)) {
+      setError('Date of birth, weight and height are all needed to work out your targets.');
+      return;
+    }
+
+    // Checked here as well as on the server, because a 422 listing a Pydantic
+    // validation error is not a sentence anyone wants to read.
+    const years = ageFrom(reg.date_of_birth);
+    if (years === null) {
+      setError('That date of birth does not look right.');
+      return;
+    }
+    if (years < 13 || years > 100) {
+      setError(`That works out as ${years}. This app is for ages 13 to 100.`);
       return;
     }
 
@@ -218,7 +260,7 @@ export default function Auth({ apiBase, onAuthenticated, notice: initialNotice =
           email: reg.email.trim(),
           username: reg.username.trim(),
           full_name: reg.full_name.trim(),
-          age,
+          date_of_birth: reg.date_of_birth,
           weight,
           height,
           // So the very first day is theirs, not UTC's. Without this a user
@@ -280,11 +322,21 @@ export default function Auth({ apiBase, onAuthenticated, notice: initialNotice =
         <div className="auth-orb auth-orb-b" />
 
         <div className="auth-brand-inner">
-          <div className="auth-logo">
-            <div className="auth-logo-mark">
-              <Activity size={22} color="#fff" />
+          {/* Name first, mark to its right, motto beneath - the same order as
+              the logo, so the sign-in page and the app agree. */}
+          <div className="auth-logo" style={{ display: 'block' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+              <span className="auth-logo-text">Kayosha</span>
+              <Lotus size={38} strokeWidth={3.4} />
             </div>
-            <span className="auth-logo-text">NutriPlan</span>
+            <div
+              style={{
+                fontSize: '0.6875rem', letterSpacing: '0.2em', textTransform: 'uppercase',
+                color: 'var(--brand-magenta)', fontWeight: 600, marginTop: 6,
+              }}
+            >
+              Nourish. Move. Thrive.
+            </div>
           </div>
 
           <h1 className="auth-headline">
@@ -315,9 +367,19 @@ export default function Auth({ apiBase, onAuthenticated, notice: initialNotice =
         <div className="auth-card">
           {/* Compact logo for the stacked mobile layout, where the brand
               panel is reduced to a strip. */}
-          <div className="auth-logo auth-logo-compact">
-            <div className="auth-logo-mark"><Activity size={18} color="#fff" /></div>
-            <span className="auth-logo-text">NutriPlan</span>
+          <div className="auth-logo auth-logo-compact" style={{ display: 'block' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <span className="auth-logo-text">Kayosha</span>
+              <Lotus size={30} strokeWidth={3.6} />
+            </div>
+            <div
+              style={{
+                fontSize: '0.625rem', letterSpacing: '0.18em', textTransform: 'uppercase',
+                color: 'var(--brand-magenta)', fontWeight: 600, marginTop: 4,
+              }}
+            >
+              Nourish. Move. Thrive.
+            </div>
           </div>
 
           <div className="segmented auth-segmented">
@@ -384,9 +446,63 @@ export default function Auth({ apiBase, onAuthenticated, notice: initialNotice =
               </button>
 
               <p className="auth-switch">
+                <button type="button" onClick={() => switchMode('forgot')}>
+                  Forgot your password?
+                </button>
+              </p>
+
+              <p className="auth-switch">
                 New here?{' '}
                 <button type="button" onClick={() => switchMode('register')}>
                   Create an account
+                </button>
+              </p>
+            </form>
+          )}
+
+          {/* ----------------------------------------------------- forgot -- */}
+          {mode === 'forgot' && (
+            <form onSubmit={submitForgot} className="auth-form">
+              <p className="section-sub" style={{ marginBottom: '0.25rem' }}>
+                Give the email address on your account and we will send a link
+                to set a new password.
+              </p>
+
+              <Field
+                icon={Mail}
+                label="Email"
+                type="email"
+                value={forgotEmail}
+                inputRef={firstField}
+                autoComplete="email"
+                placeholder="you@example.com"
+                onChange={(e) => setForgotEmail(e.target.value)}
+              />
+
+              {/* The server answers identically whether or not the address
+                  exists, so this is shown on success without claiming an
+                  account was found. Saying "we sent it" would leak exactly
+                  what the endpoint carefully does not. */}
+              {forgotSent && (
+                <div className="auth-notice">
+                  <Check size={15} />
+                  <span>{forgotSent}</span>
+                </div>
+              )}
+
+              {error && (
+                <div className="auth-error">
+                  <AlertCircle size={15} /> <span>{error}</span>
+                </div>
+              )}
+
+              <button type="submit" className="generate-btn" disabled={loading || !!forgotSent}>
+                {busy('Send the link', 'Sending…')}
+              </button>
+
+              <p className="auth-switch">
+                <button type="button" onClick={() => switchMode('login')}>
+                  Back to sign in
                 </button>
               </p>
             </form>
@@ -455,15 +571,20 @@ export default function Auth({ apiBase, onAuthenticated, notice: initialNotice =
               ) : (
                 <>
                   <div className="auth-row">
+                    {/* A birth date rather than an age. Age feeds the BMR
+                        calculation, so a number typed once is wrong from the
+                        next birthday onwards and drags every calorie target
+                        with it. A date stays true. The bounds are dates rather
+                        than years so the picker itself refuses an impossible
+                        one. */}
                     <Field
-                      label="Age"
-                      type="number"
-                      min="13"
-                      max="100"
-                      value={reg.age}
+                      label="Date of birth"
+                      type="date"
+                      min={isoYearsAgo(100)}
+                      max={isoYearsAgo(13)}
+                      value={reg.date_of_birth}
                       inputRef={firstField}
-                      placeholder="25"
-                      onChange={(e) => setReg({ ...reg, age: e.target.value })}
+                      onChange={(e) => setReg({ ...reg, date_of_birth: e.target.value })}
                     />
                     <Field
                       label="Weight"

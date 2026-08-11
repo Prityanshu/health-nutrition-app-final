@@ -7,6 +7,7 @@ import useCountUp from './useCountUp';
 import InjuryTracker from './InjuryTracker';
 import WorkoutCheckIn from './WorkoutCheckIn';
 import useIsPhone from '../useIsPhone';
+import { solid, tint } from '../theme';
 
 /**
  * Dashboard - today at a glance, measured against the active goal.
@@ -37,11 +38,11 @@ const mealTime = (iso) => {
 /* ------------------------------------------------------- goal adherence -- */
 
 const DAY_COLOURS = {
-  hit: '#34D399',
-  missed: '#F87171',
-  partial: '#FBBF24',
-  unlogged: '#2A3240',
-  no_goal: '#2A3240',
+  hit: 'var(--success)',
+  missed: 'var(--danger)',
+  partial: 'var(--warning)',
+  unlogged: 'var(--border)',
+  no_goal: 'var(--border)',
 };
 
 const DAY_LABELS = {
@@ -76,13 +77,13 @@ function AdherenceStrip({ history, summary }) {
   return (
     <div style={{ marginBottom: '1.25rem' }}>
       <div className="flex items-center justify-between" style={{ marginBottom: '0.6rem' }}>
-        <span style={{ fontSize: '0.75rem', color: '#98A2B3' }}>
+        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
           Last {history.length} days
         </span>
         {summary?.current_streak > 0 && (
           <span className="pill" style={{
-            fontSize: '0.6875rem', color: '#34D399',
-            background: 'rgba(52,211,153,0.12)', border: '1px solid rgba(52,211,153,0.3)',
+            fontSize: '0.6875rem', color: 'var(--success)',
+            background: 'rgba(var(--success-rgb),0.12)', border: '1px solid rgba(var(--success-rgb),0.3)',
           }}>
             {summary.current_streak} day{summary.current_streak === 1 ? '' : 's'} on target
           </span>
@@ -91,7 +92,7 @@ function AdherenceStrip({ history, summary }) {
 
       <div style={{ display: 'flex', gap: '0.375rem' }}>
         {history.map((day) => {
-          const colour = DAY_COLOURS[day.status] || '#2A3240';
+          const colour = DAY_COLOURS[day.status] || 'var(--border)';
           const isOpen = open === day.date;
           return (
             <button
@@ -104,7 +105,7 @@ function AdherenceStrip({ history, summary }) {
                 cursor: 'pointer', display: 'grid', gap: '0.3rem', justifyItems: 'center',
               }}
             >
-              <span style={{ fontSize: '0.625rem', color: '#667085' }}>
+              <span style={{ fontSize: '0.625rem', color: 'var(--text-faint)' }}>
                 {weekdayOf(day.date).slice(0, 1)}
               </span>
               <span style={{
@@ -126,15 +127,15 @@ function AdherenceStrip({ history, summary }) {
         return (
           <div style={{
             marginTop: '0.6rem', padding: '0.625rem 0.75rem', borderRadius: '0.5rem',
-            background: '#12151B', border: '1px solid #2A3240',
-            fontSize: '0.75rem', color: '#98A2B3', lineHeight: 1.5,
+            background: 'var(--surface-inset)', border: '1px solid var(--border)',
+            fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.5,
           }}>
             <span style={{ color: DAY_COLOURS[day.status], fontWeight: 600 }}>
               {weekdayOf(day.date)}
             </span>
             {' — '}{day.summary}
             {day.meals > 0 && (
-              <span style={{ color: '#667085' }}>
+              <span style={{ color: 'var(--text-faint)' }}>
                 {' '}· {day.meals} meal{day.meals === 1 ? '' : 's'}
               </span>
             )}
@@ -144,7 +145,7 @@ function AdherenceStrip({ history, summary }) {
 
       {summary?.headline && (
         <div style={{
-          marginTop: '0.6rem', fontSize: '0.75rem', color: '#667085', lineHeight: 1.5,
+          marginTop: '0.6rem', fontSize: '0.75rem', color: 'var(--text-faint)', lineHeight: 1.5,
         }}>
           {summary.headline}
         </div>
@@ -161,11 +162,11 @@ function GoalRings({ calories, calorieTarget, protein, proteinTarget, hasGoal })
   const rings = [
     {
       r: 96, stroke: 15, value: calories, target: calorieTarget,
-      from: '#8B5CF6', to: '#22D3EE', label: 'calories',
+      from: '--accent-rgb', to: '--cyan-rgb', label: 'calories',
     },
     {
       r: 74, stroke: 11, value: protein, target: proteinTarget,
-      from: '#22D3EE', to: '#34D399', label: 'protein',
+      from: '--cyan-rgb', to: '--success-rgb', label: 'protein',
     },
   ];
 
@@ -178,8 +179,8 @@ function GoalRings({ calories, calorieTarget, protein, proteinTarget, hasGoal })
         <defs>
           {rings.map((ring, i) => (
             <linearGradient key={i} id={`ring${i}`} x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stopColor={over && i === 0 ? '#FBBF24' : ring.from} />
-              <stop offset="100%" stopColor={over && i === 0 ? '#F87171' : ring.to} />
+              <stop offset="0%" stopColor={over && i === 0 ? 'var(--warning)' : solid(ring.from)} />
+              <stop offset="100%" stopColor={over && i === 0 ? 'var(--danger)' : solid(ring.to)} />
             </linearGradient>
           ))}
         </defs>
@@ -206,7 +207,7 @@ function GoalRings({ calories, calorieTarget, protein, proteinTarget, hasGoal })
                   '--dash-from': `${c}px`,
                   '--dash-to': `${offset}px`,
                   animationDelay: `${i * 0.12}s`,
-                  filter: `drop-shadow(0 0 7px ${ring.from}66)`,
+                  filter: `drop-shadow(0 0 7px ${tint(ring.from, 0.4)})`,
                 }}
               />
             </g>
@@ -227,7 +228,7 @@ function GoalRings({ calories, calorieTarget, protein, proteinTarget, hasGoal })
         {hasGoal && (
           <div style={{
             marginTop: 9, fontSize: '0.75rem', fontWeight: 700,
-            color: over ? '#FBBF24' : '#34D399',
+            color: over ? 'var(--warning)' : 'var(--success)',
           }}>
             {over
               ? `${(calories - calorieTarget).toLocaleString()} over`
@@ -248,9 +249,9 @@ function MacroBar({ label, grams, target, color, hasGoal, delay = 0 }) {
     <div>
       <div className="flex items-center justify-between" style={{ marginBottom: 6 }}>
         <span style={{ fontSize: '0.8125rem', fontWeight: 600 }}>{label}</span>
-        <span className="tabular" style={{ fontSize: '0.75rem', color: hit ? '#34D399' : '#98A2B3' }}>
+        <span className="tabular" style={{ fontSize: '0.75rem', color: hit ? 'var(--success)' : 'var(--text-muted)' }}>
           {Math.round(animated)}g
-          {hasGoal && <span style={{ color: '#667085' }}> / {Math.round(target)}g</span>}
+          {hasGoal && <span style={{ color: 'var(--text-faint)' }}> / {Math.round(target)}g</span>}
         </span>
       </div>
       <div className="macro-track">
@@ -258,9 +259,9 @@ function MacroBar({ label, grams, target, color, hasGoal, delay = 0 }) {
           className="macro-fill macro-fill-animate"
           style={{
             width: `${pct}%`,
-            background: `linear-gradient(90deg, ${color}, ${color}CC)`,
+            background: `linear-gradient(90deg, ${solid(color)}, ${tint(color, 0.8)})`,
             animationDelay: `${delay}s`,
-            boxShadow: pct > 0 ? `0 0 10px ${color}55` : 'none',
+            boxShadow: pct > 0 ? `0 0 10px ${tint(color, 0.33)}` : 'none',
           }}
         />
       </div>
@@ -282,7 +283,7 @@ function StatTile({ icon: Icon, label, value, sub, accent, onClick }) {
       <div className="tabular" style={{ fontSize: '1.75rem', fontWeight: 700, letterSpacing: '-0.02em' }}>
         {value}
       </div>
-      {sub && <div style={{ fontSize: '0.75rem', color: '#667085', marginTop: 4 }}>{sub}</div>}
+      {sub && <div style={{ fontSize: '0.75rem', color: 'var(--text-faint)', marginTop: 4 }}>{sub}</div>}
     </div>
   );
 }
@@ -292,7 +293,7 @@ function StatTile({ icon: Icon, label, value, sub, accent, onClick }) {
 const MACRO_UNIT = (m) => (m === 'calories' ? 'kcal' : 'g');
 
 /** A compact labelled figure for the right-hand side of the week band. */
-function WeekMetric({ icon: Icon, label, value, sub, accent = '#A78BFA', stacked = false }) {
+function WeekMetric({ icon: Icon, label, value, sub, accent = 'var(--accent-soft)', stacked = false }) {
   // Side by side on a wide screen; stacked into a narrow column on a phone,
   // where an icon beside two lines of text leaves no room for either.
   return (
@@ -306,7 +307,7 @@ function WeekMetric({ icon: Icon, label, value, sub, accent = '#A78BFA', stacked
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', minWidth: 0 }}>
         <Icon size={stacked ? 13 : 15} color={accent} style={{ flexShrink: 0 }} />
         <span style={{
-          fontSize: stacked ? '0.625rem' : '0.6875rem', color: '#667085',
+          fontSize: stacked ? '0.625rem' : '0.6875rem', color: 'var(--text-faint)',
           letterSpacing: '0.04em', textTransform: 'uppercase',
           whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
         }}>
@@ -321,7 +322,7 @@ function WeekMetric({ icon: Icon, label, value, sub, accent = '#A78BFA', stacked
         </div>
         {sub && (
           <div style={{
-            fontSize: stacked ? '0.625rem' : '0.6875rem', color: '#667085',
+            fontSize: stacked ? '0.625rem' : '0.6875rem', color: 'var(--text-faint)',
             marginTop: 1, lineHeight: 1.35,
           }}>
             {sub}
@@ -364,17 +365,17 @@ function MiniBoard({ board, onNavigate, isPhone = false }) {
   return (
     <div style={{
       display: 'grid', gap: '0.45rem', minWidth: 0,
-      ...(isPhone ? { paddingTop: '1rem', borderTop: '1px solid #2A3240' } : {}),
+      ...(isPhone ? { paddingTop: '1rem', borderTop: '1px solid var(--border)' } : {}),
     }}>
       <div className="flex items-center justify-between" style={{ marginBottom: '0.15rem' }}>
-        <span style={{ fontSize: '0.6875rem', color: '#667085', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+        <span style={{ fontSize: '0.6875rem', color: 'var(--text-faint)', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
           Leaderboard
         </span>
         <button
           onClick={() => onNavigate('profile')}
           style={{
             background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-            color: '#A78BFA', fontSize: '0.6875rem', fontWeight: 600,
+            color: 'var(--accent-soft)', fontSize: '0.6875rem', fontWeight: 600,
           }}
         >
           All
@@ -388,12 +389,12 @@ function MiniBoard({ board, onNavigate, isPhone = false }) {
           className="flex items-center justify-between"
           style={{
             padding: '0.4rem 0.55rem', borderRadius: '0.4rem', cursor: 'pointer',
-            background: e.is_you ? 'rgba(139,92,246,0.14)' : '#12151B',
-            border: `1px solid ${e.is_you ? 'rgba(139,92,246,0.35)' : '#2A3240'}`,
+            background: e.is_you ? 'rgba(var(--accent-rgb),0.14)' : 'var(--surface-inset)',
+            border: `1px solid ${e.is_you ? 'rgba(var(--accent-rgb),0.35)' : 'var(--border)'}`,
             gap: '0.5rem', width: '100%', textAlign: 'left',
           }}
         >
-          <span className="tabular" style={{ color: '#667085', fontSize: '0.75rem', width: 16, flexShrink: 0 }}>
+          <span className="tabular" style={{ color: 'var(--text-faint)', fontSize: '0.75rem', width: 16, flexShrink: 0 }}>
             {e.rank}
           </span>
           <span style={{
@@ -403,7 +404,7 @@ function MiniBoard({ board, onNavigate, isPhone = false }) {
           }}>
             {e.is_you ? 'You' : e.name}
           </span>
-          <span className="tabular" style={{ fontSize: '0.75rem', fontWeight: 600, color: '#A78BFA', flexShrink: 0 }}>
+          <span className="tabular" style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--accent-soft)', flexShrink: 0 }}>
             {e.points.toLocaleString()}
           </span>
         </button>
@@ -411,7 +412,7 @@ function MiniBoard({ board, onNavigate, isPhone = false }) {
 
       {/* The gap to the person above - the only number here you can act on. */}
       {myIndex > 0 && (
-        <div style={{ fontSize: '0.6875rem', color: '#667085', paddingLeft: '0.15rem' }}>
+        <div style={{ fontSize: '0.6875rem', color: 'var(--text-faint)', paddingLeft: '0.15rem' }}>
           {entries[myIndex - 1].points - entries[myIndex].points} points behind {entries[myIndex - 1].name.split(' ')[0]}
         </div>
       )}
@@ -445,17 +446,17 @@ function WeekBand({ challenges, summary, history, board, onNavigate }) {
         style={{
           padding: '1.25rem', width: '100%', textAlign: 'left', cursor: 'pointer',
           display: 'flex', alignItems: 'center', gap: '0.875rem',
-          background: 'linear-gradient(100deg, rgba(167,139,250,0.10), rgba(34,211,238,0.04))',
+          background: 'linear-gradient(100deg, rgba(167,139,250,0.10), rgba(var(--cyan-rgb),0.04))',
         }}
       >
-        <Trophy size={20} color="#A78BFA" />
+        <Trophy size={20} color="var(--accent-soft)" />
         <div style={{ flex: 1 }}>
           <div style={{ fontWeight: 700, fontSize: '0.9375rem' }}>Pick up a challenge</div>
-          <div style={{ fontSize: '0.8125rem', color: '#98A2B3', marginTop: 2 }}>
+          <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', marginTop: 2 }}>
             A few days of logging is enough for the app to build ones that fit you.
           </div>
         </div>
-        <ChevronRight size={18} color="#667085" />
+        <ChevronRight size={18} color="var(--text-faint)" />
       </button>
     );
   }
@@ -492,13 +493,13 @@ function WeekBand({ challenges, summary, history, board, onNavigate }) {
             <button
               onClick={() => onNavigate('enhanced-challenges')}
               style={{
-                background: 'none', border: '1px dashed #2A3240', borderRadius: '0.625rem',
-                padding: '0.875rem', cursor: 'pointer', color: '#98A2B3',
+                background: 'none', border: '1px dashed var(--border)', borderRadius: '0.625rem',
+                padding: '0.875rem', cursor: 'pointer', color: 'var(--text-muted)',
                 fontSize: '0.8125rem', textAlign: 'left', display: 'flex',
                 alignItems: 'center', gap: '0.5rem',
               }}
             >
-              <Plus size={14} color="#A78BFA" />
+              <Plus size={14} color="var(--accent-soft)" />
               No challenge running — pick one built from how you actually eat
             </button>
           ) : active.map((c, i) => {
@@ -519,11 +520,11 @@ function WeekBand({ challenges, summary, history, board, onNavigate }) {
                     fontSize: '0.8125rem', fontWeight: 600, whiteSpace: 'nowrap',
                     overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0,
                   }}>
-                    {done && <Check size={12} color="#34D399" style={{ marginRight: 4 }} />}
+                    {done && <Check size={12} color="var(--success)" style={{ marginRight: 4 }} />}
                     {c.title || 'Challenge'}
                   </span>
                   <span className="tabular" style={{
-                    fontSize: '0.75rem', color: done ? '#34D399' : '#98A2B3', flexShrink: 0,
+                    fontSize: '0.75rem', color: done ? 'var(--success)' : 'var(--text-muted)', flexShrink: 0,
                   }}>
                     {Math.round(num(c.current_value))}/{Math.round(num(c.target_value))}
                     {c.unit ? ` ${c.unit}` : ''}
@@ -535,14 +536,14 @@ function WeekBand({ challenges, summary, history, board, onNavigate }) {
                     style={{
                       width: `${pct}%`,
                       background: done
-                        ? '#34D399'
-                        : 'linear-gradient(90deg,#8B5CF6,#22D3EE)',
+                        ? 'var(--success)'
+                        : 'linear-gradient(90deg,var(--accent),var(--cyan))',
                     }}
                   />
                 </div>
                 {/* Days left is the bit that makes a challenge feel live. A
                     percentage alone gives no sense of whether it is winnable. */}
-                <div style={{ fontSize: '0.6875rem', color: '#667085' }}>
+                <div style={{ fontSize: '0.6875rem', color: 'var(--text-faint)' }}>
                   {done ? 'complete' : left > 0 ? `${left} day${left === 1 ? '' : 's'} left` : 'last day'}
                 </div>
               </button>
@@ -554,7 +555,7 @@ function WeekBand({ challenges, summary, history, board, onNavigate }) {
               onClick={() => onNavigate('enhanced-challenges')}
               style={{
                 background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-                color: '#A78BFA', fontSize: '0.75rem', fontWeight: 600, textAlign: 'left',
+                color: 'var(--accent-soft)', fontSize: '0.75rem', fontWeight: 600, textAlign: 'left',
               }}
             >
               +{challenges.length - 3} more
@@ -569,17 +570,17 @@ function WeekBand({ challenges, summary, history, board, onNavigate }) {
           gap: isPhone ? '0.75rem' : '0.875rem',
           minWidth: 0,
           ...(isPhone ? {
-            paddingTop: '1rem', borderTop: '1px solid #2A3240',
+            paddingTop: '1rem', borderTop: '1px solid var(--border)',
           } : {}),
         }}>
           <WeekMetric
-            icon={Flame} accent="#FBBF24" label="Streak"
+            icon={Flame} accent="var(--warning)" label="Streak"
             stacked={isPhone}
             value={streak ? `${streak} day${streak === 1 ? '' : 's'}` : '—'}
             sub={streak ? 'on target in a row' : 'no run going yet'}
           />
           <WeekMetric
-            icon={UtensilsCrossed} accent="#22D3EE" label="Logged"
+            icon={UtensilsCrossed} accent="var(--cyan)" label="Logged"
             stacked={isPhone}
             value={history?.length ? `${logged}/${history.length}` : '—'}
             sub="days with meals recorded"
@@ -587,7 +588,7 @@ function WeekBand({ challenges, summary, history, board, onNavigate }) {
           {/* The single most actionable line on the dashboard: not "you
               missed", but which macro, how often, and by how much. */}
           <WeekMetric
-            icon={Target} accent={worst ? '#F87171' : '#34D399'} label="To fix"
+            icon={Target} accent={worst ? 'var(--danger)' : 'var(--success)'} label="To fix"
             stacked={isPhone}
             value={worst
               ? `${worst.direction === 'short' ? '−' : '+'}${Math.abs(worst.average_delta).toFixed(0)}${MACRO_UNIT(worst.macro)}`
@@ -603,8 +604,8 @@ function WeekBand({ challenges, summary, history, board, onNavigate }) {
 
       {summary?.headline && (
         <div style={{
-          marginTop: '1rem', paddingTop: '0.875rem', borderTop: '1px solid #2A3240',
-          fontSize: '0.75rem', color: '#98A2B3', lineHeight: 1.5,
+          marginTop: '1rem', paddingTop: '0.875rem', borderTop: '1px solid var(--border)',
+          fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.5,
         }}>
           {summary.headline}
         </div>
@@ -631,7 +632,7 @@ function WeightTile({ weight, goal, onNavigate }) {
   if (!target || !entries.length) {
     return (
       <StatTile
-        icon={Scale} accent="#34D399" label="Weight"
+        icon={Scale} accent="var(--success)" label="Weight"
         value={current ? `${current} kg` : '—'}
         sub={target ? `target ${target} kg` : 'log your first'}
         onClick={() => onNavigate('set-goals')}
@@ -658,7 +659,7 @@ function WeightTile({ weight, goal, onNavigate }) {
     >
       <div className="flex items-center justify-between" style={{ marginBottom: '0.75rem' }}>
         <span className="metric-label">Weight goal</span>
-        <Scale size={16} color="#34D399" />
+        <Scale size={16} color="var(--success)" />
       </div>
 
       <div className="flex items-center justify-between" style={{ gap: '0.5rem' }}>
@@ -679,12 +680,12 @@ function WeightTile({ weight, goal, onNavigate }) {
           className="macro-fill macro-fill-animate"
           style={{
             width: `${pct}%`,
-            background: 'linear-gradient(90deg,#8B5CF6,#22D3EE)',
+            background: 'linear-gradient(90deg,var(--accent),var(--cyan))',
           }}
         />
       </div>
 
-      <div style={{ fontSize: '0.75rem', color: '#667085', marginTop: 6 }}>
+      <div style={{ fontSize: '0.75rem', color: 'var(--text-faint)', marginTop: 6 }}>
         {remaining < 0.05
           ? `target reached · ${target} kg`
           : `${remaining.toFixed(1)} kg to ${target} · ${Math.round(pct)}% there`}
@@ -769,22 +770,22 @@ export default function Dashboard({
           style={{
             padding: '1.25rem', display: 'flex', alignItems: 'center', gap: '1rem',
             textAlign: 'left', cursor: 'pointer', width: '100%',
-            borderColor: 'rgba(139,92,246,0.35)',
+            borderColor: 'rgba(var(--accent-rgb),0.35)',
           }}
         >
           <div className="flex items-center justify-center" style={{
             width: 44, height: 44, borderRadius: 12, flexShrink: 0,
-            background: 'linear-gradient(135deg,#8B5CF6,#22D3EE)',
+            background: 'linear-gradient(135deg,var(--accent),var(--cyan))',
           }}>
             <Target size={20} color="#fff" />
           </div>
           <div style={{ flex: 1 }}>
             <div style={{ fontWeight: 600, fontSize: '0.9375rem' }}>Set a goal to unlock targets</div>
-            <div style={{ fontSize: '0.8125rem', color: '#98A2B3', marginTop: 2 }}>
+            <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', marginTop: 2 }}>
               Pick what you're aiming for and we'll work out your calories and macros.
             </div>
           </div>
-          <ChevronRight size={18} color="#667085" />
+          <ChevronRight size={18} color="var(--text-faint)" />
         </button>
       )}
 
@@ -802,9 +803,9 @@ export default function Dashboard({
               {num(stats.meal_count)} {num(stats.meal_count) === 1 ? 'meal' : 'meals'} today
             </span>
           </div>
-          <MacroBar label="Protein" grams={protein} target={proteinTarget} color="#22D3EE" hasGoal={hasGoal} delay={0.05} />
-          <MacroBar label="Carbs" grams={num(stats.total_carbs)} target={carbTarget} color="#A78BFA" hasGoal={hasGoal} delay={0.12} />
-          <MacroBar label="Fat" grams={num(stats.total_fat)} target={fatTarget} color="#FBBF24" hasGoal={hasGoal} delay={0.19} />
+          <MacroBar label="Protein" grams={protein} target={proteinTarget} color="--cyan-rgb" hasGoal={hasGoal} delay={0.05} />
+          <MacroBar label="Carbs" grams={num(stats.total_carbs)} target={carbTarget} color="--accent-soft-rgb" hasGoal={hasGoal} delay={0.12} />
+          <MacroBar label="Fat" grams={num(stats.total_fat)} target={fatTarget} color="--warning-rgb" hasGoal={hasGoal} delay={0.19} />
         </div>
       </div>
 
@@ -832,12 +833,12 @@ export default function Dashboard({
       {/* Stats */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))', gap: '1rem' }}>
         <StatTile
-          icon={Flame} accent="#FBBF24" label="Calories"
+          icon={Flame} accent="var(--warning)" label="Calories"
           value={consumed.toLocaleString()}
           sub={hasGoal ? `${Math.round((consumed / calorieTarget) * 100)}% of target` : 'no target set'}
         />
         <StatTile
-          icon={UtensilsCrossed} accent="#22D3EE" label="Meals"
+          icon={UtensilsCrossed} accent="var(--cyan)" label="Meals"
           value={num(stats.meal_count)} sub="logged today"
           onClick={() => onNavigate('log-meal')}
         />
@@ -848,7 +849,7 @@ export default function Dashboard({
             the band above with actual progress. Protein is the macro most
             often missed, and the one worth watching mid-day. */}
         <StatTile
-          icon={Target} accent="#22D3EE" label="Protein"
+          icon={Target} accent="var(--cyan)" label="Protein"
           value={`${Math.round(protein)}g`}
           sub={hasGoal && proteinTarget
             ? (protein >= proteinTarget
@@ -875,25 +876,25 @@ export default function Dashboard({
         style={{
           padding: '1.25rem', display: 'flex', alignItems: 'center', gap: '1rem',
           textAlign: 'left', cursor: 'pointer', width: '100%',
-          background: 'linear-gradient(100deg, rgba(139,92,246,0.14), rgba(34,211,238,0.05))',
-          borderColor: 'rgba(139,92,246,0.3)',
+          background: 'linear-gradient(100deg, rgba(var(--accent-rgb),0.14), rgba(var(--cyan-rgb),0.05))',
+          borderColor: 'rgba(var(--accent-rgb),0.3)',
         }}
       >
         <div className="flex items-center justify-center" style={{
           width: 44, height: 44, borderRadius: 12, flexShrink: 0,
-          background: 'linear-gradient(135deg,#8B5CF6,#22D3EE)',
+          background: 'linear-gradient(135deg,var(--accent),var(--cyan))',
         }}>
           <MessageSquare size={20} color="#fff" />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontWeight: 600, fontSize: '0.9375rem' }}>Ask your AI coach</div>
-          <div style={{ fontSize: '0.8125rem', color: '#98A2B3', marginTop: 2 }}>
+          <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', marginTop: 2 }}>
             {hasGoal
               ? `Plan meals that fit ${calorieTarget.toLocaleString()} kcal`
               : 'Plan meals, adapt workouts, or check what to eat next'}
           </div>
         </div>
-        <ChevronRight size={18} color="#667085" />
+        <ChevronRight size={18} color="var(--text-faint)" />
       </button>
 
       {/* Today, and how the week has gone.
@@ -906,7 +907,7 @@ export default function Dashboard({
           <span className="section-title">Today</span>
           <button
             onClick={() => onNavigate('view-progress')}
-            style={{ background: 'none', border: 'none', color: '#A78BFA', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer' }}
+            style={{ background: 'none', border: 'none', color: 'var(--accent-soft)', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer' }}
           >
             View all
           </button>
@@ -916,8 +917,8 @@ export default function Dashboard({
 
         {timeline.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '2rem 1rem' }}>
-            <Sparkles size={26} color="#3A4453" style={{ marginBottom: 10 }} />
-            <div style={{ color: '#98A2B3', fontSize: '0.875rem' }}>Nothing logged yet today</div>
+            <Sparkles size={26} color="var(--border-strong)" style={{ marginBottom: 10 }} />
+            <div style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>Nothing logged yet today</div>
             <button className="btn btn-primary" style={{ marginTop: '1rem' }} onClick={() => onNavigate('log-meal')}>
               Log your first meal
             </button>
@@ -937,11 +938,11 @@ export default function Dashboard({
                 <React.Fragment key={meal.id ?? i}>
                   {gapHours != null && gapHours >= 5 && (
                     <div style={{
-                      fontSize: '0.6875rem', color: '#667085',
+                      fontSize: '0.6875rem', color: 'var(--text-faint)',
                       paddingLeft: '0.75rem', display: 'flex',
                       alignItems: 'center', gap: '0.4rem',
                     }}>
-                      <span style={{ width: 1, height: 12, background: '#2A3240' }} />
+                      <span style={{ width: 1, height: 12, background: 'var(--border)' }} />
                       {gapHours} hours
                     </div>
                   )}
@@ -949,11 +950,11 @@ export default function Dashboard({
                     className="flex items-center justify-between lift"
                     style={{
                       padding: '0.75rem', borderRadius: '0.625rem',
-                      background: '#12151B', border: '1px solid #2A3240',
+                      background: 'var(--surface-inset)', border: '1px solid var(--border)',
                     }}
                   >
                     <div style={{
-                      fontSize: '0.75rem', color: '#98A2B3', fontVariantNumeric: 'tabular-nums',
+                      fontSize: '0.75rem', color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums',
                       width: 44, flexShrink: 0,
                     }}>
                       {meal.local_time || mealTime(meal.logged_at)}
@@ -962,17 +963,17 @@ export default function Dashboard({
                       <div style={{ fontSize: '0.875rem', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {meal.name || 'Meal'}
                         {num(meal.quantity) > 1 && (
-                          <span style={{ color: '#667085', fontWeight: 500 }}>
+                          <span style={{ color: 'var(--text-faint)', fontWeight: 500 }}>
                             {' '}&times;{formatQty(meal.quantity)}
                           </span>
                         )}
                       </div>
-                      <div style={{ fontSize: '0.75rem', color: '#667085', marginTop: 2 }}>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-faint)', marginTop: 2 }}>
                         <span style={{ textTransform: 'capitalize' }}>{meal.meal_type || 'meal'}</span>
                         {num(meal.protein) > 0 && <> · {Math.round(num(meal.protein))}g protein</>}
                       </div>
                     </div>
-                    <div className="tabular" style={{ fontSize: '0.875rem', fontWeight: 700, color: '#FBBF24', flexShrink: 0 }}>
+                    <div className="tabular" style={{ fontSize: '0.875rem', fontWeight: 700, color: 'var(--warning)', flexShrink: 0 }}>
                       {Math.round(num(meal.calories))} kcal
                     </div>
                   </div>

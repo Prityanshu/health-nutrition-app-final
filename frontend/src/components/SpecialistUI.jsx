@@ -7,6 +7,7 @@ import renderMarkdown from './markdown';
 import useIsPhone from '../useIsPhone';
 import { saveFile, shareFile } from '../nativeFiles';
 import { toast, toastError } from '../Toast';
+import { solid, tint } from '../theme';
 
 /**
  * Shared building blocks for the specialist pages (FitMentor, BudgetChef,
@@ -20,15 +21,18 @@ import { toast, toastError } from '../Toast';
 
 /* ---------------------------------------------------------------- layout */
 
-export function PageHero({ icon: Icon, title, subtitle, gradient = '#8B5CF6,#22D3EE' }) {
+export function PageHero({ icon: Icon, title, subtitle,
+  // RGB triple names, not colour strings: the glow below needs an alpha,
+  // and `var(--accent)b3` is not a colour - the whole shadow is dropped.
+  from = '--accent-rgb', to = '--cyan-rgb' }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
       <div
         className="flex items-center justify-center"
         style={{
           width: 52, height: 52, borderRadius: 15, flexShrink: 0,
-          background: `linear-gradient(135deg,${gradient})`,
-          boxShadow: `0 0 28px -6px ${gradient.split(',')[0]}b3`,
+          background: `linear-gradient(135deg, ${solid(from)}, ${solid(to)})`,
+          boxShadow: `0 0 28px -6px ${tint(from, 0.7)}`,
         }}
       >
         <Icon size={25} color="#fff" />
@@ -101,7 +105,7 @@ export function SliderField({
   return (
     <div>
       <div className="flex items-center justify-between" style={{ marginBottom: '0.625rem' }}>
-        <span style={{ fontSize: '0.75rem', color: '#98A2B3' }}>Drag to adjust</span>
+        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Drag to adjust</span>
         <span className="pill pill-brand tabular">{shown}</span>
       </div>
       <input
@@ -205,7 +209,7 @@ export function ChipInput({ values, onChange, placeholder, suggestions = [], sug
       {remaining.length > 0 && (
         <div>
           {suggestLabel && (
-            <div style={{ fontSize: '0.6875rem', color: '#667085', marginBottom: '0.5rem', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+            <div style={{ fontSize: '0.6875rem', color: 'var(--text-faint)', marginBottom: '0.5rem', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
               {suggestLabel}
             </div>
           )}
@@ -266,7 +270,7 @@ export function LoadingSkeleton() {
 export function ErrorNote({ children }) {
   if (!children) return null;
   return (
-    <div className="surface" style={{ padding: '0.9375rem', borderColor: '#F87171', color: '#F87171', fontSize: '0.875rem' }}>
+    <div className="surface" style={{ padding: '0.9375rem', borderColor: 'var(--danger)', color: 'var(--danger)', fontSize: '0.875rem' }}>
       {children}
     </div>
   );
@@ -274,7 +278,7 @@ export function ErrorNote({ children }) {
 
 /** Markdown result with copy / regenerate and meta pills. */
 export function ResultPanel({
-  title, icon: Icon, accent = '#FBBF24', markdown, pills = [], onRegenerate, footer,
+  title, icon: Icon, accent = 'var(--warning)', markdown, pills = [], onRegenerate, footer,
   apiBase, savedPlan, planType, params,
 }) {
   const [copied, setCopied] = useState(false);
@@ -327,9 +331,9 @@ export function ResultPanel({
 export function EmptyState({ icon: Icon, title, body }) {
   return (
     <div className="surface" style={{ padding: '2.5rem 1.5rem', textAlign: 'center' }}>
-      <Icon size={30} color="#3A4453" style={{ marginBottom: '0.75rem' }} />
-      <div style={{ color: '#98A2B3', fontSize: '0.9375rem', fontWeight: 600 }}>{title}</div>
-      <div style={{ color: '#667085', fontSize: '0.8125rem', marginTop: 5, maxWidth: 380, marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.55 }}>
+      <Icon size={30} color="var(--border-strong)" style={{ marginBottom: '0.75rem' }} />
+      <div style={{ color: 'var(--text-muted)', fontSize: '0.9375rem', fontWeight: 600 }}>{title}</div>
+      <div style={{ color: 'var(--text-faint)', fontSize: '0.8125rem', marginTop: 5, maxWidth: 380, marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.55 }}>
         {body}
       </div>
     </div>
@@ -582,7 +586,7 @@ export function PlanActions({
       {done && (
         <span style={{
           fontSize: '0.6875rem',
-          color: /fail|could not|needs|refus|reject|limit/i.test(done) ? '#F87171' : '#34D399',
+          color: /fail|could not|needs|refus|reject|limit/i.test(done) ? 'var(--danger)' : 'var(--success)',
           maxWidth: 260, lineHeight: 1.35,
         }}>
           {done}
@@ -690,7 +694,7 @@ function EmailDialog({ anchor, ignoreRef, defaultAddress, busy, onSend, onClose 
         visibility: pos ? 'visible' : 'hidden',
         zIndex: 9999,
         width: WIDTH, padding: '1rem', display: 'grid', gap: '0.75rem',
-        boxShadow: '0 20px 50px -12px rgba(0,0,0,0.9)',
+        boxShadow: '0 20px 50px -12px rgba(var(--black-rgb),0.9)',
         animation: 'fade-up 0.18s ease both',
       }}
     >
@@ -738,7 +742,7 @@ function EmailDialog({ anchor, ignoreRef, defaultAddress, busy, onSend, onClose 
             onKeyDown={(e) => e.key === 'Enter' && send()}
           />
           {address && !valid && (
-            <div style={{ fontSize: '0.6875rem', color: '#F87171' }}>
+            <div style={{ fontSize: '0.6875rem', color: 'var(--danger)' }}>
               That doesn't look like an email address.
             </div>
           )}
@@ -769,8 +773,8 @@ export function RestoredNote({ createdAt, onDismiss }) {
   return (
     <div style={{
       display: 'flex', alignItems: 'center', gap: '0.625rem',
-      background: 'rgba(52,211,153,0.08)', border: '1px solid rgba(52,211,153,0.25)',
-      borderRadius: '0.75rem', padding: '0.75rem 1rem', fontSize: '0.8125rem', color: '#34D399',
+      background: 'rgba(var(--success-rgb),0.08)', border: '1px solid rgba(var(--success-rgb),0.25)',
+      borderRadius: '0.75rem', padding: '0.75rem 1rem', fontSize: '0.8125rem', color: 'var(--success)',
     }}>
       <History size={15} style={{ flexShrink: 0 }} />
       <span style={{ flex: 1 }}>Picking up the plan you made {ago}.</span>

@@ -258,7 +258,7 @@ record and a fresh rate-limit bucket:
 tailscale serve reset
 tailscale funnel reset
 tailscale down
-tailscale up --hostname=nutriplan
+tailscale up --hostname=kayosha
 tailscale funnel --bg 8001
 ```
 

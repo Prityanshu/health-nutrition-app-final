@@ -111,7 +111,7 @@ def _compute(user: User, db: Session, req: TargetPreviewRequest):
     return calculate_targets(
         weight_kg=weight,
         height_cm=user.height or 170,
-        age=user.age or 25,
+        age=user.current_age or 25,
         sex=req.sex or user.sex or "other",
         activity_level=req.activity_level or user.activity_level or "moderately_active",
         goal_key=req.goal_key,
@@ -163,7 +163,7 @@ async def preview_targets(
     result["profile_used"] = {
         "weight_kg": request.current_weight or _current_weight(current_user, db),
         "height_cm": current_user.height,
-        "age": current_user.age,
+        "age": current_user.current_age,
         "sex": request.sex or current_user.sex or "other",
         "activity_level": request.activity_level or current_user.activity_level,
         "sex_missing": not (request.sex or current_user.sex),
@@ -251,7 +251,7 @@ async def log_weight(
         targets = calculate_targets(
             weight_kg=entry.weight_kg,
             height_cm=current_user.height or 170,
-            age=current_user.age or 25,
+            age=current_user.current_age or 25,
             sex=current_user.sex or "other",
             activity_level=current_user.activity_level or "moderately_active",
             goal_key=active.goal_type,
@@ -300,6 +300,27 @@ async def weight_history(
             (datetime.utcnow() - logs[-1].logged_at).days if logs else None
         ),
     }
+
+
+@router.get("/weight/progress")
+async def weight_goal_progress(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """
+    How the target weight is actually going.
+
+    Setting a target was already possible; nothing ever answered whether it was
+    being reached, which made it decoration. This returns the distance left,
+    the rate over the last eight weeks, and an arrival estimate - but only when
+    there are enough readings over enough time for one to mean anything.
+
+    When there is not, `note` says why in words rather than returning a
+    confident date derived from two weigh-ins and a water swing.
+    """
+    from app.services import weight_progress
+
+    return weight_progress.for_user(db, current_user).as_dict()
 
 
 @router.post("/", response_model=GoalResponse)

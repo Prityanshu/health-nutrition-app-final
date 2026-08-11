@@ -84,7 +84,7 @@ export default function InjuryTracker({ data, apiBase, onChanged }) {
     <div className="surface" style={{ padding: '1.25rem', display: 'grid', gap: '1rem' }}>
       <div className="flex items-center justify-between" style={{ gap: '1rem' }}>
         <div className="flex items-center" style={{ gap: '0.6rem' }}>
-          <HeartPulse size={17} color="#F472B6" />
+          <HeartPulse size={17} color="var(--brand-pink)" />
           <span className="section-title">Injuries</span>
         </div>
         {!adding && (
@@ -131,7 +131,7 @@ export default function InjuryTracker({ data, apiBase, onChanged }) {
         const improving = (injury.improvement ?? 0) > 0;
         const worsening = (injury.improvement ?? 0) < 0;
         const Trend = improving ? TrendingDown : worsening ? TrendingUp : Minus;
-        const trendColour = improving ? '#34D399' : worsening ? '#F87171' : '#667085';
+        const trendColour = improving ? 'var(--success)' : worsening ? 'var(--danger)' : 'var(--text-faint)';
 
         return (
           <div
@@ -139,8 +139,8 @@ export default function InjuryTracker({ data, apiBase, onChanged }) {
             style={{
               padding: '0.9rem',
               borderRadius: '0.75rem',
-              background: '#12151B',
-              border: `1px solid ${injury.needs_attention ? 'rgba(248,113,113,0.4)' : '#2A3240'}`,
+              background: 'var(--surface-inset)',
+              border: `1px solid ${injury.needs_attention ? 'rgba(var(--danger-rgb),0.4)' : 'var(--border)'}`,
               display: 'grid',
               gap: '0.7rem',
             }}
@@ -168,8 +168,8 @@ export default function InjuryTracker({ data, apiBase, onChanged }) {
                       flex: 1,
                       height: `${Math.max(8, (h.severity / 10) * 100)}%`,
                       borderRadius: 2,
-                      background: h.severity >= 7 ? '#F87171'
-                        : h.severity >= 4 ? '#FBBF24' : '#34D399',
+                      background: h.severity >= 7 ? 'var(--danger)'
+                        : h.severity >= 4 ? 'var(--warning)' : 'var(--success)',
                       opacity: 0.4 + (i / injury.history.length) * 0.6,
                     }}
                   />
@@ -228,7 +228,7 @@ function SeveritySlider({ value, onChange }) {
           className="tabular"
           style={{
             fontWeight: 700,
-            color: value >= 7 ? '#F87171' : value >= 4 ? '#FBBF24' : '#34D399',
+            color: value >= 7 ? 'var(--danger)' : value >= 4 ? 'var(--warning)' : 'var(--success)',
           }}
         >
           {value}/10 · {SEVERITY_LABELS[value]}
@@ -243,7 +243,7 @@ function SeveritySlider({ value, onChange }) {
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
       />
-      <div className="flex items-center justify-between" style={{ fontSize: '0.6875rem', color: '#556070' }}>
+      <div className="flex items-center justify-between" style={{ fontSize: '0.6875rem', color: 'var(--text-dim)' }}>
         <span>Gone</span><span>Severe</span>
       </div>
     </div>

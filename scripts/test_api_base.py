@@ -124,7 +124,7 @@ CASES = {
     # A quick tunnel, for as long as those are still in use.
     "brave-fox-runs.trycloudflare.com": "https://brave-fox-runs.trycloudflare.com/api",
     # Any other host someone might deploy to.
-    "nutriplan.onrender.com": "https://nutriplan.onrender.com/api",
+    "kayosha.onrender.com": "https://kayosha.onrender.com/api",
 
     # --- the LAN: http, port 8001. Must not regress. ---
     "192.168.1.5": "http://192.168.1.5:8001/api",

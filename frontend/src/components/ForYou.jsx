@@ -16,9 +16,9 @@ import useCountUp from './useCountUp';
  */
 
 const KIND_STYLE = {
-  good: { icon: CheckCircle2, color: '#34D399', bg: 'rgba(52,211,153,0.09)', border: 'rgba(52,211,153,0.28)' },
-  warn: { icon: AlertTriangle, color: '#FBBF24', bg: 'rgba(251,191,36,0.09)', border: 'rgba(251,191,36,0.28)' },
-  info: { icon: Info, color: '#A78BFA', bg: 'rgba(139,92,246,0.09)', border: 'rgba(139,92,246,0.28)' },
+  good: { icon: CheckCircle2, color: 'var(--success)', bg: 'rgba(var(--success-rgb),0.09)', border: 'rgba(var(--success-rgb),0.28)' },
+  warn: { icon: AlertTriangle, color: 'var(--warning)', bg: 'rgba(var(--warning-rgb),0.09)', border: 'rgba(var(--warning-rgb),0.28)' },
+  info: { icon: Info, color: 'var(--accent-soft)', bg: 'rgba(var(--accent-rgb),0.09)', border: 'rgba(var(--accent-rgb),0.28)' },
 };
 
 const CONFIDENCE = {
@@ -34,7 +34,7 @@ function RemainingBar({ label, remaining, target, color }) {
   return (
     <div>
       <div className="flex items-center justify-between" style={{ marginBottom: 5 }}>
-        <span style={{ fontSize: '0.75rem', color: '#98A2B3' }}>{label}</span>
+        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{label}</span>
         <span className="tabular" style={{ fontSize: '0.75rem', fontWeight: 700, color }}>
           {Math.round(animated)} left
         </span>
@@ -54,7 +54,7 @@ function FoodCard({ food, onLog, rank }) {
           <div style={{ fontWeight: 700, fontSize: '0.9375rem', textTransform: 'capitalize' }}>
             {food.name}
           </div>
-          <div style={{ fontSize: '0.6875rem', color: '#667085', marginTop: 3, textTransform: 'capitalize' }}>
+          <div style={{ fontSize: '0.6875rem', color: 'var(--text-faint)', marginTop: 3, textTransform: 'capitalize' }}>
             {food.cuisine && food.cuisine !== 'mixed' ? `${food.cuisine} · ` : ''}
             {food.prep_complexity ? `${food.prep_complexity.toLowerCase()} effort` : ''}
           </div>
@@ -68,26 +68,26 @@ function FoodCard({ food, onLog, rank }) {
 
       <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
         {[
-          { v: food.calories, u: 'kcal', c: '#FBBF24' },
-          { v: food.protein_g, u: 'g protein', c: '#22D3EE' },
-          { v: food.carbs_g, u: 'g carbs', c: '#A78BFA' },
+          { v: food.calories, u: 'kcal', c: 'var(--warning)' },
+          { v: food.protein_g, u: 'g protein', c: 'var(--cyan)' },
+          { v: food.carbs_g, u: 'g carbs', c: 'var(--accent-soft)' },
         ].map((m, i) => (
           <div key={i}>
             <span className="tabular" style={{ fontSize: '1rem', fontWeight: 700, color: m.c }}>{m.v}</span>
-            <span style={{ fontSize: '0.6875rem', color: '#667085', marginLeft: 3 }}>{m.u}</span>
+            <span style={{ fontSize: '0.6875rem', color: 'var(--text-faint)', marginLeft: 3 }}>{m.u}</span>
           </div>
         ))}
         {food.cost != null && (
           <div style={{ marginLeft: 'auto' }}>
-            <span className="tabular" style={{ fontSize: '1rem', fontWeight: 700, color: '#34D399' }}>₹{food.cost}</span>
+            <span className="tabular" style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--success)' }}>₹{food.cost}</span>
           </div>
         )}
       </div>
 
       <div style={{ display: 'grid', gap: '0.3125rem' }}>
         {food.reasons.map((r, i) => (
-          <div key={i} style={{ display: 'flex', gap: '0.4rem', alignItems: 'flex-start', fontSize: '0.75rem', color: '#98A2B3', lineHeight: 1.45 }}>
-            <span style={{ color: '#8B5CF6', flexShrink: 0 }}>·</span>
+          <div key={i} style={{ display: 'flex', gap: '0.4rem', alignItems: 'flex-start', fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>
+            <span style={{ color: 'var(--accent)', flexShrink: 0 }}>·</span>
             <span>{r}</span>
           </div>
         ))}
@@ -139,7 +139,7 @@ export default function ForYou({ apiBase, onNavigate }) {
 
   if (error || !data) {
     return (
-      <div className="surface" style={{ padding: '1.5rem', color: '#F87171' }}>
+      <div className="surface" style={{ padding: '1.5rem', color: 'var(--danger)' }}>
         {error || 'No data.'}
       </div>
     );
@@ -184,8 +184,8 @@ export default function ForYou({ apiBase, onNavigate }) {
       {/* Cold start */}
       {confidence === 'low' && (
         <div className="surface-hero" style={{ padding: '1.25rem', display: 'flex', gap: '1rem', alignItems: 'center' }}>
-          <Target size={20} color="#FBBF24" style={{ flexShrink: 0 }} />
-          <div style={{ flex: 1, fontSize: '0.875rem', color: '#98A2B3', lineHeight: 1.55 }}>
+          <Target size={20} color="var(--warning)" style={{ flexShrink: 0 }} />
+          <div style={{ flex: 1, fontSize: '0.875rem', color: 'var(--text-muted)', lineHeight: 1.55 }}>
             These are reasonable general picks, not personal ones yet. Log a handful of meals and
             this page starts matching your cuisines, budget and macro gaps.
           </div>
@@ -204,8 +204,8 @@ export default function ForYou({ apiBase, onNavigate }) {
             <span className="pill pill-muted">{today.meals_today} logged</span>
           </div>
           <div style={{ display: 'grid', gap: '0.875rem' }}>
-            <RemainingBar label="Calories" remaining={remaining.calories} target={goal.target_calories} color="#8B5CF6" />
-            <RemainingBar label="Protein (g)" remaining={remaining.protein} target={goal.target_protein} color="#22D3EE" />
+            <RemainingBar label="Calories" remaining={remaining.calories} target={goal.target_calories} color="var(--accent)" />
+            <RemainingBar label="Protein (g)" remaining={remaining.protein} target={goal.target_protein} color="var(--cyan)" />
           </div>
         </div>
       )}
@@ -226,7 +226,7 @@ export default function ForYou({ apiBase, onNavigate }) {
                 <Icon size={17} color={s.color} style={{ flexShrink: 0, marginTop: 1 }} />
                 <div>
                   <div style={{ fontWeight: 600, fontSize: '0.875rem', color: s.color }}>{ins.title}</div>
-                  <div style={{ fontSize: '0.8125rem', color: '#98A2B3', marginTop: 3, lineHeight: 1.55 }}>
+                  <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', marginTop: 3, lineHeight: 1.55 }}>
                     {ins.body}
                   </div>
                 </div>
@@ -249,7 +249,7 @@ export default function ForYou({ apiBase, onNavigate }) {
           </div>
           <button
             onClick={() => onNavigate('chatbot')}
-            style={{ background: 'none', border: 'none', color: '#A78BFA', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3 }}
+            style={{ background: 'none', border: 'none', color: 'var(--accent-soft)', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3 }}
           >
             Ask the coach <ChevronRight size={13} />
           </button>
@@ -269,19 +269,19 @@ export default function ForYou({ apiBase, onNavigate }) {
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
             {profile.favourites.map((f, i) => (
               <span key={i} className="pill pill-muted" style={{ textTransform: 'capitalize' }}>
-                {f.name} <span style={{ color: '#667085' }}>×{f.times}</span>
+                {f.name} <span style={{ color: 'var(--text-faint)' }}>×{f.times}</span>
               </span>
             ))}
           </div>
           {profile.variety?.in_a_rut && (
-            <div style={{ fontSize: '0.75rem', color: '#FBBF24', marginTop: '0.75rem' }}>
+            <div style={{ fontSize: '0.75rem', color: 'var(--warning)', marginTop: '0.75rem' }}>
               You've been repeating these a lot — the suggestions above lean toward variety.
             </div>
           )}
         </div>
       )}
 
-      <p style={{ fontSize: '0.6875rem', color: '#667085', textAlign: 'center', lineHeight: 1.55 }}>
+      <p style={{ fontSize: '0.6875rem', color: 'var(--text-faint)', textAlign: 'center', lineHeight: 1.55 }}>
         Recommendations are calculated from your logged meals, goal targets and stated preferences.
         No two accounts get the same list.
       </p>

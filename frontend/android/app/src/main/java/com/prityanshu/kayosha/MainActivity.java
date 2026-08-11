@@ -1,4 +1,4 @@
-package com.prityanshu.nutriplan;
+package com.prityanshu.kayosha;
 
 import com.getcapacitor.BridgeActivity;
 

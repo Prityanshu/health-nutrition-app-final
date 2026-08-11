@@ -57,9 +57,9 @@ const STARTERS = [
 ];
 
 const MACROS = [
-  { key: 'protein', label: 'Protein', colour: '#22D3EE' },
-  { key: 'carbohydrates', label: 'Carbs', colour: '#FBBF24' },
-  { key: 'fat', label: 'Fat', colour: '#F472B6' },
+  { key: 'protein', label: 'Protein', colour: 'var(--cyan)' },
+  { key: 'carbohydrates', label: 'Carbs', colour: 'var(--warning)' },
+  { key: 'fat', label: 'Fat', colour: 'var(--brand-pink)' },
 ];
 
 const num = (v) => {
@@ -356,12 +356,12 @@ export default function LogMeal({ apiBase, onLogged, calorieTarget = 0, consumed
       {logged && (
         <div className="surface" style={{
           padding: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.875rem',
-          borderColor: 'rgba(52,211,153,0.35)',
-          background: 'linear-gradient(100deg, rgba(52,211,153,0.10), transparent)',
+          borderColor: 'rgba(var(--success-rgb),0.35)',
+          background: 'linear-gradient(100deg, rgba(var(--success-rgb),0.10), transparent)',
         }}>
           <div className="flex items-center justify-center" style={{
             width: 38, height: 38, borderRadius: 11, flexShrink: 0,
-            background: 'rgba(52,211,153,0.16)', color: '#34D399',
+            background: 'rgba(var(--success-rgb),0.16)', color: 'var(--success)',
           }}>
             <Check size={19} />
           </div>
@@ -426,7 +426,7 @@ export default function LogMeal({ apiBase, onLogged, calorieTarget = 0, consumed
               </div>
             </div>
             <div style={{ textAlign: 'right' }}>
-              <div className="metric-value tabular" style={{ color: '#FBBF24', fontSize: '2rem', lineHeight: 1 }}>
+              <div className="metric-value tabular" style={{ color: 'var(--warning)', fontSize: '2rem', lineHeight: 1 }}>
                 {Math.round(kcal)}
               </div>
               <div className="metric-label">kcal</div>
@@ -436,7 +436,7 @@ export default function LogMeal({ apiBase, onLogged, calorieTarget = 0, consumed
           {/* Macro split. A single stacked bar reads faster than four numbers,
               and the numbers are still underneath it. */}
           <div style={{ display: 'grid', gap: '0.625rem' }}>
-            <div style={{ display: 'flex', height: 8, borderRadius: 4, overflow: 'hidden', background: '#12151B' }}>
+            <div style={{ display: 'flex', height: 8, borderRadius: 4, overflow: 'hidden', background: 'var(--surface-inset)' }}>
               {MACROS.map((m) => (
                 <div
                   key={m.key}
@@ -452,7 +452,7 @@ export default function LogMeal({ apiBase, onLogged, calorieTarget = 0, consumed
               {MACROS.map((m) => (
                 <div key={m.key} style={{
                   padding: '0.625rem 0.75rem', borderRadius: '0.625rem',
-                  background: '#12151B', border: '1px solid #2A3240',
+                  background: 'var(--surface-inset)', border: '1px solid var(--border)',
                 }}>
                   <div className="metric-label" style={{ color: m.colour }}>{m.label}</div>
                   <div className="tabular" style={{ fontSize: '1.0625rem', fontWeight: 700, marginTop: 2 }}>
@@ -471,11 +471,11 @@ export default function LogMeal({ apiBase, onLogged, calorieTarget = 0, consumed
             <div style={{
               display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap',
               padding: '0.7rem 0.85rem', borderRadius: '0.625rem',
-              background: 'rgba(251,191,36,0.07)',
-              border: '1px solid rgba(251,191,36,0.22)',
-              fontSize: '0.8125rem', color: '#C6CEDA',
+              background: 'rgba(var(--warning-rgb),0.07)',
+              border: '1px solid rgba(var(--warning-rgb),0.22)',
+              fontSize: '0.8125rem', color: 'var(--text-secondary)',
             }}>
-              <AlertCircle size={15} style={{ flexShrink: 0, color: '#FBBF24' }} />
+              <AlertCircle size={15} style={{ flexShrink: 0, color: 'var(--warning)' }} />
               <span style={{ flex: 1, minWidth: 180 }}>
                 This is the label for <strong>{analysis.source.matched_name}</strong>. If your
                 packet is a different variant, the numbers will differ.
@@ -491,10 +491,10 @@ export default function LogMeal({ apiBase, onLogged, calorieTarget = 0, consumed
             <div style={{
               display: 'flex', alignItems: 'center', gap: '0.6rem',
               padding: '0.7rem 0.85rem', borderRadius: '0.625rem',
-              background: remainingAfter < 0 ? 'rgba(248,113,113,0.08)' : 'rgba(139,92,246,0.08)',
-              border: `1px solid ${remainingAfter < 0 ? 'rgba(248,113,113,0.28)' : 'rgba(139,92,246,0.24)'}`,
+              background: remainingAfter < 0 ? 'rgba(var(--danger-rgb),0.08)' : 'rgba(var(--accent-rgb),0.08)',
+              border: `1px solid ${remainingAfter < 0 ? 'rgba(var(--danger-rgb),0.28)' : 'rgba(var(--accent-rgb),0.24)'}`,
               fontSize: '0.8125rem',
-              color: remainingAfter < 0 ? '#FCA5A5' : '#C6CEDA',
+              color: remainingAfter < 0 ? 'var(--danger-soft)' : 'var(--text-secondary)',
             }}>
               <Flame size={15} style={{ flexShrink: 0 }} />
               <span>
@@ -516,7 +516,7 @@ export default function LogMeal({ apiBase, onLogged, calorieTarget = 0, consumed
           {analysis.raw_analysis && (
             <details>
               <summary style={{
-                cursor: 'pointer', fontSize: '0.8125rem', color: '#98A2B3',
+                cursor: 'pointer', fontSize: '0.8125rem', color: 'var(--text-muted)',
                 display: 'flex', alignItems: 'center', gap: '0.4rem',
               }}>
                 <Zap size={13} /> Full breakdown
@@ -525,7 +525,7 @@ export default function LogMeal({ apiBase, onLogged, calorieTarget = 0, consumed
                   straight into dangerouslySetInnerHTML. */}
               <div style={{
                 marginTop: '0.75rem', fontSize: '0.8125rem', lineHeight: 1.7,
-                color: '#C6CEDA', whiteSpace: 'pre-wrap',
+                color: 'var(--text-secondary)', whiteSpace: 'pre-wrap',
               }}>
                 {analysis.raw_analysis}
               </div>

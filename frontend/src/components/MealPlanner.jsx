@@ -71,8 +71,8 @@ function DayCard({ dayKey, meals, index, defaultOpen }) {
             className="flex items-center justify-center tabular"
             style={{
               width: 32, height: 32, borderRadius: 9, flexShrink: 0,
-              background: 'linear-gradient(135deg,rgba(139,92,246,0.3),rgba(34,211,238,0.15))',
-              border: '1px solid rgba(139,92,246,0.4)',
+              background: 'linear-gradient(135deg,rgba(var(--accent-rgb),0.3),rgba(var(--cyan-rgb),0.15))',
+              border: '1px solid rgba(var(--accent-rgb),0.4)',
               fontSize: '0.8125rem', fontWeight: 700,
             }}
           >
@@ -80,13 +80,13 @@ function DayCard({ dayKey, meals, index, defaultOpen }) {
           </div>
           <div>
             <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>Day {dayNum}</div>
-            <div style={{ fontSize: '0.6875rem', color: '#667085' }}>
+            <div style={{ fontSize: '0.6875rem', color: 'var(--text-faint)' }}>
               {meals.length} meals · {Math.round(total)} kcal
             </div>
           </div>
         </div>
         <ChevronDown
-          size={17} color="#667085"
+          size={17} color="var(--text-faint)"
           style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.22s ease' }}
         />
       </button>
@@ -99,7 +99,7 @@ function DayCard({ dayKey, meals, index, defaultOpen }) {
               className="flex items-center justify-between"
               style={{
                 padding: '0.6875rem 0.875rem', borderRadius: '0.625rem',
-                background: '#12151B', border: '1px solid #2A3240',
+                background: 'var(--surface-inset)', border: '1px solid var(--border)',
                 animation: `fade-up 0.3s ease ${i * 0.04}s both`,
               }}
             >
@@ -107,16 +107,16 @@ function DayCard({ dayKey, meals, index, defaultOpen }) {
                 <div style={{ fontSize: '0.8125rem', fontWeight: 600, textTransform: 'capitalize' }}>
                   {m.recipe_name || 'Meal'}
                 </div>
-                <div style={{ fontSize: '0.6875rem', color: '#667085', marginTop: 2, textTransform: 'capitalize' }}>
+                <div style={{ fontSize: '0.6875rem', color: 'var(--text-faint)', marginTop: 2, textTransform: 'capitalize' }}>
                   {m.meal_label || 'meal'}
                 </div>
               </div>
               <div style={{ display: 'flex', gap: '0.75rem', flexShrink: 0 }}>
-                <span className="tabular" style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#FBBF24' }}>
+                <span className="tabular" style={{ fontSize: '0.8125rem', fontWeight: 700, color: 'var(--warning)' }}>
                   {Math.round(m.macros?.calories || 0)}
                 </span>
                 {m.macros?.protein && (
-                  <span className="tabular" style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#22D3EE' }}>
+                  <span className="tabular" style={{ fontSize: '0.8125rem', fontWeight: 700, color: 'var(--cyan)' }}>
                     {Math.round(m.macros.protein)}g
                   </span>
                 )}
@@ -335,7 +335,7 @@ export default function MealPlanner({ apiBase }) {
         icon={CalendarDays}
         title="Meal Planner"
         subtitle="A full week of meals built around your targets and schedule."
-        gradient="#A78BFA,#FBBF24"
+        from="--accent-soft-rgb" to="--warning-rgb"
       />
 
       {/* Mode selector */}
@@ -363,18 +363,18 @@ export default function MealPlanner({ apiBase }) {
             style={{
               padding: '1.125rem', textAlign: 'left', cursor: disabled ? 'not-allowed' : 'pointer',
               opacity: disabled ? 0.5 : 1,
-              borderColor: personalised === key ? '#8B5CF6' : undefined,
+              borderColor: personalised === key ? 'var(--accent)' : undefined,
               background: personalised === key
-                ? 'linear-gradient(135deg, rgba(139,92,246,0.16), rgba(34,211,238,0.05))'
+                ? 'linear-gradient(135deg, rgba(var(--accent-rgb),0.16), rgba(var(--cyan-rgb),0.05))'
                 : undefined,
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-              <Icon size={17} color={personalised === key ? '#A78BFA' : '#667085'} />
+              <Icon size={17} color={personalised === key ? 'var(--accent-soft)' : 'var(--text-faint)'} />
               <span style={{ fontWeight: 600, fontSize: '0.9375rem' }}>{title}</span>
-              {personalised === key && <Check size={15} color="#34D399" style={{ marginLeft: 'auto' }} />}
+              {personalised === key && <Check size={15} color="var(--success)" style={{ marginLeft: 'auto' }} />}
             </div>
-            <div style={{ fontSize: '0.75rem', color: '#98A2B3', lineHeight: 1.5 }}>{body}</div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>{body}</div>
           </button>
         ))}
       </div>
@@ -383,12 +383,12 @@ export default function MealPlanner({ apiBase }) {
           invisibly and the user can override anything below. */}
       {personalised && profileReady && (
         <div style={{
-          background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.25)',
+          background: 'rgba(var(--accent-rgb),0.08)', border: '1px solid rgba(var(--accent-rgb),0.25)',
           borderRadius: '0.75rem', padding: '0.9375rem', display: 'flex',
           gap: '0.625rem', alignItems: 'flex-start',
         }}>
-          <Sparkles size={15} color="#A78BFA" style={{ flexShrink: 0, marginTop: 2 }} />
-          <div style={{ fontSize: '0.8125rem', color: '#98A2B3', lineHeight: 1.55 }}>
+          <Sparkles size={15} color="var(--accent-soft)" style={{ flexShrink: 0, marginTop: 2 }} />
+          <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', lineHeight: 1.55 }}>
             Using your history:{' '}
             {[
               profile.profile.top_cuisine && `${profile.profile.top_cuisine} cuisine`,
@@ -408,11 +408,11 @@ export default function MealPlanner({ apiBase }) {
           from no target - and this is the one thing the planner never had. */}
       {personalised && goalMacros?.protein > 0 && (
         <div style={{
-          background: 'rgba(34,211,238,0.07)', border: '1px solid rgba(34,211,238,0.22)',
+          background: 'rgba(var(--cyan-rgb),0.07)', border: '1px solid rgba(var(--cyan-rgb),0.22)',
           borderRadius: '0.75rem', padding: '1rem', display: 'grid', gap: '0.75rem',
         }}>
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-            <Target size={15} color="#22D3EE" />
+            <Target size={15} color="var(--cyan)" />
             <span style={{ fontSize: '0.8125rem', fontWeight: 600 }}>
               Every day will be built to hit
             </span>
@@ -421,17 +421,17 @@ export default function MealPlanner({ apiBase }) {
             display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(90px,1fr))', gap: '0.75rem',
           }}>
             {[
-              ['Calories', goalMacros.calories, 'kcal', '#FBBF24'],
-              ['Protein', goalMacros.protein, 'g', '#22D3EE'],
-              ['Carbs', goalMacros.carbs, 'g', '#A78BFA'],
-              ['Fat', goalMacros.fat, 'g', '#F87171'],
+              ['Calories', goalMacros.calories, 'kcal', 'var(--warning)'],
+              ['Protein', goalMacros.protein, 'g', 'var(--cyan)'],
+              ['Carbs', goalMacros.carbs, 'g', 'var(--accent-soft)'],
+              ['Fat', goalMacros.fat, 'g', 'var(--danger)'],
             ].map(([label, value, unit, colour]) => (
               <div key={label}>
-                <div style={{ fontSize: '0.625rem', color: '#667085', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                <div style={{ fontSize: '0.625rem', color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                   {label}
                 </div>
                 <div className="tabular" style={{ fontSize: '1.0625rem', fontWeight: 700, color: colour, marginTop: 2 }}>
-                  {value}<span style={{ fontSize: '0.6875rem', color: '#667085', fontWeight: 500 }}> {unit}</span>
+                  {value}<span style={{ fontSize: '0.6875rem', color: 'var(--text-faint)', fontWeight: 500 }}> {unit}</span>
                 </div>
               </div>
             ))}
@@ -444,21 +444,21 @@ export default function MealPlanner({ apiBase }) {
       {source.verification?.checked && (
         <div style={{
           background: source.verification.hit
-            ? 'rgba(52,211,153,0.08)' : 'rgba(251,191,36,0.08)',
+            ? 'rgba(var(--success-rgb),0.08)' : 'rgba(var(--warning-rgb),0.08)',
           border: `1px solid ${source.verification.hit
-            ? 'rgba(52,211,153,0.28)' : 'rgba(251,191,36,0.28)'}`,
+            ? 'rgba(var(--success-rgb),0.28)' : 'rgba(var(--warning-rgb),0.28)'}`,
           borderRadius: '0.75rem', padding: '1rem', display: 'grid', gap: '0.75rem',
         }}>
           <div style={{ display: 'flex', gap: '0.625rem', alignItems: 'flex-start' }}>
             {source.verification.hit
-              ? <Check size={15} color="#34D399" style={{ flexShrink: 0, marginTop: 2 }} />
-              : <Target size={15} color="#FBBF24" style={{ flexShrink: 0, marginTop: 2 }} />}
+              ? <Check size={15} color="var(--success)" style={{ flexShrink: 0, marginTop: 2 }} />
+              : <Target size={15} color="var(--warning)" style={{ flexShrink: 0, marginTop: 2 }} />}
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: '0.8125rem', fontWeight: 600 }}>
                 {source.verification.days_on_target} of {source.verification.days_total} days
                 hit every macro
               </div>
-              <div style={{ fontSize: '0.75rem', color: '#98A2B3', marginTop: 2, lineHeight: 1.5 }}>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2, lineHeight: 1.5 }}>
                 {source.verification.summary}
                 {source.verification.retried && ' Regenerated once to get closer.'}
               </div>
@@ -475,10 +475,10 @@ export default function MealPlanner({ apiBase }) {
                     : d.missed.map((m) => `${m} ${d.macros[m].total}${d.macros[m].unit}`).join(', ')}`}
                   style={{
                     width: '100%', height: 6, borderRadius: 3,
-                    background: d.hit ? '#34D399' : d.missed.length > 2 ? '#F87171' : '#FBBF24',
+                    background: d.hit ? 'var(--success)' : d.missed.length > 2 ? 'var(--danger)' : 'var(--warning)',
                   }}
                 />
-                <span style={{ fontSize: '0.5625rem', color: '#667085' }}>
+                <span style={{ fontSize: '0.5625rem', color: 'var(--text-faint)' }}>
                   {d.day.replace('day_', '')}
                 </span>
               </div>
@@ -496,7 +496,7 @@ export default function MealPlanner({ apiBase }) {
               <span className="metric-value tabular" style={{ fontSize: '3rem' }}>
                 {Math.round(animatedCals).toLocaleString()}
               </span>
-              <span style={{ color: '#667085', fontWeight: 500 }}>kcal</span>
+              <span style={{ color: 'var(--text-faint)', fontWeight: 500 }}>kcal</span>
             </div>
             {goalCalories && (
               <span className="pill pill-good" style={{ marginTop: 8 }}>from your goal</span>
@@ -504,11 +504,11 @@ export default function MealPlanner({ apiBase }) {
           </div>
           <div style={{ textAlign: 'right' }}>
             <div className="metric-label">Per meal</div>
-            <div className="tabular" style={{ fontSize: '1.5rem', fontWeight: 700, color: '#A78BFA', marginTop: 6 }}>
+            <div className="tabular" style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--accent-soft)', marginTop: 6 }}>
               ~{Math.round(calories / mealsPerDay)} kcal
             </div>
             {useBudget && (
-              <div style={{ fontSize: '0.6875rem', color: '#667085' }}>
+              <div style={{ fontSize: '0.6875rem', color: 'var(--text-faint)' }}>
                 ₹{Math.round(budget / mealsPerDay)} each
               </div>
             )}
@@ -550,13 +550,13 @@ export default function MealPlanner({ apiBase }) {
             <>
               <SliderField value={budget} onChange={setBudget} min={50} max={1500} step={25}
                 presets={[150, 300, 500, 800]} format={(v) => `₹${v}`} />
-              <div style={{ fontSize: '0.75rem', color: '#98A2B3', lineHeight: 1.5 }}>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
                 If the budget and your protein target conflict, nutrition wins and
                 the plan will say so.
               </div>
             </>
           ) : (
-            <div style={{ fontSize: '0.8125rem', color: '#98A2B3', lineHeight: 1.55 }}>
+            <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', lineHeight: 1.55 }}>
               No spending limit, so meals are picked to hit your calorie and macro
               targets. Costs are still estimated for each item so you can see what
               the week would run to.
@@ -618,7 +618,7 @@ export default function MealPlanner({ apiBase }) {
           <div className="surface-hero" style={{ padding: '1.5rem', display: 'grid', gap: '1rem' }}>
             <div className="flex items-center justify-between" style={{ flexWrap: 'wrap', gap: '1rem' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem' }}>
-                <Sparkles size={18} color="#FBBF24" />
+                <Sparkles size={18} color="var(--warning)" />
                 <span style={{ fontWeight: 700, fontSize: '1.0625rem' }}>Your week</span>
                 {personalised && (
                   <span className="pill pill-brand"><Sparkles size={11} /> personalised</span>
@@ -626,17 +626,17 @@ export default function MealPlanner({ apiBase }) {
               </div>
               <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>
                 {[
-                  { label: 'kcal/day', value: meta.total_daily_calories ?? calories, color: '#FBBF24' },
+                  { label: 'kcal/day', value: meta.total_daily_calories ?? calories, color: 'var(--warning)' },
                   // Only claim a cost when one was actually produced or requested.
                   ...(summary.avg_daily_cost || useBudget
                     ? [{ label: 'avg cost',
-                         value: `₹${summary.avg_daily_cost ?? budget}`, color: '#34D399' }]
+                         value: `₹${summary.avg_daily_cost ?? budget}`, color: 'var(--success)' }]
                     : []),
-                  { label: 'meals/day', value: meta.meals_per_day ?? mealsPerDay, color: '#A78BFA' },
+                  { label: 'meals/day', value: meta.meals_per_day ?? mealsPerDay, color: 'var(--accent-soft)' },
                 ].map((s, i) => (
                   <div key={i} style={{ textAlign: 'right' }}>
                     <div className="tabular" style={{ fontSize: '1.25rem', fontWeight: 700, color: s.color }}>{s.value}</div>
-                    <div style={{ fontSize: '0.6875rem', color: '#667085' }}>{s.label}</div>
+                    <div style={{ fontSize: '0.6875rem', color: 'var(--text-faint)' }}>{s.label}</div>
                   </div>
                 ))}
               </div>
@@ -665,13 +665,13 @@ export default function MealPlanner({ apiBase }) {
 
           {shopping.length > 0 && (
             <Section title="Shopping list" hint={`${shopping.length} items for the week`}
-              right={<ShoppingCart size={16} color="#34D399" />}>
+              right={<ShoppingCart size={16} color="var(--success)" />}>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))', gap: '0.5rem' }}>
                 {shopping.map((item, i) => (
                   <div key={i} className="flex items-center justify-between"
-                    style={{ padding: '0.625rem 0.75rem', borderRadius: '0.5rem', background: '#12151B', border: '1px solid #2A3240' }}>
+                    style={{ padding: '0.625rem 0.75rem', borderRadius: '0.5rem', background: 'var(--surface-inset)', border: '1px solid var(--border)' }}>
                     <span style={{ fontSize: '0.8125rem', textTransform: 'capitalize' }}>{item.name}</span>
-                    <span className="tabular" style={{ fontSize: '0.75rem', color: '#34D399', fontWeight: 600 }}>
+                    <span className="tabular" style={{ fontSize: '0.75rem', color: 'var(--success)', fontWeight: 600 }}>
                       {item.est_cost ? `₹${item.est_cost}` : item.qty_est}
                     </span>
                   </div>
@@ -683,11 +683,11 @@ export default function MealPlanner({ apiBase }) {
           {summary.progression_tip && (
             <div style={{
               display: 'flex', gap: '0.625rem', alignItems: 'flex-start',
-              background: 'rgba(139,92,246,0.09)', border: '1px solid rgba(139,92,246,0.28)',
+              background: 'rgba(var(--accent-rgb),0.09)', border: '1px solid rgba(var(--accent-rgb),0.28)',
               borderRadius: '0.75rem', padding: '1rem', fontSize: '0.8125rem',
-              color: '#C6CEDA', lineHeight: 1.55,
+              color: 'var(--text-secondary)', lineHeight: 1.55,
             }}>
-              <Flame size={16} color="#A78BFA" style={{ flexShrink: 0, marginTop: 1 }} />
+              <Flame size={16} color="var(--accent-soft)" style={{ flexShrink: 0, marginTop: 1 }} />
               <span>{summary.progression_tip}</span>
             </div>
           )}

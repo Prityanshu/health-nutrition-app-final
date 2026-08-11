@@ -30,9 +30,9 @@ const GOAL_ICONS = {
 };
 
 const MACROS = [
-  { key: 'protein_g', label: 'Protein', color: '#22D3EE' },
-  { key: 'carbs_g', label: 'Carbs', color: '#A78BFA' },
-  { key: 'fat_g', label: 'Fat', color: '#FBBF24' },
+  { key: 'protein_g', label: 'Protein', color: 'var(--cyan)' },
+  { key: 'carbs_g', label: 'Carbs', color: 'var(--accent-soft)' },
+  { key: 'fat_g', label: 'Fat', color: 'var(--warning)' },
 ];
 
 export default function GoalSetup({ apiBase, onGoalSaved }) {
@@ -150,7 +150,7 @@ export default function GoalSetup({ apiBase, onGoalSaved }) {
         <h1 style={{ fontSize: '1.75rem', fontWeight: 700, letterSpacing: '-0.02em' }}>
           Set your goal
         </h1>
-        <p style={{ color: '#98A2B3', fontSize: '0.875rem', marginTop: 4 }}>
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginTop: 4 }}>
           Tell us what you're aiming for. We'll work out the calories and macros.
         </p>
       </div>
@@ -185,18 +185,18 @@ export default function GoalSetup({ apiBase, onGoalSaved }) {
               className="surface surface-hover"
               style={{
                 padding: '1rem', textAlign: 'left', cursor: 'pointer',
-                borderColor: active ? '#8B5CF6' : undefined,
+                borderColor: active ? 'var(--accent)' : undefined,
                 background: active
-                  ? 'linear-gradient(135deg, rgba(139,92,246,0.16), rgba(34,211,238,0.05))'
+                  ? 'linear-gradient(135deg, rgba(var(--accent-rgb),0.16), rgba(var(--cyan-rgb),0.05))'
                   : undefined,
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                <Icon size={17} color={active ? '#A78BFA' : '#667085'} />
+                <Icon size={17} color={active ? 'var(--accent-soft)' : 'var(--text-faint)'} />
                 <span style={{ fontWeight: 600, fontSize: '0.9375rem' }}>{p.label}</span>
-                {active && <Check size={15} color="#34D399" style={{ marginLeft: 'auto' }} />}
+                {active && <Check size={15} color="var(--success)" style={{ marginLeft: 'auto' }} />}
               </div>
-              <div style={{ fontSize: '0.75rem', color: '#98A2B3', lineHeight: 1.5 }}>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
                 {p.description}
               </div>
             </button>
@@ -211,7 +211,7 @@ export default function GoalSetup({ apiBase, onGoalSaved }) {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: '1rem' }}>
             {selected.needs_target_weight && (
               <div>
-                <label style={{ fontSize: '0.8125rem', color: '#98A2B3', display: 'block', marginBottom: 6 }}>
+                <label style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>
                   Target weight (kg)
                 </label>
                 <input
@@ -221,8 +221,8 @@ export default function GoalSetup({ apiBase, onGoalSaved }) {
               </div>
             )}
             <div>
-              <label style={{ fontSize: '0.8125rem', color: '#98A2B3', display: 'block', marginBottom: 6 }}>
-                By when? <span style={{ color: '#667085' }}>(optional)</span>
+              <label style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>
+                By when? <span style={{ color: 'var(--text-faint)' }}>(optional)</span>
               </label>
               <input
                 type="date" className="form-input"
@@ -231,7 +231,7 @@ export default function GoalSetup({ apiBase, onGoalSaved }) {
             </div>
             {needsSex && (
               <div>
-                <label style={{ fontSize: '0.8125rem', color: '#FBBF24', display: 'block', marginBottom: 6 }}>
+                <label style={{ fontSize: '0.8125rem', color: 'var(--warning)', display: 'block', marginBottom: 6 }}>
                   Sex — needed for an accurate estimate
                 </label>
                 <select className="form-input" value={sex} onChange={(e) => setSex(e.target.value)}>
@@ -247,7 +247,7 @@ export default function GoalSetup({ apiBase, onGoalSaved }) {
       )}
 
       {error && (
-        <div className="surface" style={{ padding: '0.875rem', borderColor: '#F87171', color: '#F87171', fontSize: '0.875rem' }}>
+        <div className="surface" style={{ padding: '0.875rem', borderColor: 'var(--danger)', color: 'var(--danger)', fontSize: '0.875rem' }}>
           {error}
         </div>
       )}
@@ -262,10 +262,10 @@ export default function GoalSetup({ apiBase, onGoalSaved }) {
               <div className="metric-label">Your daily target</div>
               <div className="metric-value" style={{ marginTop: 6 }}>
                 {preview.target_calories.toLocaleString()}
-                <span style={{ fontSize: '1rem', color: '#667085', fontWeight: 500, marginLeft: 8 }}>kcal</span>
+                <span style={{ fontSize: '1rem', color: 'var(--text-faint)', fontWeight: 500, marginLeft: 8 }}>kcal</span>
               </div>
             </div>
-            <div style={{ textAlign: 'right', fontSize: '0.8125rem', color: '#98A2B3' }}>
+            <div style={{ textAlign: 'right', fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
               <div>BMR {preview.bmr.toLocaleString()} kcal</div>
               <div>Maintenance {preview.tdee.toLocaleString()} kcal</div>
             </div>
@@ -273,8 +273,8 @@ export default function GoalSetup({ apiBase, onGoalSaved }) {
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '0.75rem' }}>
             {MACROS.map((m) => (
-              <div key={m.key} style={{ background: '#12151B', border: '1px solid #2A3240', borderRadius: '0.75rem', padding: '0.875rem' }}>
-                <div style={{ fontSize: '0.6875rem', color: '#667085', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600 }}>
+              <div key={m.key} style={{ background: 'var(--surface-inset)', border: '1px solid var(--border)', borderRadius: '0.75rem', padding: '0.875rem' }}>
+                <div style={{ fontSize: '0.6875rem', color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600 }}>
                   {m.label}
                 </div>
                 <div style={{ fontSize: '1.5rem', fontWeight: 700, color: m.color, marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>
@@ -284,13 +284,13 @@ export default function GoalSetup({ apiBase, onGoalSaved }) {
             ))}
           </div>
 
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start', fontSize: '0.8125rem', color: '#98A2B3', lineHeight: 1.6 }}>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start', fontSize: '0.8125rem', color: 'var(--text-muted)', lineHeight: 1.6 }}>
             <Info size={15} style={{ flexShrink: 0, marginTop: 2 }} />
             <span>{preview.rationale}</span>
           </div>
 
           {preview.estimated_weeks && (
-            <div className="pill" style={{ background: 'rgba(52,211,153,0.14)', color: '#34D399', width: 'fit-content' }}>
+            <div className="pill" style={{ background: 'rgba(var(--success-rgb),0.14)', color: 'var(--success)', width: 'fit-content' }}>
               <Scale size={13} />
               About {preview.estimated_weeks} weeks at {preview.weekly_change_kg} kg/week
             </div>
@@ -301,8 +301,8 @@ export default function GoalSetup({ apiBase, onGoalSaved }) {
               {preview.warnings.map((w, i) => (
                 <div key={i} style={{
                   display: 'flex', gap: '0.5rem', alignItems: 'flex-start',
-                  background: 'rgba(251,191,36,0.09)', border: '1px solid rgba(251,191,36,0.28)',
-                  borderRadius: '0.625rem', padding: '0.75rem', fontSize: '0.8125rem', color: '#FBBF24',
+                  background: 'rgba(var(--warning-rgb),0.09)', border: '1px solid rgba(var(--warning-rgb),0.28)',
+                  borderRadius: '0.625rem', padding: '0.75rem', fontSize: '0.8125rem', color: 'var(--warning)',
                   lineHeight: 1.55,
                 }}>
                   <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
@@ -323,7 +323,7 @@ export default function GoalSetup({ apiBase, onGoalSaved }) {
               : <>Set this as my goal <ChevronRight size={16} style={{ marginLeft: 6 }} /></>}
           </button>
 
-          <p style={{ fontSize: '0.75rem', color: '#667085', textAlign: 'center', lineHeight: 1.5 }}>
+          <p style={{ fontSize: '0.75rem', color: 'var(--text-faint)', textAlign: 'center', lineHeight: 1.5 }}>
             These are estimates from a standard formula, not medical advice. If you have a health
             condition or are unsure, check with a doctor or dietitian.
           </p>

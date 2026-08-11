@@ -43,7 +43,7 @@ class NutritionCalculator:
         # Get basic info
         weight = user.weight or 70
         height = user.height or 170
-        age = user.age or 30
+        age = user.current_age or 30
         activity_level = ActivityLevel(user.activity_level) if user.activity_level else ActivityLevel.MODERATELY_ACTIVE
         
         # Calculate BMR and TDEE
@@ -117,7 +117,7 @@ class NutritionCalculator:
         # Get basic info
         weight = user.weight or 70
         height = user.height or 170
-        age = user.age or 30
+        age = user.current_age or 30
         activity_level = ActivityLevel(user.activity_level) if user.activity_level else ActivityLevel.MODERATELY_ACTIVE
         goal_type = GoalType(goal.goal_type) if goal else GoalType.MAINTENANCE
         

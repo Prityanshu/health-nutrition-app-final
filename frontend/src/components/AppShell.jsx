@@ -5,6 +5,7 @@ import {
   Globe, CalendarDays, Trophy, Menu, X, LogOut,
 } from 'lucide-react';
 import ToastHost from '../Toast';
+import { Wordmark } from './Lotus';
 
 /**
  * Persistent application shell.
@@ -119,26 +120,17 @@ export default function AppShell({
 
       <aside className={`nav-rail ${sidebarOpen ? 'nav-rail-open' : ''}`}>
         <div className="flex items-center justify-between" style={{ padding: '0 0.75rem 1.25rem' }}>
-          <div className="flex items-center" style={{ gap: '0.625rem' }}>
-            <div
-              className="flex items-center justify-center"
-              style={{
-                width: 34, height: 34, borderRadius: 10,
-                background: 'linear-gradient(135deg,#8B5CF6,#22D3EE)',
-                boxShadow: '0 0 20px -4px rgba(139,92,246,0.6)',
-              }}
-            >
-              <Sparkles size={18} color="#fff" />
-            </div>
-            <span style={{ fontWeight: 700, fontSize: '0.95rem', letterSpacing: '-0.01em' }}>
-              NutriPlan
-            </span>
-          </div>
+          {/* The generic gradient square with a Sparkles icon said nothing and
+              could have belonged to any app. The lotus sits to the RIGHT of
+              the name, as in the logo, and the motto goes underneath - it is
+              the only line that tells a new user what the app is actually
+              for. */}
+          <Wordmark size="md" />
           <button
             onClick={() => setSidebarOpen(false)}
             aria-label="Close navigation"
             className="nav-close"
-            style={{ background: 'none', border: 'none', color: '#98A2B3', cursor: 'pointer' }}
+            style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
           >
             <X size={18} />
           </button>
@@ -163,7 +155,7 @@ export default function AppShell({
           ))}
         </nav>
 
-        <div style={{ borderTop: '1px solid #2A3240', paddingTop: '0.75rem', marginTop: '0.75rem' }}>
+        <div style={{ borderTop: '1px solid var(--border)', paddingTop: '0.75rem', marginTop: '0.75rem' }}>
           {/* This said "View profile" and went nowhere for the whole life of
               the app. It is a button now. */}
           <button
@@ -176,9 +168,9 @@ export default function AppShell({
               style={{
                 width: 32, height: 32, borderRadius: 999, flexShrink: 0,
                 background: activeView === 'profile'
-                  ? 'linear-gradient(135deg,#8B5CF6,#22D3EE)' : '#2A3240',
+                  ? 'linear-gradient(135deg,var(--accent),var(--cyan))' : 'var(--border)',
                 fontSize: '0.75rem', fontWeight: 700,
-                color: activeView === 'profile' ? '#0B0E14' : '#EEF2F7',
+                color: activeView === 'profile' ? 'var(--bg)' : 'var(--text)',
               }}
             >
               {initials}
@@ -187,7 +179,7 @@ export default function AppShell({
               <div style={{ fontSize: '0.8125rem', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {user?.full_name || user?.username || 'Athlete'}
               </div>
-              <div style={{ fontSize: '0.6875rem', color: '#667085' }}>
+              <div style={{ fontSize: '0.6875rem', color: 'var(--text-faint)' }}>
                 {points != null ? `${points.toLocaleString()} points` : 'View profile'}
               </div>
             </div>
@@ -214,7 +206,7 @@ export default function AppShell({
           >
             <Menu size={20} />
           </button>
-          <span className="topbar-title">{current?.label || 'NutriPlan'}</span>
+          <span className="topbar-title">{current?.label || 'Kayosha'}</span>
         </div>
 
         {children}

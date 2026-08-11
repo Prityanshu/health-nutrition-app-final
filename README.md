@@ -1,4 +1,4 @@
-# 🥗 NutriPlan — AI Health & Nutrition
+# 🥗 Kayosha — AI Health & Nutrition
 
 A nutrition and fitness app that plans around *you*: your goals, your budget,
 your kitchen, your injuries, and what you actually ate today.

@@ -38,7 +38,7 @@ EMAIL_USER = os.getenv("EMAIL_USER", "").strip()
 # Gmail app passwords are shown as "abcd efgh ijkl mnop"; the spaces are for
 # readability only and must be stripped before authenticating.
 EMAIL_PASS = re.sub(r"\s+", "", os.getenv("EMAIL_PASS", ""))
-EMAIL_FROM_NAME = os.getenv("EMAIL_FROM_NAME", "NutriPlan")
+EMAIL_FROM_NAME = os.getenv("EMAIL_FROM_NAME", "Kayosha")
 
 EMAIL_ENABLED = bool(EMAIL_USER and EMAIL_PASS)
 
@@ -229,7 +229,7 @@ def plan_email_body(
         f"{intro}{note_text}\n\n"
         "You can open it on any device, print it, or keep it on your phone for "
         "the gym or the kitchen.\n\n"
-        "— NutriPlan\n\n"
+        "— Kayosha\n\n"
         "This is an estimate generated from the details provided, not medical advice."
     )
 
@@ -249,7 +249,7 @@ def plan_email_body(
             max-width:520px;margin:0 auto;color:#1A1A1A;">
   <div style="background:linear-gradient(135deg,#8B5CF6,#22D3EE);padding:22px 24px;
               border-radius:14px 14px 0 0;">
-    <div style="color:#fff;font-size:19px;font-weight:700;">NutriPlan</div>
+    <div style="color:#fff;font-size:19px;font-weight:700;">Kayosha</div>
     <div style="color:rgba(255,255,255,.85);font-size:13px;margin-top:3px;">
       {html_mod.escape(plan_title)}
     </div>

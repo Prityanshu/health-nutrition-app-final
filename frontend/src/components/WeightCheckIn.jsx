@@ -59,24 +59,24 @@ export default function WeightCheckIn({ apiBase, onLogged }) {
 
   const change = history?.change_kg ?? 0;
   const Trend = change < -0.05 ? TrendingDown : change > 0.05 ? TrendingUp : Minus;
-  const trendColor = change < -0.05 ? '#34D399' : change > 0.05 ? '#FBBF24' : '#667085';
+  const trendColor = change < -0.05 ? 'var(--success)' : change > 0.05 ? 'var(--warning)' : 'var(--text-faint)';
   const stale = history?.days_since_last != null && history.days_since_last >= 7;
 
   return (
     <div className="surface" style={{ padding: '1.25rem', display: 'grid', gap: '1rem' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <span className="metric-label">Weekly check-in</span>
-        <Scale size={16} color="#667085" />
+        <Scale size={16} color="var(--text-faint)" />
       </div>
 
       {history?.latest != null && (
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.75rem', flexWrap: 'wrap' }}>
           <div style={{ fontSize: '2rem', fontWeight: 700, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>
             {history.latest}
-            <span style={{ fontSize: '0.875rem', color: '#667085', fontWeight: 500, marginLeft: 4 }}>kg</span>
+            <span style={{ fontSize: '0.875rem', color: 'var(--text-faint)', fontWeight: 500, marginLeft: 4 }}>kg</span>
           </div>
           {history.count > 1 && (
-            <span className="pill" style={{ background: 'rgba(255,255,255,0.05)', color: trendColor }}>
+            <span className="pill" style={{ background: 'rgba(var(--white-rgb),0.05)', color: trendColor }}>
               <Trend size={13} />
               {change > 0 ? '+' : ''}{change} kg
             </span>
@@ -85,7 +85,7 @@ export default function WeightCheckIn({ apiBase, onLogged }) {
       )}
 
       {stale && (
-        <div style={{ fontSize: '0.8125rem', color: '#FBBF24' }}>
+        <div style={{ fontSize: '0.8125rem', color: 'var(--warning)' }}>
           Last weighed {history.days_since_last} days ago — worth updating so your targets stay accurate.
         </div>
       )}
@@ -104,12 +104,12 @@ export default function WeightCheckIn({ apiBase, onLogged }) {
         </button>
       </div>
 
-      {error && <div style={{ fontSize: '0.8125rem', color: '#F87171' }}>{error}</div>}
+      {error && <div style={{ fontSize: '0.8125rem', color: 'var(--danger)' }}>{error}</div>}
 
       {result?.goal_recalculated && result.updated_targets && (
         <div style={{
-          background: 'rgba(52,211,153,0.09)', border: '1px solid rgba(52,211,153,0.28)',
-          borderRadius: '0.625rem', padding: '0.75rem', fontSize: '0.8125rem', color: '#34D399',
+          background: 'rgba(var(--success-rgb),0.09)', border: '1px solid rgba(var(--success-rgb),0.28)',
+          borderRadius: '0.625rem', padding: '0.75rem', fontSize: '0.8125rem', color: 'var(--success)',
           display: 'flex', gap: '0.5rem', alignItems: 'flex-start', lineHeight: 1.55,
         }}>
           <Check size={15} style={{ flexShrink: 0, marginTop: 1 }} />
@@ -147,13 +147,13 @@ function Sparkline({ entries }) {
         <polyline
           points={points}
           fill="none"
-          stroke="#8B5CF6"
+          stroke="var(--accent)"
           strokeWidth="1.5"
           vectorEffect="non-scaling-stroke"
           strokeLinejoin="round"
         />
       </svg>
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.6875rem', color: '#667085' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.6875rem', color: 'var(--text-faint)' }}>
         <span>{min.toFixed(1)} kg</span>
         <span>{entries.length} entries</span>
         <span>{max.toFixed(1)} kg</span>

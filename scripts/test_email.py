@@ -46,7 +46,7 @@ def main() -> int:
     user = os.getenv("EMAIL_USER", "").strip()
     raw_pass = os.getenv("EMAIL_PASS", "")
     password = re.sub(r"\s+", "", raw_pass)
-    from_name = os.getenv("EMAIL_FROM_NAME", "NutriPlan")
+    from_name = os.getenv("EMAIL_FROM_NAME", "Kayosha")
 
     print()
     print("=" * 68)
@@ -92,14 +92,14 @@ def main() -> int:
 
             if args.send:
                 msg = MIMEText(
-                    "If you are reading this, NutriPlan can send email.\n\n"
+                    "If you are reading this, Kayosha can send email.\n\n"
                     "Sent by scripts/test_email.py",
                     "plain",
                     "utf-8",
                 )
                 msg["From"] = formataddr((from_name, user))
                 msg["To"] = args.send
-                msg["Subject"] = "NutriPlan email test"
+                msg["Subject"] = "Kayosha email test"
                 smtp.sendmail(user, [args.send], msg.as_string())
                 print(f"{GREEN}v Test email sent to {args.send}.{RESET}")
                 print(f"{DIM}  Check the spam folder too - a new Gmail account has no")

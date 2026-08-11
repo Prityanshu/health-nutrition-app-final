@@ -36,8 +36,15 @@ export const STAGES = {
 /** Severity at or above this is refused by the backend, not worked around. */
 export const BLOCKING_SEVERITY = 8;
 
+/**
+ * The RGB TRIPLE VARIABLE for a severity, not a colour string.
+ *
+ * Callers need both the solid colour and translucent versions of it, and a
+ * `var(--danger)` string cannot have an alpha appended - see src/theme.js.
+ * Wrap with solid() to render it.
+ */
 export const severityColor = (v) =>
-  (v >= 8 ? '#F87171' : v >= 6 ? '#FB923C' : v >= 4 ? '#FBBF24' : '#34D399');
+  (v >= 8 ? '--danger-rgb' : v >= 6 ? '--orange-rgb' : v >= 4 ? '--warning-rgb' : '--success-rgb');
 
 export const stageFor = (v) => STAGES[Math.max(0, Math.min(10, v))] || STAGES[5];
 

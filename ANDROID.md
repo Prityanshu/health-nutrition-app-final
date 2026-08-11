@@ -1,4 +1,4 @@
-# NutriPlan on Android
+# Kayosha on Android
 
 The React app runs inside a Capacitor shell, so the APK is the same frontend
 you already have — no rewrite, and every fix to the web app is one rebuild away

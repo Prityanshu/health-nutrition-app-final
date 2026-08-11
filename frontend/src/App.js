@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { localDateString, syncTimezone, onLocalDayChange } from './localDay';
 import { 
   Utensils, 
@@ -36,6 +36,8 @@ import MealPlanner from './components/MealPlanner';
 import renderMarkdown from './components/markdown';
 import { apiBase, isNativeApp } from './apiBase';
 import ServerSetup from './components/ServerSetup';
+import ResetPassword from './components/ResetPassword';
+import Welcome from './components/Welcome';
 import { toast, toastError } from './Toast';
 
 // Resolved at runtime rather than baked in at build time: inside an APK the
@@ -55,6 +57,20 @@ function App() {
   const [workoutToday, setWorkoutToday] = useState(null);
   const [leaderboard, setLeaderboard] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+
+  /*
+   * Send a goal-less account to goal setup, exactly once per session.
+   *
+   * Every recommendation in the app is derived from a goal, so an account
+   * without one can only ever be shown empty boxes - which is what four of
+   * the first seven signups saw before leaving.
+   *
+   * A ref rather than state, and once rather than continuously: someone who
+   * deliberately clicks Dashboard to look around must be able to stay there.
+   * Redirecting on every render would trap them, which is a far worse problem
+   * than the one being solved.
+   */
+  const routedToGoalSetup = useRef(false);
   const [error, setError] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -64,6 +80,27 @@ function App() {
   // machine, so an unreachable backend means the server is down rather than
   // misconfigured, and a "set your server address" screen would be noise.
   const [needsServer, setNeedsServer] = useState(false);
+
+  /*
+   * The token from a reset link, captured once at startup.
+   *
+   * Read in the initialiser rather than an effect so the reset screen is the
+   * first thing rendered - an effect would flash the login form first. The
+   * token is stripped from the URL immediately afterwards: leaving it there
+   * puts a working password-reset credential into browser history, into any
+   * Referer header the page sends, and into whatever someone screenshots.
+   */
+  const [resetToken, setResetToken] = useState(() => {
+    try {
+      const found = new URLSearchParams(window.location.search).get('reset_token');
+      if (found) {
+        window.history.replaceState({}, '', window.location.pathname);
+      }
+      return found || '';
+    } catch {
+      return '';
+    }
+  });
   // Injury summary, so the dashboard can prompt for a check-in when one is due.
   const [injurySummary, setInjurySummary] = useState(null);
 
@@ -1583,6 +1620,17 @@ function App() {
       if (response.ok) {
         const userGoals = await response.json();
         setGoals(userGoals);
+
+        // Decided here rather than in an effect on dashboardData, because
+        // dashboardData.goals starts as [] before anything has loaded - so an
+        // effect could not tell "no goals" from "not fetched yet" and would
+        // redirect every user on every login.
+        if (!routedToGoalSetup.current) {
+          routedToGoalSetup.current = true;
+          if (Array.isArray(userGoals) && userGoals.length === 0) {
+            setActiveView('set-goals');
+          }
+        }
       }
     } catch (error) {
       console.error('Error fetching goals:', error);
@@ -2547,7 +2595,7 @@ function App() {
             left: 0,
             right: 0,
             bottom: 0,
-            backgroundColor: 'rgba(0,0,0,0.8)',
+            backgroundColor: 'rgba(var(--black-rgb),0.8)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -2561,7 +2609,7 @@ function App() {
               borderRadius: '8px',
               maxWidth: '500px',
               width: '90%',
-              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+              boxShadow: '0 25px 50px -12px rgba(var(--black-rgb), 0.25)',
               position: 'relative',
               zIndex: 1000000
             }}
@@ -2675,7 +2723,7 @@ function App() {
         <h1 style={{ fontSize: '1.75rem', fontWeight: 700, letterSpacing: '-0.02em' }}>
           ChefGenius
         </h1>
-        <p style={{ color: '#98A2B3', fontSize: '0.875rem', marginTop: 4 }}>
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginTop: 4 }}>
           Tell it what you have and it builds a recipe around it.
         </p>
       </div>
@@ -4787,6 +4835,29 @@ function App() {
     return <ServerSetup onSaved={() => window.location.reload()} />;
   }
 
+  /*
+   * A reset link was opened.
+   *
+   * Checked before everything else, including the signed-in branch: someone
+   * who is still logged in on this device but has forgotten their password
+   * must still be able to use the link, and landing them on the dashboard
+   * instead would be baffling.
+   *
+   * The token is read from the query string and removed from the address bar
+   * as soon as it is captured, so it does not sit in the browser history, get
+   * copied out of a shared screen, or leak through a Referer header.
+   */
+  if (resetToken) {
+    return (
+      <ResetPassword
+        apiBase={API_BASE_URL}
+        token={resetToken}
+        onDone={() => { setResetToken(''); setCurrentView('login'); }}
+        onCancel={() => { setResetToken(''); setCurrentView('login'); }}
+      />
+    );
+  }
+
   // Auth owns both sign-in and registration, including the switch between
   // them, so `currentView` no longer needs a separate 'register' branch.
   if (currentView === 'login' || currentView === 'register') {
@@ -4838,6 +4909,51 @@ function App() {
 
     const activeGoal =
       (dashboardData.goals || []).find((g) => g.is_active) || (dashboardData.goals || [])[0] || null;
+
+    /*
+     * A new account starts on the walkthrough, then on goal setup.
+     *
+     * Four of the first seven people who signed up did nothing afterwards -
+     * no goal, no meal, no weigh-in. They landed on an empty dashboard with
+     * fourteen destinations and nothing indicating which one mattered.
+     *
+     * The condition is "has no goal", not "is a new account", so it resolves
+     * itself the moment a goal exists and never nags anyone twice. Dismissal
+     * is remembered per user, so someone who wants to look around first is
+     * not shown the introduction again on every render.
+     */
+    const hasGoal = (dashboardData.goals || []).length > 0;
+    const welcomeKey = `kayosha.seenWelcome.${user.id}`;
+    let seenWelcome = true;
+    try {
+      seenWelcome = localStorage.getItem(welcomeKey) === '1';
+    } catch {
+      // Private mode. Showing the introduction once per session is a far
+      // smaller problem than crashing the whole app on a storage read.
+      seenWelcome = false;
+    }
+
+    if (!hasGoal && !seenWelcome) {
+      return (
+        <AppShell
+          activeView={activeView}
+          onNavigate={setActiveView}
+          user={user}
+          points={totalPoints}
+          onLogout={handleLogout}
+          sidebarOpen={sidebarOpen}
+          setSidebarOpen={setSidebarOpen}
+        >
+          <Welcome
+            name={user.full_name || user.username}
+            onStart={() => {
+              try { localStorage.setItem(welcomeKey, '1'); } catch { /* private mode */ }
+              setActiveView('set-goals');
+            }}
+          />
+        </AppShell>
+      );
+    }
 
     const legacyViews = {
       'log-meal': () => (

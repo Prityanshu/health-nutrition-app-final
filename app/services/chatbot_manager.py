@@ -361,7 +361,7 @@ class ChatbotManager:
 
             context = {
                 "user_id": user.id,
-                "age": user.age or 25,
+                "age": user.current_age or 25,
                 "weight": user.weight or 70,
                 "height": user.height or 170,
                 "activity_level": user.activity_level or "moderately_active",

@@ -101,7 +101,7 @@ export default function BudgetChef({ apiBase }) {
         icon={Wallet}
         title="BudgetChef"
         subtitle="Eat well without overspending. Set a daily budget and it works within it."
-        gradient="#34D399,#22D3EE"
+        from="--success-rgb" to="--cyan-rgb"
       />
 
       {/* Budget hero */}
@@ -110,16 +110,16 @@ export default function BudgetChef({ apiBase }) {
           <div>
             <div className="metric-label">Daily food budget</div>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', marginTop: 6 }}>
-              <IndianRupee size={26} color="#34D399" />
+              <IndianRupee size={26} color="var(--success)" />
               <span className="metric-value tabular" style={{ fontSize: '3rem' }}>{budget}</span>
             </div>
           </div>
           <div style={{ textAlign: 'right' }}>
             <div className="metric-label">Per meal</div>
-            <div className="tabular" style={{ fontSize: '1.5rem', fontWeight: 700, color: '#22D3EE', marginTop: 6 }}>
+            <div className="tabular" style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--cyan)', marginTop: 6 }}>
               ₹{perMeal}
             </div>
-            <div style={{ fontSize: '0.6875rem', color: '#667085' }}>across {mealsPerDay} meals</div>
+            <div style={{ fontSize: '0.6875rem', color: 'var(--text-faint)' }}>across {mealsPerDay} meals</div>
           </div>
         </div>
         <SliderField
@@ -178,7 +178,7 @@ export default function BudgetChef({ apiBase }) {
           <ResultPanel
             title="Your budget plan"
             icon={Sparkles}
-            accent="#34D399"
+            accent="var(--success)"
             markdown={activeContent}
             onRegenerate={run}
             apiBase={apiBase}

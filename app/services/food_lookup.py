@@ -58,7 +58,7 @@ USDA_API_KEY = os.getenv("USDA_API_KEY", "").strip()
 # Open Food Facts asks that clients identify themselves so they can contact you
 # if a client misbehaves. It is a donation-funded project; this is the polite
 # minimum, along with caching every lookup.
-USER_AGENT = "NutriPlan/1.0 (student project; nutrition lookup)"
+USER_AGENT = "Kayosha/1.0 (student project; nutrition lookup)"
 
 # Network budget. A lookup that takes longer than this is worse than falling
 # through to the next source.

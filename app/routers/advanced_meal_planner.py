@@ -7,7 +7,7 @@ from enum import Enum
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_active_user
-from app.database import User, get_db
+from app.database import Goal, User, get_db
 from app.services import macro_targets
 
 from ..services.advanced_meal_planner_service import advanced_meal_planner_service
@@ -49,6 +49,22 @@ async def generate_advanced_meal_plan(
     try:
         # Convert Pydantic model to dict
         payload = request.dict()
+
+        # The weight goal travels with the request. Unlike the macro target it
+        # is never a hard requirement, so it is not gated on match_macros - a
+        # plan should know what the person is working towards whether or not
+        # they asked for strict macro matching.
+        from app.services import weight_progress
+        progress = weight_progress.for_user(db, current_user)
+        active_goal = (
+            db.query(Goal)
+            .filter(Goal.user_id == current_user.id, Goal.is_active == True)  # noqa: E712
+            .order_by(Goal.created_at.desc())
+            .first()
+        )
+        payload["goal_context"] = weight_progress.prompt_block(
+            progress, getattr(active_goal, "goal_type", None)
+        )
 
         target = None
         if request.match_macros:

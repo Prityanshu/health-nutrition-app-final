@@ -13,10 +13,11 @@ from datetime import date, timedelta
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.database import age_on
 from app.auth import get_current_active_user
 from app.database import MealLog, User, WeightLog, WorkoutLog, get_db
 from app.services import adherence, daytime, points_engine
@@ -43,11 +44,32 @@ class WorkoutCheckIn(BaseModel):
 
 class ProfileUpdate(BaseModel):
     full_name: Optional[str] = None
+    # Every account created before birth dates existed is still running on the
+    # stored `age`, which was typed once and has been drifting ever since -
+    # and age feeds the BMR equation behind every calorie target. This is how
+    # those accounts fix themselves.
+    date_of_birth: Optional[date] = None
     age: Optional[int] = Field(None, ge=10, le=120)
     height: Optional[float] = Field(None, ge=80, le=260)
     weight: Optional[float] = Field(None, ge=25, le=400)
     sex: Optional[str] = None
     activity_level: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _sane_birth_date(self):
+        if self.date_of_birth is not None:
+            if self.date_of_birth > date.today():
+                raise ValueError("That date of birth is in the future.")
+            years = age_on(self.date_of_birth)
+            if not 13 <= years <= 100:
+                raise ValueError(
+                    f"That date of birth works out as {years}. "
+                    "This app is for ages 13 to 100."
+                )
+            # Keep the legacy column in step, so anything still reading `age`
+            # directly agrees with `current_age`.
+            self.age = years
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -192,7 +214,14 @@ async def get_profile(
                 "username": current_user.username,
                 "full_name": current_user.full_name,
                 "email": current_user.email,
-                "age": current_user.age,
+                "age": current_user.current_age,
+                # Sent so the form can prefill and so the UI can tell the
+                # difference between "26, derived from a birth date" and
+                # "26, typed in at some point and drifting since".
+                "date_of_birth": (
+                    current_user.date_of_birth.isoformat()
+                    if current_user.date_of_birth else None
+                ),
                 "height": current_user.height,
                 "weight": weight,
                 "sex": current_user.sex,
@@ -326,7 +355,7 @@ async def update_profile(
     """
     try:
         changed = []
-        for field in ("full_name", "age", "height", "sex", "activity_level"):
+        for field in ("full_name", "date_of_birth", "age", "height", "sex", "activity_level"):
             value = getattr(body, field)
             if value is not None and getattr(current_user, field) != value:
                 setattr(current_user, field, value)

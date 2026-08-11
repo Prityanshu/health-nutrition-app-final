@@ -4,6 +4,7 @@ import {
   Plus, X, Check, RefreshCw, AlertCircle, Activity,
 } from 'lucide-react';
 import { PageHero } from './SpecialistUI';
+import { solid, tint } from '../theme';
 
 /**
  * Challenges.
@@ -20,12 +21,12 @@ import { PageHero } from './SpecialistUI';
  */
 
 const TYPE_STYLE = {
-  nutrition:     { icon: Utensils,      colour: '#34D399', label: 'Nutrition' },
-  consistency:   { icon: CalendarCheck, colour: '#22D3EE', label: 'Consistency' },
-  workout:       { icon: Activity,      colour: '#A78BFA', label: 'Training' },
-  goal_oriented: { icon: Target,        colour: '#FBBF24', label: 'Goal' },
-  variety:       { icon: Sparkles,      colour: '#F472B6', label: 'Variety' },
-  hybrid:        { icon: Trophy,        colour: '#A78BFA', label: 'Mixed' },
+  nutrition:     { icon: Utensils,      colour: '--success-rgb', label: 'Nutrition' },
+  consistency:   { icon: CalendarCheck, colour: '--cyan-rgb', label: 'Consistency' },
+  workout:       { icon: Activity,      colour: '--accent-soft-rgb', label: 'Training' },
+  goal_oriented: { icon: Target,        colour: '--warning-rgb', label: 'Goal' },
+  variety:       { icon: Sparkles,      colour: '--brand-pink-rgb', label: 'Variety' },
+  hybrid:        { icon: Trophy,        colour: '--accent-soft-rgb', label: 'Mixed' },
 };
 
 function ChallengeCard({ challenge, onDrop }) {
@@ -40,9 +41,9 @@ function ChallengeCard({ challenge, onDrop }) {
         padding: '1.15rem',
         display: 'grid',
         gap: '0.85rem',
-        borderColor: done ? 'rgba(52,211,153,0.35)' : undefined,
+        borderColor: done ? 'rgba(var(--success-rgb),0.35)' : undefined,
         background: done
-          ? 'linear-gradient(120deg, rgba(52,211,153,0.08), transparent 60%)'
+          ? 'linear-gradient(120deg, rgba(var(--success-rgb),0.08), transparent 60%)'
           : undefined,
       }}
     >
@@ -52,9 +53,9 @@ function ChallengeCard({ challenge, onDrop }) {
             className="flex items-center justify-center"
             style={{
               width: 34, height: 34, borderRadius: 10, flexShrink: 0,
-              color: done ? '#34D399' : style.colour,
-              background: `${done ? '#34D399' : style.colour}1F`,
-              border: `1px solid ${done ? '#34D399' : style.colour}44`,
+              color: solid(done ? '--success-rgb' : style.colour),
+              background: tint(done ? '--success-rgb' : style.colour, 0.12),
+              border: `1px solid ${tint(done ? '--success-rgb' : style.colour, 0.27)}`,
             }}
           >
             {done ? <Check size={16} /> : <Icon size={16} />}
@@ -85,8 +86,8 @@ function ChallengeCard({ challenge, onDrop }) {
       {challenge.reason && (
         <div
           style={{
-            fontSize: '0.75rem', lineHeight: 1.5, color: '#98A2B3',
-            paddingLeft: '0.7rem', borderLeft: `2px solid ${style.colour}55`,
+            fontSize: '0.75rem', lineHeight: 1.5, color: 'var(--text-muted)',
+            paddingLeft: '0.7rem', borderLeft: `2px solid ${tint(style.colour, 0.33)}`,
           }}
         >
           {challenge.reason}
@@ -100,17 +101,17 @@ function ChallengeCard({ challenge, onDrop }) {
             style={{
               width: `${challenge.percent}%`,
               background: done
-                ? 'linear-gradient(90deg,#34D399,#22D3EE)'
-                : `linear-gradient(90deg, ${style.colour}, #22D3EE)`,
-              boxShadow: `0 0 12px ${style.colour}66`,
+                ? 'linear-gradient(90deg,var(--success),var(--cyan))'
+                : `linear-gradient(90deg, ${solid(style.colour)}, var(--cyan))`,
+              boxShadow: `0 0 12px ${tint(style.colour, 0.4)}`,
             }}
           />
         </div>
         <div className="flex items-center justify-between" style={{ fontSize: '0.75rem' }}>
-          <span className="tabular" style={{ color: '#EEF2F7', fontWeight: 600 }}>
+          <span className="tabular" style={{ color: 'var(--text)', fontWeight: 600 }}>
             {Math.round(challenge.current)} / {Math.round(challenge.target)} {challenge.unit}
           </span>
-          <span style={{ color: '#667085' }}>
+          <span style={{ color: 'var(--text-faint)' }}>
             {done
               ? `+${challenge.points} points`
               : `${challenge.days_left}d left · ${challenge.points} pts`}
@@ -186,17 +187,17 @@ export default function Challenges({ apiBase }) {
         icon={Trophy}
         title="Challenges"
         subtitle="Built from what you've actually been doing — not a generic list."
-        gradient="#FBBF24,#F472B6"
+        from="--warning-rgb" to="--brand-pink-rgb"
       />
 
       {/* Standing, so completing things means something. */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(140px,1fr))', gap: '0.75rem' }}>
-        <Stat icon={Trophy} label="Points earned" value={context.total_points ?? 0} colour="#FBBF24" />
+        <Stat icon={Trophy} label="Points earned" value={context.total_points ?? 0} colour="var(--warning)" />
         <Stat icon={Flame} label="Streak" value={context.streak ?? 0}
-              suffix={context.streak === 1 ? 'challenge' : 'challenges'} colour="#F472B6" />
-        <Stat icon={Check} label="Done this round" value={done} colour="#34D399" />
+              suffix={context.streak === 1 ? 'challenge' : 'challenges'} colour="var(--brand-pink)" />
+        <Stat icon={Check} label="Done this round" value={done} colour="var(--success)" />
         <Stat icon={Target} label="Up for grabs" value={data?.points_available ?? 0}
-              suffix="pts" colour="#A78BFA" />
+              suffix="pts" colour="var(--accent-soft)" />
       </div>
 
 
@@ -206,8 +207,8 @@ export default function Challenges({ apiBase }) {
 
       {challenges.length === 0 ? (
         <div className="surface" style={{ padding: '2.5rem 1.5rem', textAlign: 'center' }}>
-          <Trophy size={30} color="#3A4453" style={{ marginBottom: 12 }} />
-          <div style={{ color: '#98A2B3', fontSize: '0.9375rem', marginBottom: 4 }}>
+          <Trophy size={30} color="var(--border-strong)" style={{ marginBottom: 12 }} />
+          <div style={{ color: 'var(--text-muted)', fontSize: '0.9375rem', marginBottom: 4 }}>
             No challenges right now
           </div>
           <div className="section-sub" style={{ maxWidth: 380, margin: '0 auto 1.25rem' }}>
@@ -241,7 +242,7 @@ function Stat({ icon: Icon, label, value, suffix, colour }) {
       </div>
       <div className="tabular" style={{ fontSize: '1.5rem', fontWeight: 700, marginTop: 4, lineHeight: 1 }}>
         {value}
-        {suffix && <span style={{ fontSize: '0.75rem', color: '#667085', fontWeight: 500 }}> {suffix}</span>}
+        {suffix && <span style={{ fontSize: '0.75rem', color: 'var(--text-faint)', fontWeight: 500 }}> {suffix}</span>}
       </div>
     </div>
   );

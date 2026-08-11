@@ -312,7 +312,7 @@ async def email_plan(
     )
 
     subject = (
-        f"{title} — NutriPlan" if is_self
+        f"{title} — Kayosha" if is_self
         else f"{sender_name or 'Someone'} shared a {plan.plan_type.replace('_', ' ')} with you"
     )
 

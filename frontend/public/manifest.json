@@ -1,6 +1,6 @@
 {
-  "short_name": "Nutrition App",
-  "name": "Nutrition App - MyFitnessPal Data Integration",
+  "short_name": "Kayosha",
+  "name": "Kayosha - AI health and nutrition",
   "icons": [
     {
       "src": "favicon.ico",
@@ -13,7 +13,3 @@
   "theme_color": "#000000",
   "background_color": "#ffffff"
 }
-
-
-
-

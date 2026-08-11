@@ -11,6 +11,7 @@ import {
   usePersistentPlan, RestoredNote,
 } from './SpecialistUI';
 import renderMarkdown from './markdown';
+import { solid, tint } from '../theme';
 import {
   SEVERITY_LABELS, BLOCKING_SEVERITY, severityColor, stageFor,
   encodeInjury, decodeInjury,
@@ -32,8 +33,8 @@ function InjuryRow({ injury, onChange, onRemove }) {
 
   return (
     <div style={{
-      background: 'rgba(255,255,255,0.03)',
-      border: `1px solid ${blocking ? 'rgba(248,113,113,0.4)' : 'rgba(255,255,255,0.08)'}`,
+      background: 'rgba(var(--white-rgb),0.03)',
+      border: `1px solid ${blocking ? 'rgba(var(--danger-rgb),0.4)' : 'rgba(var(--white-rgb),0.08)'}`,
       borderRadius: '0.75rem', padding: '0.875rem', display: 'grid', gap: '0.625rem',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -44,8 +45,8 @@ function InjuryRow({ injury, onChange, onRemove }) {
           <span className="pill pill-muted" style={{ fontSize: '0.625rem' }}>tracked</span>
         )}
         <span className="pill tabular" style={{
-          fontSize: '0.6875rem', color: colour,
-          background: `${colour}1A`, border: `1px solid ${colour}44`,
+          fontSize: '0.6875rem', color: solid(colour),
+          background: tint(colour, 0.1), border: `1px solid ${tint(colour, 0.27)}`,
         }}>
           {injury.severity}/10 · {SEVERITY_LABELS[injury.severity]}
         </span>
@@ -55,7 +56,7 @@ function InjuryRow({ injury, onChange, onRemove }) {
           aria-label={`Remove ${injury.text}`}
           style={{
             background: 'none', border: 'none', cursor: 'pointer',
-            color: '#667085', display: 'flex', padding: 2,
+            color: 'var(--text-faint)', display: 'flex', padding: 2,
           }}
         >
           <X size={15} />
@@ -68,7 +69,7 @@ function InjuryRow({ injury, onChange, onRemove }) {
         aria-label={`Severity of ${injury.text}`}
         onChange={(e) => onChange({ ...injury, severity: Number(e.target.value) })}
         className="range-slider"
-        style={{ '--pct': `${injury.severity * 10}%`, accentColor: colour }}
+        style={{ '--pct': `${injury.severity * 10}%`, accentColor: solid(colour) }}
       />
 
       {/* Showing the consequence before generating matters: severity is not a
@@ -77,7 +78,7 @@ function InjuryRow({ injury, onChange, onRemove }) {
           reads like a failure rather than a decision. */}
       <div style={{
         fontSize: '0.75rem', lineHeight: 1.5,
-        color: blocking ? '#F87171' : '#98A2B3',
+        color: blocking ? 'var(--danger)' : 'var(--text-muted)',
         display: 'flex', gap: '0.4rem', alignItems: 'flex-start',
       }}>
         {blocking && <ShieldAlert size={13} style={{ flexShrink: 0, marginTop: 2 }} />}
@@ -205,7 +206,7 @@ function FeedbackPanel({ apiBase, plan, onAdapted }) {
     <Section
       title="Not quite right?"
       hint="Pick an adjustment and FitMentor will rework the plan"
-      right={<MessageSquarePlus size={16} color="#A78BFA" />}
+      right={<MessageSquarePlus size={16} color="var(--accent-soft)" />}
     >
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
         {QUICK_FEEDBACK.map(({ key, label, icon: Icon }) => (
@@ -240,7 +241,7 @@ function FeedbackPanel({ apiBase, plan, onAdapted }) {
         />
       )}
 
-      {err && <div style={{ fontSize: '0.8125rem', color: '#F87171' }}>{err}</div>}
+      {err && <div style={{ fontSize: '0.8125rem', color: 'var(--danger)' }}>{err}</div>}
 
       <button
         className="btn btn-primary"
@@ -376,7 +377,7 @@ export default function FitMentor({ apiBase }) {
         icon={Dumbbell}
         title="FitMentor"
         subtitle="A seven-day plan built around your level, kit and time."
-        gradient="#8B5CF6,#F87171"
+        from="--accent-rgb" to="--danger-rgb"
       />
 
       <Section title="Where are you now?" hint="Be honest — the plan scales to it" hero>
@@ -457,10 +458,10 @@ export default function FitMentor({ apiBase }) {
         {importable.length > 0 && (
           <div style={{
             display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center',
-            background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.25)',
+            background: 'rgba(var(--accent-rgb),0.08)', border: '1px solid rgba(var(--accent-rgb),0.25)',
             borderRadius: '0.625rem', padding: '0.75rem',
           }}>
-            <HeartPulse size={14} color="#A78BFA" style={{ flexShrink: 0 }} />
+            <HeartPulse size={14} color="var(--accent-soft)" style={{ flexShrink: 0 }} />
             <span style={{ fontSize: '0.75rem', color: '#C4B5FD', flex: 1, minWidth: 160 }}>
               You're tracking {importable.length === 1 ? 'an injury' : `${importable.length} injuries`} on your dashboard.
             </span>
@@ -512,7 +513,7 @@ export default function FitMentor({ apiBase }) {
         {suggestions.length > 0 && (
           <div>
             <div style={{
-              fontSize: '0.6875rem', color: '#667085', marginBottom: '0.5rem',
+              fontSize: '0.6875rem', color: 'var(--text-faint)', marginBottom: '0.5rem',
               fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
             }}>
               Common ones
@@ -530,9 +531,9 @@ export default function FitMentor({ apiBase }) {
         {constraints.length > 0 && (
           <div style={{
             display: 'flex', gap: '0.5rem', alignItems: 'flex-start',
-            background: 'rgba(251,191,36,0.09)', border: '1px solid rgba(251,191,36,0.28)',
+            background: 'rgba(var(--warning-rgb),0.09)', border: '1px solid rgba(var(--warning-rgb),0.28)',
             borderRadius: '0.625rem', padding: '0.75rem', fontSize: '0.75rem',
-            color: '#FBBF24', lineHeight: 1.5,
+            color: 'var(--warning)', lineHeight: 1.5,
           }}>
             <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
             <span>
@@ -548,9 +549,9 @@ export default function FitMentor({ apiBase }) {
       {blocked.length > 0 && (
         <div style={{
           display: 'flex', gap: '0.625rem', alignItems: 'flex-start',
-          background: 'rgba(248,113,113,0.09)', border: '1px solid rgba(248,113,113,0.3)',
+          background: 'rgba(var(--danger-rgb),0.09)', border: '1px solid rgba(var(--danger-rgb),0.3)',
           borderRadius: '0.75rem', padding: '1rem', fontSize: '0.8125rem',
-          color: '#F87171', lineHeight: 1.55,
+          color: 'var(--danger)', lineHeight: 1.55,
         }}>
           <ShieldAlert size={16} style={{ flexShrink: 0, marginTop: 2 }} />
           <span>
@@ -582,21 +583,21 @@ export default function FitMentor({ apiBase }) {
               rating or the model's mood. */}
           {stages?.length > 0 && !adapted && (
             <div style={{
-              background: 'rgba(139,92,246,0.07)', border: '1px solid rgba(139,92,246,0.22)',
+              background: 'rgba(var(--accent-rgb),0.07)', border: '1px solid rgba(var(--accent-rgb),0.22)',
               borderRadius: '0.75rem', padding: '1rem', display: 'grid', gap: '0.75rem',
             }}>
               {stages.map((s, i) => (
                 <div key={i} style={{ display: 'flex', gap: '0.625rem', alignItems: 'flex-start' }}>
-                  <Gauge size={15} color={severityColor(s.severity)} style={{ flexShrink: 0, marginTop: 2 }} />
+                  <Gauge size={15} color={solid(severityColor(s.severity))} style={{ flexShrink: 0, marginTop: 2 }} />
                   <div>
                     <div style={{ fontSize: '0.8125rem', fontWeight: 600, textTransform: 'capitalize' }}>
                       {s.side && s.side !== 'bilateral' ? `${s.side} ` : ''}{s.label}
                       {s.side === 'bilateral' ? ' (both sides)' : ''}
-                      <span style={{ color: severityColor(s.severity), marginLeft: 6 }}>
+                      <span style={{ color: solid(severityColor(s.severity)), marginLeft: 6 }}>
                         {s.severity}/10
                       </span>
                     </div>
-                    <div style={{ fontSize: '0.75rem', color: '#98A2B3', marginTop: 3, lineHeight: 1.5 }}>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 3, lineHeight: 1.5 }}>
                       {s.stage_label} — {s.guidance}
                     </div>
                   </div>
@@ -607,18 +608,18 @@ export default function FitMentor({ apiBase }) {
           {/* What the injury detector removed, so it isn't taken on trust */}
           {detected && (
             <div style={{
-              background: detected.red_flag ? 'rgba(248,113,113,0.09)' : 'rgba(251,191,36,0.09)',
-              border: `1px solid ${detected.red_flag ? 'rgba(248,113,113,0.3)' : 'rgba(251,191,36,0.28)'}`,
+              background: detected.red_flag ? 'rgba(var(--danger-rgb),0.09)' : 'rgba(var(--warning-rgb),0.09)',
+              border: `1px solid ${detected.red_flag ? 'rgba(var(--danger-rgb),0.3)' : 'rgba(var(--warning-rgb),0.28)'}`,
               borderRadius: '0.75rem', padding: '1rem', display: 'grid', gap: '0.5rem',
             }}>
               {detected.injuries.map((inj, i) => (
                 <div key={i} style={{ display: 'flex', gap: '0.625rem', alignItems: 'flex-start' }}>
-                  <ShieldAlert size={16} color={detected.red_flag ? '#F87171' : '#FBBF24'} style={{ flexShrink: 0, marginTop: 2 }} />
+                  <ShieldAlert size={16} color={detected.red_flag ? 'var(--danger)' : 'var(--warning)'} style={{ flexShrink: 0, marginTop: 2 }} />
                   <div>
-                    <div style={{ fontWeight: 600, fontSize: '0.875rem', color: detected.red_flag ? '#F87171' : '#FBBF24', textTransform: 'capitalize' }}>
+                    <div style={{ fontWeight: 600, fontSize: '0.875rem', color: detected.red_flag ? 'var(--danger)' : 'var(--warning)', textTransform: 'capitalize' }}>
                       {inj.label} — {inj.excluded.length} movements removed
                     </div>
-                    <div style={{ fontSize: '0.75rem', color: '#98A2B3', marginTop: 4, lineHeight: 1.5 }}>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.5 }}>
                       {inj.excluded.slice(0, 8).join(', ')}
                       {inj.excluded.length > 8 && ` and ${inj.excluded.length - 8} more`}
                     </div>
@@ -626,7 +627,7 @@ export default function FitMentor({ apiBase }) {
                 </div>
               ))}
               {detected.red_flag && (
-                <div style={{ fontSize: '0.8125rem', color: '#F87171', paddingLeft: '2.1rem', lineHeight: 1.5 }}>
+                <div style={{ fontSize: '0.8125rem', color: 'var(--danger)', paddingLeft: '2.1rem', lineHeight: 1.5 }}>
                   What you described — sharp pain, numbness, swelling or something getting worse — is worth
                   getting looked at before you train that area at all.
                 </div>
@@ -637,7 +638,7 @@ export default function FitMentor({ apiBase }) {
           <ResultPanel
             title={adapted ? 'Your updated week' : 'Your week'}
             icon={Dumbbell}
-            accent="#F87171"
+            accent="var(--danger)"
             markdown={currentPlan}
             onRegenerate={run}
             apiBase={apiBase}

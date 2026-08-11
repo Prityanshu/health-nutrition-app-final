@@ -114,3 +114,7 @@ frontend/android/capacitor-cordova-android-plugins/
 
 # Personal share templates - these contain the live tunnel URL.
 SHARE.md
+
+# Artefacts of a FUSE mount - created when a file is deleted while still
+# open. Not project files, and they appear from tooling rather than from you.
+.fuse_hidden*

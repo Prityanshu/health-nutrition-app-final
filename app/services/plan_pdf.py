@@ -182,7 +182,7 @@ def _footer(canvas, doc, owner: str):
     canvas.saveState()
     canvas.setFont("Helvetica", 7.5)
     canvas.setFillColor(MUTED)
-    canvas.drawString(20 * mm, 12 * mm, f"NutriPlan · {owner}")
+    canvas.drawString(20 * mm, 12 * mm, f"Kayosha · {owner}")
     canvas.drawRightString(A4[0] - 20 * mm, 12 * mm, f"Page {doc.page}")
     canvas.setStrokeColor(RULE)
     canvas.setLineWidth(0.5)
@@ -218,7 +218,7 @@ def build_plan_pdf(
         buf, pagesize=A4,
         leftMargin=20 * mm, rightMargin=20 * mm,
         topMargin=18 * mm, bottomMargin=22 * mm,
-        title=title, author="NutriPlan",
+        title=title, author="Kayosha",
     )
 
     story = [Paragraph(html.escape(title), s["title"])]

@@ -6,6 +6,7 @@ import {
 import WorkoutCheckIn from './WorkoutCheckIn';
 import ServerSetup from './ServerSetup';
 import { isNativeApp } from '../apiBase';
+import { ageFrom, isoYearsAgo } from '../age';
 
 /**
  * Profile - who you are, what you have done, and what it earned.
@@ -56,17 +57,17 @@ function PointsCard({ points, onExplain }) {
           <div className="tabular" style={{ fontSize: '1.875rem', fontWeight: 700, letterSpacing: '-0.02em' }}>
             {(points?.total || 0).toLocaleString()}
           </div>
-          <div style={{ fontSize: '0.6875rem', color: '#667085' }}>points</div>
+          <div style={{ fontSize: '0.6875rem', color: 'var(--text-faint)' }}>points</div>
         </div>
       </div>
 
       <div className="macro-track" style={{ height: '0.5rem' }}>
         <div
           className="macro-fill macro-fill-animate"
-          style={{ width: `${pct}%`, background: 'linear-gradient(90deg,#8B5CF6,#22D3EE)' }}
+          style={{ width: `${pct}%`, background: 'linear-gradient(90deg,var(--accent),var(--cyan))' }}
         />
       </div>
-      <div className="flex items-center justify-between" style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: '#667085' }}>
+      <div className="flex items-center justify-between" style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: 'var(--text-faint)' }}>
         <span>{pct}% to level {(points?.level || 1) + 1}</span>
         {points?.to_next != null && (
           <span>{points.to_next} points to “{points.next_title}”</span>
@@ -85,7 +86,7 @@ function PointsCard({ points, onExplain }) {
                 flex: 1,
                 height: `${Math.max(2, (d.points / peak) * 100)}%`,
                 borderRadius: 2,
-                background: d.points ? '#8B5CF6' : '#232A35',
+                background: d.points ? 'var(--accent)' : '#232A35',
                 opacity: d.points ? 0.55 + (d.points / peak) * 0.45 : 1,
               }}
             />
@@ -97,9 +98,9 @@ function PointsCard({ points, onExplain }) {
         <div style={{ marginTop: '1.125rem', display: 'grid', gap: '0.5rem' }}>
           {points.breakdown.slice(0, 5).map((b) => (
             <div key={b.reason} className="flex items-center justify-between" style={{ fontSize: '0.8125rem' }}>
-              <span style={{ color: '#98A2B3' }}>
+              <span style={{ color: 'var(--text-muted)' }}>
                 {b.label}
-                <span style={{ color: '#667085' }}> ×{b.times}</span>
+                <span style={{ color: 'var(--text-faint)' }}> ×{b.times}</span>
               </span>
               <span className="tabular" style={{ fontWeight: 600 }}>+{b.points}</span>
             </div>
@@ -111,7 +112,7 @@ function PointsCard({ points, onExplain }) {
         onClick={onExplain}
         style={{
           background: 'none', border: 'none', padding: 0, marginTop: '0.875rem',
-          color: '#A78BFA', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer',
+          color: 'var(--accent-soft)', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer',
           display: 'flex', alignItems: 'center', gap: 4,
         }}
       >
@@ -128,20 +129,38 @@ function BodyStats({ user, bmi, apiBase, onSaved }) {
   const [form, setForm] = useState({});
   const [busy, setBusy] = useState(false);
 
+  const [error, setError] = useState('');
+
   useEffect(() => {
     setForm({
-      full_name: user?.full_name || '', age: user?.age || '',
+      full_name: user?.full_name || '',
+      date_of_birth: user?.date_of_birth || '',
       height: user?.height || '', weight: user?.weight || '',
       activity_level: user?.activity_level || 'moderately_active',
     });
   }, [user]);
 
   const save = async () => {
+    setError('');
+
+    // Checked here as well as on the server, because a 422 full of Pydantic
+    // validation objects is not a sentence anyone wants to read.
+    if (form.date_of_birth) {
+      const years = ageFrom(form.date_of_birth);
+      if (years === null) { setError('That date of birth does not look right.'); return; }
+      if (years < 13 || years > 100) {
+        setError(`That works out as ${years}. This app is for ages 13 to 100.`);
+        return;
+      }
+    }
+
     setBusy(true);
     try {
       const body = {
         full_name: form.full_name || null,
-        age: form.age ? Number(form.age) : null,
+        // Sending a birth date also refreshes the stored age server-side, so
+        // the two can never drift apart afterwards.
+        date_of_birth: form.date_of_birth || null,
         height: form.height ? Number(form.height) : null,
         weight: form.weight ? Number(form.weight) : null,
         activity_level: form.activity_level || null,
@@ -149,14 +168,30 @@ function BodyStats({ user, bmi, apiBase, onSaved }) {
       const res = await fetch(`${apiBase}/profile`, {
         method: 'PUT', headers: authHeaders(), body: JSON.stringify(body),
       });
-      if (res.ok) { setEditing(false); onSaved?.(); }
+      if (res.ok) {
+        setEditing(false);
+        onSaved?.();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setError(typeof data.detail === 'string' ? data.detail : 'Could not save that.');
+      }
     } finally {
       setBusy(false);
     }
   };
 
   const rows = [
-    { icon: Cake, label: 'Age', value: user?.age ? `${user.age}` : '—' },
+    {
+      icon: Cake,
+      label: 'Age',
+      value: user?.age ? `${user.age}` : '—',
+      // Says where the number came from. An age with no birth date behind it
+      // was typed once and has been drifting ever since - and it feeds the
+      // BMR calculation, so it quietly skews every calorie target.
+      sub: user?.date_of_birth
+        ? 'from your date of birth'
+        : user?.age ? 'set once - add a date of birth to keep it accurate' : null,
+    },
     { icon: Ruler, label: 'Height', value: user?.height ? `${user.height} cm` : '—' },
     { icon: Scale, label: 'Weight', value: user?.weight ? `${user.weight} kg` : '—' },
     {
@@ -172,7 +207,7 @@ function BodyStats({ user, bmi, apiBase, onSaved }) {
         <button
           onClick={() => setEditing(!editing)}
           style={{
-            background: 'none', border: 'none', color: '#A78BFA', cursor: 'pointer',
+            background: 'none', border: 'none', color: 'var(--accent-soft)', cursor: 'pointer',
             fontSize: '0.75rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4,
           }}
         >
@@ -186,14 +221,34 @@ function BodyStats({ user, bmi, apiBase, onSaved }) {
             className="form-input" placeholder="Full name" value={form.full_name}
             onChange={(e) => setForm({ ...form, full_name: e.target.value })}
           />
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '0.5rem' }}>
-            <input className="form-input" type="number" placeholder="Age" value={form.age}
-                   onChange={(e) => setForm({ ...form, age: e.target.value })} />
+          {/* A date rather than a number. An age is right on the day it is
+              typed and drifts from the next birthday onwards - and it feeds
+              the BMR equation, so it drags every calorie target with it. */}
+          <div>
+            <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: 5 }}>
+              Date of birth
+            </label>
+            <input
+              className="form-input" type="date"
+              min={isoYearsAgo(100)} max={isoYearsAgo(13)}
+              value={form.date_of_birth}
+              onChange={(e) => setForm({ ...form, date_of_birth: e.target.value })}
+            />
+            {form.date_of_birth && ageFrom(form.date_of_birth) !== null && (
+              <div style={{ fontSize: '0.6875rem', color: 'var(--text-faint)', marginTop: 4 }}>
+                That makes you {ageFrom(form.date_of_birth)}.
+              </div>
+            )}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '0.5rem' }}>
             <input className="form-input" type="number" placeholder="Height cm" value={form.height}
                    onChange={(e) => setForm({ ...form, height: e.target.value })} />
             <input className="form-input" type="number" placeholder="Weight kg" value={form.weight}
                    onChange={(e) => setForm({ ...form, weight: e.target.value })} />
           </div>
+          {error && (
+            <div className="auth-error" style={{ fontSize: '0.8125rem' }}>{error}</div>
+          )}
           <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
             {ACTIVITY_LEVELS.map((a) => (
               <button
@@ -207,7 +262,7 @@ function BodyStats({ user, bmi, apiBase, onSaved }) {
           </div>
           {/* Changing weight here also files a check-in, so the trend chart
               keeps its history instead of the old value being overwritten. */}
-          <div style={{ fontSize: '0.6875rem', color: '#667085', lineHeight: 1.5 }}>
+          <div style={{ fontSize: '0.6875rem', color: 'var(--text-faint)', lineHeight: 1.5 }}>
             Updating your weight also records a check-in, so your progress chart keeps the history.
           </div>
           <button className="btn btn-primary" style={{ justifyContent: 'center' }}
@@ -218,26 +273,31 @@ function BodyStats({ user, bmi, apiBase, onSaved }) {
       ) : (
         <>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(110px,1fr))', gap: '0.875rem' }}>
-            {rows.map(({ icon: Icon, label, value }) => (
+            {rows.map(({ icon: Icon, label, value, sub }) => (
               <div key={label}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 3 }}>
-                  <Icon size={13} color="#667085" />
-                  <span style={{ fontSize: '0.6875rem', color: '#667085', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  <Icon size={13} color="var(--text-faint)" />
+                  <span style={{ fontSize: '0.6875rem', color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                     {label}
                   </span>
                 </div>
                 <div className="tabular" style={{ fontSize: '1.0625rem', fontWeight: 600 }}>{value}</div>
+                {sub && (
+                  <div style={{ fontSize: '0.6875rem', color: 'var(--text-faint)', marginTop: 2, lineHeight: 1.35 }}>
+                    {sub}
+                  </div>
+                )}
               </div>
             ))}
           </div>
 
           {bmi && (
             <div style={{
-              marginTop: '1rem', paddingTop: '0.875rem', borderTop: '1px solid #2A3240',
-              fontSize: '0.75rem', color: '#98A2B3', lineHeight: 1.5,
+              marginTop: '1rem', paddingTop: '0.875rem', borderTop: '1px solid var(--border)',
+              fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.5,
             }}>
-              BMI <span className="tabular" style={{ color: '#EEF2F7', fontWeight: 600 }}>{bmi.value}</span>
-              {' — '}{bmi.band}. <span style={{ color: '#667085' }}>{bmi.note}</span>
+              BMI <span className="tabular" style={{ color: 'var(--text)', fontWeight: 600 }}>{bmi.value}</span>
+              {' — '}{bmi.band}. <span style={{ color: 'var(--text-faint)' }}>{bmi.note}</span>
             </div>
           )}
         </>
@@ -281,7 +341,7 @@ export default function Profile({ apiBase, user: authUser, onNavigate }) {
   if (loading && !data) {
     return (
       <div className="surface" style={{ padding: '3rem', textAlign: 'center' }}>
-        <Loader2 size={22} className="spin" color="#667085" />
+        <Loader2 size={22} className="spin" color="var(--text-faint)" />
       </div>
     );
   }
@@ -291,13 +351,13 @@ export default function Profile({ apiBase, user: authUser, onNavigate }) {
       {/* identity */}
       <div className="surface" style={{
         padding: '1.5rem', display: 'flex', alignItems: 'center', gap: '1.125rem',
-        background: 'linear-gradient(100deg, rgba(139,92,246,0.14), rgba(34,211,238,0.05))',
+        background: 'linear-gradient(100deg, rgba(var(--accent-rgb),0.14), rgba(var(--cyan-rgb),0.05))',
       }}>
         <div style={{
           width: 62, height: 62, borderRadius: 999, flexShrink: 0,
-          background: 'linear-gradient(135deg,#8B5CF6,#22D3EE)',
+          background: 'linear-gradient(135deg,var(--accent),var(--cyan))',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: '1.25rem', fontWeight: 700, color: '#0B0E14',
+          fontSize: '1.25rem', fontWeight: 700, color: 'var(--bg)',
         }}>
           {initials}
         </div>
@@ -305,7 +365,7 @@ export default function Profile({ apiBase, user: authUser, onNavigate }) {
           <div style={{ fontSize: '1.25rem', fontWeight: 700, letterSpacing: '-0.01em' }}>
             {u.full_name || u.username}
           </div>
-          <div style={{ fontSize: '0.8125rem', color: '#98A2B3', marginTop: 2 }}>
+          <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', marginTop: 2 }}>
             {u.email}
           </div>
           <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.6rem', flexWrap: 'wrap' }}>
@@ -336,7 +396,7 @@ export default function Profile({ apiBase, user: authUser, onNavigate }) {
       {explain && (
         <div className="surface" style={{ padding: '1.25rem' }}>
           <div className="section-title" style={{ marginBottom: '0.75rem' }}>How points work</div>
-          <div style={{ fontSize: '0.8125rem', color: '#98A2B3', lineHeight: 1.6 }}>
+          <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', lineHeight: 1.6 }}>
             <p style={{ marginTop: 0 }}>
               Logging earns the base, hitting your targets earns a bonus. Effort is
               weighted heavily on purpose — a day where you logged everything honestly
@@ -355,12 +415,12 @@ export default function Profile({ apiBase, user: authUser, onNavigate }) {
                 ['Streak bonus', '3 pts × days', 'capped at 30'],
               ].map(([what, worth, note]) => (
                 <div key={what} className="flex items-center justify-between" style={{ fontSize: '0.8125rem' }}>
-                  <span>{what} {note && <span style={{ color: '#667085' }}>· {note}</span>}</span>
-                  <span className="tabular" style={{ fontWeight: 600, color: '#A78BFA' }}>{worth}</span>
+                  <span>{what} {note && <span style={{ color: 'var(--text-faint)' }}>· {note}</span>}</span>
+                  <span className="tabular" style={{ fontWeight: 600, color: 'var(--accent-soft)' }}>{worth}</span>
                 </div>
               ))}
             </div>
-            <p style={{ marginBottom: 0, color: '#667085', fontSize: '0.75rem' }}>
+            <p style={{ marginBottom: 0, color: 'var(--text-faint)', fontSize: '0.75rem' }}>
               Points are never taken away.
             </p>
           </div>
@@ -374,13 +434,13 @@ export default function Profile({ apiBase, user: authUser, onNavigate }) {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(140px,1fr))', gap: '1rem' }}>
             {data.records.map((r) => (
               <div key={r.label}>
-                <div style={{ fontSize: '0.6875rem', color: '#667085', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                <div style={{ fontSize: '0.6875rem', color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                   {r.label}
                 </div>
                 <div className="tabular" style={{ fontSize: '1.25rem', fontWeight: 700, marginTop: 3 }}>
                   {r.value}
                 </div>
-                <div style={{ fontSize: '0.6875rem', color: '#667085', marginTop: 2 }}>{r.sub}</div>
+                <div style={{ fontSize: '0.6875rem', color: 'var(--text-faint)', marginTop: 2 }}>{r.sub}</div>
               </div>
             ))}
           </div>
@@ -392,7 +452,7 @@ export default function Profile({ apiBase, user: authUser, onNavigate }) {
         <div className="surface" style={{ padding: '1.25rem' }}>
           <div className="flex items-center justify-between" style={{ marginBottom: '1rem' }}>
             <span className="section-title">Last 30 days</span>
-            <span style={{ fontSize: '0.6875rem', color: '#667085' }}>rolling window</span>
+            <span style={{ fontSize: '0.6875rem', color: 'var(--text-faint)' }}>rolling window</span>
           </div>
           <div style={{ display: 'grid', gap: '0.5rem' }}>
             {board.entries.map((e) => (
@@ -401,12 +461,12 @@ export default function Profile({ apiBase, user: authUser, onNavigate }) {
                 className="flex items-center justify-between"
                 style={{
                   padding: '0.625rem 0.75rem', borderRadius: '0.5rem',
-                  background: e.is_you ? 'rgba(139,92,246,0.12)' : '#12151B',
-                  border: `1px solid ${e.is_you ? 'rgba(139,92,246,0.35)' : '#2A3240'}`,
+                  background: e.is_you ? 'rgba(var(--accent-rgb),0.12)' : 'var(--surface-inset)',
+                  border: `1px solid ${e.is_you ? 'rgba(var(--accent-rgb),0.35)' : 'var(--border)'}`,
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem', minWidth: 0 }}>
-                  <span className="tabular" style={{ width: 20, color: '#667085', fontSize: '0.8125rem' }}>
+                  <span className="tabular" style={{ width: 20, color: 'var(--text-faint)', fontSize: '0.8125rem' }}>
                     {e.rank}
                   </span>
                   <span style={{
@@ -416,7 +476,7 @@ export default function Profile({ apiBase, user: authUser, onNavigate }) {
                     {e.is_you ? 'You' : e.name}
                   </span>
                 </div>
-                <span className="tabular" style={{ fontSize: '0.8125rem', fontWeight: 600, color: '#A78BFA' }}>
+                <span className="tabular" style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--accent-soft)' }}>
                   {e.points.toLocaleString()}
                 </span>
               </div>
@@ -437,12 +497,12 @@ export default function Profile({ apiBase, user: authUser, onNavigate }) {
           textAlign: 'left', cursor: 'pointer', width: '100%',
         }}
       >
-        <Flame size={18} color="#FBBF24" />
+        <Flame size={18} color="var(--warning)" />
         <div style={{ flex: 1 }}>
           <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>Full progress</div>
-          <div style={{ fontSize: '0.75rem', color: '#98A2B3' }}>Charts, weight trend and history</div>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Charts, weight trend and history</div>
         </div>
-        <ChevronRight size={17} color="#667085" />
+        <ChevronRight size={17} color="var(--text-faint)" />
       </button>
     </div>
   );

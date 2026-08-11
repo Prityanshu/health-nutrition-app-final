@@ -21,7 +21,7 @@ async function setupNative() {
     // The app is dark, so the status bar needs light icons. The default is
     // dark-on-dark, which renders the clock and battery effectively invisible.
     await StatusBar.setStyle({ style: Style.Dark });
-    await StatusBar.setBackgroundColor({ color: '#0B0E14' });
+    await StatusBar.setBackgroundColor({ color: 'var(--bg)' });
     // Do NOT overlay: with overlay on, the first row of the dashboard sits
     // under the clock. The CSS safe-area insets then have nothing to do, and
     // reserving the space in native is more reliable than guessing it in CSS.

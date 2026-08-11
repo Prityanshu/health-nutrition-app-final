@@ -1,6 +1,6 @@
 {
-  "appId": "com.prityanshu.nutriplan",
-  "appName": "NutriPlan",
+  "appId": "com.prityanshu.kayosha",
+  "appName": "Kayosha",
   "webDir": "build",
   "android": {
     "allowMixedContent": true

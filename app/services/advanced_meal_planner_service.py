@@ -183,6 +183,14 @@ class AdvancedMealPlannerService:
             macro_block = "\n" + macro_target.prompt_block(
                 per_day=True, structured=True) + "\n"
 
+        # The weight goal, if there is one. Macros say what a day must add up
+        # to; this says why, and the why changes the food. The same 2000 kcal
+        # looks very different for someone cutting to 74 kg than for someone
+        # bulking to 85 - volume and satiety versus calorie density.
+        goal_block = payload.get("goal_context") or ""
+        if goal_block:
+            goal_block = "\n            " + goal_block.strip() + "\n"
+
         query = dedent(f"""\
             Create a 7-day meal plan JSON for the following user inputs.
             Return ONLY a single JSON object exactly matching the schema in your instructions.
@@ -198,7 +206,7 @@ class AdvancedMealPlannerService:
             - time_per_meal_min: {payload.get('time_per_meal_min', 30)}
             - region_or_cuisine: {region}
             - user_notes: {payload.get('user_notes', '')}
-            {macro_block}
+            {goal_block}{macro_block}
             Please generate the 7-day plan now.
         """)
         return query

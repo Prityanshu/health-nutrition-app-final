@@ -3,6 +3,7 @@ import {
   TrendingDown, TrendingUp, Minus, Target, Flame, Scale, Award,
 } from 'lucide-react';
 import useCountUp from './useCountUp';
+import { solid, tint } from '../theme';
 
 /**
  * Progress - how the last N days compare to the active goal.
@@ -52,7 +53,7 @@ function WeightChart({ entries, targetWeight }) {
 
   if (!path) {
     return (
-      <div style={{ padding: '2rem', textAlign: 'center', color: '#667085', fontSize: '0.875rem' }}>
+      <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-faint)', fontSize: '0.875rem' }}>
         Log at least two weigh-ins to see a trend.
       </div>
     );
@@ -67,34 +68,34 @@ function WeightChart({ entries, targetWeight }) {
       <svg viewBox="0 0 100 40" preserveAspectRatio="none" style={{ width: '100%', height: 150, overflow: 'visible' }}>
         <defs>
           <linearGradient id="wArea" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#8B5CF6" stopOpacity="0.32" />
-            <stop offset="100%" stopColor="#8B5CF6" stopOpacity="0" />
+            <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.32" />
+            <stop offset="100%" stopColor="var(--accent)" stopOpacity="0" />
           </linearGradient>
         </defs>
 
         {targetY != null && (
           <line
             x1="0" y1={targetY} x2="100" y2={targetY}
-            stroke="#34D399" strokeWidth="0.4" strokeDasharray="1.5 1.5"
+            stroke="var(--success)" strokeWidth="0.4" strokeDasharray="1.5 1.5"
             vectorEffect="non-scaling-stroke" opacity="0.8"
           />
         )}
 
         <path d={area} fill="url(#wArea)" />
         <path
-          d={path} fill="none" stroke="#A78BFA" strokeWidth="2"
+          d={path} fill="none" stroke="var(--accent-soft)" strokeWidth="2"
           vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round"
         />
         {points.length <= 30 && points.map((p, i) => (
-          <circle key={i} cx={p.x} cy={p.y} r="1.6" fill="#0B0D11" stroke="#A78BFA"
+          <circle key={i} cx={p.x} cy={p.y} r="1.6" fill="#0B0D11" stroke="var(--accent-soft)"
             strokeWidth="1.4" vectorEffect="non-scaling-stroke" />
         ))}
       </svg>
 
-      <div className="flex items-center justify-between" style={{ fontSize: '0.6875rem', color: '#667085', marginTop: 6 }}>
+      <div className="flex items-center justify-between" style={{ fontSize: '0.6875rem', color: 'var(--text-faint)', marginTop: 6 }}>
         <span>{entries.length} entries</span>
         {targetWeight && (
-          <span style={{ color: '#34D399' }}>— — target {targetWeight} kg</span>
+          <span style={{ color: 'var(--success)' }}>— — target {targetWeight} kg</span>
         )}
         <span>{entries[entries.length - 1].weight_kg} kg now</span>
       </div>
@@ -114,8 +115,8 @@ function AdherenceRow({ label, actual, target, color }) {
       <div className="flex items-center justify-between" style={{ marginBottom: 6 }}>
         <span style={{ fontSize: '0.8125rem', fontWeight: 600 }}>{label}</span>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <span className="tabular" style={{ fontSize: '0.75rem', color: '#98A2B3' }}>
-            {Math.round(animated)} <span style={{ color: '#667085' }}>/ {Math.round(target)}</span>
+          <span className="tabular" style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+            {Math.round(animated)} <span style={{ color: 'var(--text-faint)' }}>/ {Math.round(target)}</span>
           </span>
           <span className={`pill pill-${state}`} style={{ fontSize: '0.625rem' }}>{stateLabel}</span>
         </div>
@@ -123,7 +124,7 @@ function AdherenceRow({ label, actual, target, color }) {
       <div className="macro-track">
         <div
           className="macro-fill macro-fill-animate"
-          style={{ width: `${pct}%`, background: color, boxShadow: `0 0 10px ${color}44` }}
+          style={{ width: `${pct}%`, background: solid(color), boxShadow: `0 0 10px ${tint(color, 0.27)}` }}
         />
       </div>
     </div>
@@ -186,7 +187,7 @@ export default function Progress({ apiBase, dashboardData, onNavigate }) {
       {!goal && (
         <button onClick={() => onNavigate('set-goals')} className="surface-hero lift"
           style={{ padding: '1.25rem', width: '100%', textAlign: 'left', cursor: 'pointer', display: 'flex', gap: '1rem', alignItems: 'center' }}>
-          <Target size={20} color="#A78BFA" />
+          <Target size={20} color="var(--accent-soft)" />
           <span style={{ fontSize: '0.875rem' }}>No active goal — set one to see how you're tracking.</span>
         </button>
       )}
@@ -199,7 +200,7 @@ export default function Progress({ apiBase, dashboardData, onNavigate }) {
             <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.75rem', marginTop: 6 }}>
               <span className="metric-value tabular" style={{ fontSize: '2.5rem' }}>
                 {current ?? '—'}
-                {current && <span style={{ fontSize: '0.9rem', color: '#667085', fontWeight: 500, marginLeft: 5 }}>kg</span>}
+                {current && <span style={{ fontSize: '0.9rem', color: 'var(--text-faint)', fontWeight: 500, marginLeft: 5 }}>kg</span>}
               </span>
               {entries.length > 1 && (
                 <span className={`pill ${change < 0 ? 'pill-good' : change > 0 ? 'pill-warn' : 'pill-muted'}`}>
@@ -211,7 +212,7 @@ export default function Progress({ apiBase, dashboardData, onNavigate }) {
           {target && (
             <div style={{ textAlign: 'right' }}>
               <div className="metric-label">Goal</div>
-              <div className="tabular" style={{ fontSize: '1.25rem', fontWeight: 700, color: '#34D399', marginTop: 4 }}>
+              <div className="tabular" style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--success)', marginTop: 4 }}>
                 {target} kg
               </div>
             </div>
@@ -226,15 +227,15 @@ export default function Progress({ apiBase, dashboardData, onNavigate }) {
             <hr className="hairline" style={{ margin: '1.25rem 0 1rem' }} />
             <div className="flex items-center justify-between" style={{ marginBottom: 8 }}>
               <span style={{ fontSize: '0.8125rem', fontWeight: 600 }}>Toward your target</span>
-              <span className="tabular" style={{ fontSize: '0.8125rem', color: '#A78BFA', fontWeight: 700 }}>
+              <span className="tabular" style={{ fontSize: '0.8125rem', color: 'var(--accent-soft)', fontWeight: 700 }}>
                 {Math.round(goalPct)}%
               </span>
             </div>
             <div className="macro-track" style={{ height: '0.625rem' }}>
               <div className="macro-fill macro-fill-animate"
-                style={{ width: `${goalPct}%`, background: 'linear-gradient(90deg,#8B5CF6,#34D399)', boxShadow: '0 0 12px rgba(139,92,246,0.5)' }} />
+                style={{ width: `${goalPct}%`, background: 'linear-gradient(90deg,var(--accent),var(--success))', boxShadow: '0 0 12px rgba(var(--accent-rgb),0.5)' }} />
             </div>
-            <div style={{ fontSize: '0.75rem', color: '#667085', marginTop: 8 }}>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-faint)', marginTop: 8 }}>
               {Math.abs(target - current).toFixed(1)} kg to go
             </div>
           </>
@@ -249,12 +250,12 @@ export default function Progress({ apiBase, dashboardData, onNavigate }) {
               <div className="section-title">Today against target</div>
               <div className="section-sub">Within 10% counts as on target</div>
             </div>
-            <Flame size={16} color="#FBBF24" />
+            <Flame size={16} color="var(--warning)" />
           </div>
-          <AdherenceRow label="Calories" actual={num(stats.total_calories)} target={num(goal.target_calories)} color="#8B5CF6" />
-          <AdherenceRow label="Protein (g)" actual={num(stats.total_protein)} target={num(goal.target_protein)} color="#22D3EE" />
-          <AdherenceRow label="Carbs (g)" actual={num(stats.total_carbs)} target={num(goal.target_carbs)} color="#A78BFA" />
-          <AdherenceRow label="Fat (g)" actual={num(stats.total_fat)} target={num(goal.target_fat)} color="#FBBF24" />
+          <AdherenceRow label="Calories" actual={num(stats.total_calories)} target={num(goal.target_calories)} color="--accent-rgb" />
+          <AdherenceRow label="Protein (g)" actual={num(stats.total_protein)} target={num(goal.target_protein)} color="--cyan-rgb" />
+          <AdherenceRow label="Carbs (g)" actual={num(stats.total_carbs)} target={num(goal.target_carbs)} color="--accent-soft-rgb" />
+          <AdherenceRow label="Fat (g)" actual={num(stats.total_fat)} target={num(goal.target_fat)} color="--warning-rgb" />
         </div>
       )}
 
@@ -262,42 +263,42 @@ export default function Progress({ apiBase, dashboardData, onNavigate }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))', gap: '1rem' }}>
         <div className="surface lift" style={{ padding: '1.125rem' }}>
           <div className="flex items-center justify-between" style={{ marginBottom: '0.75rem' }}>
-            <span className="metric-label">Check-ins</span><Scale size={15} color="#22D3EE" />
+            <span className="metric-label">Check-ins</span><Scale size={15} color="var(--cyan)" />
           </div>
           <div className="tabular" style={{ fontSize: '1.75rem', fontWeight: 700 }}>{entries.length}</div>
-          <div style={{ fontSize: '0.75rem', color: '#667085', marginTop: 4 }}>last {range} days</div>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-faint)', marginTop: 4 }}>last {range} days</div>
         </div>
 
         <div className="surface lift" style={{ padding: '1.125rem' }}>
           <div className="flex items-center justify-between" style={{ marginBottom: '0.75rem' }}>
-            <span className="metric-label">Net change</span><Trend size={15} color={change < 0 ? '#34D399' : '#FBBF24'} />
+            <span className="metric-label">Net change</span><Trend size={15} color={change < 0 ? 'var(--success)' : 'var(--warning)'} />
           </div>
-          <div className="tabular" style={{ fontSize: '1.75rem', fontWeight: 700, color: change < 0 ? '#34D399' : change > 0 ? '#FBBF24' : '#EEF2F7' }}>
+          <div className="tabular" style={{ fontSize: '1.75rem', fontWeight: 700, color: change < 0 ? 'var(--success)' : change > 0 ? 'var(--warning)' : 'var(--text)' }}>
             {change > 0 ? '+' : ''}{change}<span style={{ fontSize: '0.875rem' }}> kg</span>
           </div>
-          <div style={{ fontSize: '0.75rem', color: '#667085', marginTop: 4 }}>over the period</div>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-faint)', marginTop: 4 }}>over the period</div>
         </div>
 
         <div className="surface lift" style={{ padding: '1.125rem' }}>
           <div className="flex items-center justify-between" style={{ marginBottom: '0.75rem' }}>
-            <span className="metric-label">Daily target</span><Target size={15} color="#A78BFA" />
+            <span className="metric-label">Daily target</span><Target size={15} color="var(--accent-soft)" />
           </div>
           <div className="tabular" style={{ fontSize: '1.75rem', fontWeight: 700 }}>
             {goal?.target_calories ? Math.round(goal.target_calories).toLocaleString() : '—'}
           </div>
-          <div style={{ fontSize: '0.75rem', color: '#667085', marginTop: 4 }}>kcal</div>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-faint)', marginTop: 4 }}>kcal</div>
         </div>
 
         <div className="surface lift" style={{ padding: '1.125rem' }}>
           <div className="flex items-center justify-between" style={{ marginBottom: '0.75rem' }}>
-            <span className="metric-label">Goal</span><Award size={15} color="#34D399" />
+            <span className="metric-label">Goal</span><Award size={15} color="var(--success)" />
           </div>
           <div style={{ fontSize: '1rem', fontWeight: 700, lineHeight: 1.3 }}>
             {goal ? goal.goal_type.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : 'None set'}
           </div>
           <button
             onClick={() => onNavigate('set-goals')}
-            style={{ background: 'none', border: 'none', color: '#A78BFA', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', padding: 0, marginTop: 6 }}
+            style={{ background: 'none', border: 'none', color: 'var(--accent-soft)', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', padding: 0, marginTop: 6 }}
           >
             {goal ? 'Change' : 'Set one'}
           </button>

@@ -52,10 +52,10 @@ export default function ServerSetup({ onSaved, embedded = false }) {
   const body = (
     <div style={{ display: 'grid', gap: '0.875rem' }}>
       <div>
-        <div style={{ fontSize: '0.75rem', color: '#98A2B3', marginBottom: '0.5rem', lineHeight: 1.5 }}>
+        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.5rem', lineHeight: 1.5 }}>
           The address of the machine running the backend. A tunnel hostname
           works here, and so does a laptop on the same WiFi — find that with{' '}
-          <code style={{ color: '#A78BFA' }}>ipconfig getifaddr en0</code>.
+          <code style={{ color: 'var(--accent-soft)' }}>ipconfig getifaddr en0</code>.
         </div>
         <input
           className="form-input"
@@ -71,11 +71,11 @@ export default function ServerSetup({ onSaved, embedded = false }) {
         {/* Typing a bare address is the common case, so say what it becomes
             rather than silently rewriting it. The two defaults differ, and a
             surprised user cannot tell why one worked and the other did not. */}
-        <div style={{ fontSize: '0.6875rem', color: '#667085', marginTop: 5 }}>
-          <code style={{ color: '#98A2B3' }}>/api</code> is added for you. A
-          name like <code style={{ color: '#98A2B3' }}>x.ts.net</code> is
+        <div style={{ fontSize: '0.6875rem', color: 'var(--text-faint)', marginTop: 5 }}>
+          <code style={{ color: 'var(--text-muted)' }}>/api</code> is added for you. A
+          name like <code style={{ color: 'var(--text-muted)' }}>x.ts.net</code> is
           assumed to be https; an address like{' '}
-          <code style={{ color: '#98A2B3' }}>192.168.1.5</code> is assumed to be
+          <code style={{ color: 'var(--text-muted)' }}>192.168.1.5</code> is assumed to be
           http on port 8001.
         </div>
       </div>
@@ -104,9 +104,9 @@ export default function ServerSetup({ onSaved, embedded = false }) {
           display: 'flex', gap: '0.5rem', alignItems: 'flex-start',
           padding: '0.75rem', borderRadius: '0.625rem', fontSize: '0.8125rem',
           lineHeight: 1.5,
-          background: state.ok ? 'rgba(52,211,153,0.1)' : 'rgba(248,113,113,0.1)',
-          border: `1px solid ${state.ok ? 'rgba(52,211,153,0.3)' : 'rgba(248,113,113,0.3)'}`,
-          color: state.ok ? '#34D399' : '#F87171',
+          background: state.ok ? 'rgba(var(--success-rgb),0.1)' : 'rgba(var(--danger-rgb),0.1)',
+          border: `1px solid ${state.ok ? 'rgba(var(--success-rgb),0.3)' : 'rgba(var(--danger-rgb),0.3)'}`,
+          color: state.ok ? 'var(--success)' : 'var(--danger)',
         }}>
           {state.ok ? <Check size={15} style={{ flexShrink: 0, marginTop: 2 }} />
                     : <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 2 }} />}
@@ -123,11 +123,11 @@ export default function ServerSetup({ onSaved, embedded = false }) {
         {busy ? <><Loader2 size={15} className="spin" /> Checking…</> : 'Connect'}
       </button>
 
-      <div style={{ fontSize: '0.6875rem', color: '#667085', lineHeight: 1.6 }}>
+      <div style={{ fontSize: '0.6875rem', color: 'var(--text-faint)', lineHeight: 1.6 }}>
         Not connecting? The laptop has to be awake with the server running —{' '}
-        <code style={{ color: '#98A2B3' }}>./scripts/serve-public.sh</code>{' '}
+        <code style={{ color: 'var(--text-muted)' }}>./scripts/serve-public.sh</code>{' '}
         starts it and opens the tunnel. On the same WiFi instead, it must be{' '}
-        <code style={{ color: '#98A2B3' }}>--host 0.0.0.0</code>: without that it
+        <code style={{ color: 'var(--text-muted)' }}>--host 0.0.0.0</code>: without that it
         only accepts connections from the laptop itself.
       </div>
     </div>
@@ -138,7 +138,7 @@ export default function ServerSetup({ onSaved, embedded = false }) {
       <div className="surface" style={{ padding: '1.25rem' }}>
         <div className="flex items-center justify-between" style={{ marginBottom: '1rem' }}>
           <span className="section-title">Server</span>
-          <Server size={16} color="#A78BFA" />
+          <Server size={16} color="var(--accent-soft)" />
         </div>
         {body}
       </div>
@@ -154,14 +154,14 @@ export default function ServerSetup({ onSaved, embedded = false }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.25rem' }}>
           <div style={{
             width: 40, height: 40, borderRadius: 12,
-            background: 'linear-gradient(135deg,#8B5CF6,#22D3EE)',
+            background: 'linear-gradient(135deg,var(--accent),var(--cyan))',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}>
-            <Wifi size={20} color="#0B0E14" />
+            <Wifi size={20} color="var(--bg)" />
           </div>
           <div>
             <div style={{ fontSize: '1.125rem', fontWeight: 700 }}>Connect to your server</div>
-            <div style={{ fontSize: '0.75rem', color: '#98A2B3' }}>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
               {isNativeApp() ? 'Needed once per network' : 'Point the app at a backend'}
             </div>
           </div>
