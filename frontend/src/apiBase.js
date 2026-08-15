@@ -24,12 +24,37 @@
 const STORAGE_KEY = 'kayosha.apiBase';
 
 const BUILD_TIME = process.env.REACT_APP_API_URL || '';
-const WEB_DEFAULT = 'http://localhost:8001/api';
 
 /** True when running inside the Capacitor shell rather than a browser tab. */
 export const isNativeApp = () =>
   typeof window !== 'undefined' &&
   Boolean(window.Capacitor?.isNativePlatform?.());
+
+/**
+ * Last-resort fallback: no stored override, no REACT_APP_API_URL baked in.
+ *
+ * That build-time variable comes from frontend/.env.production.local, which
+ * is gitignored on purpose (it holds a personal tunnel URL) - so a build
+ * done by a host's own CI, like Render's, never sees it and lands here.
+ *
+ * Three different situations reach this line:
+ *   - `npm start` in development: frontend and backend are on different
+ *     ports (3000 and 8001), so :8001 is the only correct guess.
+ *   - a production build served BY the same backend that built it - Render,
+ *     or the local scripts/serve-public.sh flow - where the page's own
+ *     origin already IS the API's origin, by construction (see main.py's
+ *     StaticFiles mount).
+ *   - a native build with no baked-in address, which has no origin to fall
+ *     back to at all (capacitor://localhost is not a backend). Same
+ *     unresolvable case as before this fallback existed, not made worse.
+ */
+const WEB_DEFAULT = (() => {
+  if (process.env.NODE_ENV === 'development') return 'http://localhost:8001/api';
+  if (typeof window !== 'undefined' && window.location?.origin && !isNativeApp()) {
+    return `${window.location.origin}/api`;
+  }
+  return 'http://localhost:8001/api';
+})();
 
 /** A dotted quad, i.e. something on the local network rather than a domain. */
 const looksLikeIp = (host) => /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
