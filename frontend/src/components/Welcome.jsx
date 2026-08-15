@@ -21,9 +21,14 @@ import Lotus from './Lotus';
  * A few short paragraphs answer it in one screen, in the order someone
  * actually needs to know things. There is one button, and it goes to the one
  * thing that has to happen first.
+ *
+ * `hasGoal` is true when this is being replayed on purpose from Profile ->
+ * Help rather than shown as the first-run gate - the account already has a
+ * goal, so the button returns to the app instead of pushing them back into
+ * goal setup, and there is nothing left to "skip".
  */
 
-export default function Welcome({ name, onStart }) {
+export default function Welcome({ name, onStart, onSkip, hasGoal = false }) {
   const first = (name || '').trim().split(' ')[0];
 
   return (
@@ -92,9 +97,28 @@ export default function Welcome({ name, onStart }) {
           </p>
         </div>
 
-        <button className="generate-btn" onClick={onStart} style={{ justifyContent: 'center' }}>
-          <Target size={16} /> Set my goal <ArrowRight size={15} />
-        </button>
+        <div style={{ display: 'grid', gap: '0.625rem', justifyItems: 'center' }}>
+          <button
+            className="generate-btn"
+            onClick={onStart}
+            style={{ justifyContent: 'center', width: '100%' }}
+          >
+            <Target size={16} /> {hasGoal ? 'Back to the app' : 'Set my goal'} <ArrowRight size={15} />
+          </button>
+
+          {!hasGoal && onSkip && (
+            <button
+              type="button"
+              onClick={onSkip}
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer', padding: '0.25rem',
+                fontSize: '0.8125rem', color: 'var(--text-muted)', textDecoration: 'underline',
+              }}
+            >
+              Skip for now — don't show this again
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

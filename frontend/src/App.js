@@ -71,6 +71,22 @@ function App() {
    * than the one being solved.
    */
   const routedToGoalSetup = useRef(false);
+
+  /*
+   * Whether the walkthrough (<Welcome>) is currently showing.
+   *
+   * A real state, not just a derived "!hasGoal && !seenWelcome" check inline
+   * in render, because it used to BE derived like that - and dashboardData
+   * loading, or the goal-less auto-redirect in fetchGoals() firing, could
+   * change the inputs to that check mid-display and yank the screen away
+   * before anyone had read it, let alone clicked anything. Once this flips
+   * true it stays true until the user actually dismisses it (Start or Skip),
+   * regardless of what else changes underneath it.
+   *
+   * Also reused to let someone replay the walkthrough later from Profile ->
+   * Help, via the 'walkthrough' activeView - see the render gate below.
+   */
+  const [showWelcome, setShowWelcome] = useState(false);
   const [error, setError] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -116,6 +132,24 @@ function App() {
     goals: [],
     weight: null
   });
+
+  // Latch the walkthrough on the moment a goal-less, not-yet-dismissed
+  // account is first seen - see the comment on showWelcome above. Only ever
+  // sets it TRUE here; dismissal (which sets it false) happens explicitly in
+  // the Welcome screen's own Start/Skip handlers, never as a side effect of
+  // data reloading.
+  useEffect(() => {
+    if (!user) return;
+    let seen = true;
+    try {
+      seen = localStorage.getItem(`kayosha.seenWelcome.${user.id}`) === '1';
+    } catch {
+      seen = false;
+    }
+    if (!seen && (dashboardData.goals || []).length === 0) {
+      setShowWelcome(true);
+    }
+  }, [user, dashboardData.goals]);
 
   // Navigation state
   const [activeView, setActiveView] = useState('dashboard');
@@ -1628,7 +1662,21 @@ function App() {
         if (!routedToGoalSetup.current) {
           routedToGoalSetup.current = true;
           if (Array.isArray(userGoals) && userGoals.length === 0) {
-            setActiveView('set-goals');
+            // A goal-less account that has already dismissed the walkthrough
+            // (a returning visitor who skipped goal setup last time) goes
+            // straight there. One that hasn't is either about to see the
+            // walkthrough or already looking at it - jumping to goal setup
+            // here would yank that screen away mid-read; its own button is
+            // what should make this navigation, on the user's click.
+            let seenWelcome = true;
+            try {
+              seenWelcome = localStorage.getItem(`kayosha.seenWelcome.${user.id}`) === '1';
+            } catch {
+              seenWelcome = false;
+            }
+            if (seenWelcome) {
+              setActiveView('set-goals');
+            }
           }
         }
       }
@@ -4924,16 +4972,16 @@ function App() {
      */
     const hasGoal = (dashboardData.goals || []).length > 0;
     const welcomeKey = `kayosha.seenWelcome.${user.id}`;
-    let seenWelcome = true;
-    try {
-      seenWelcome = localStorage.getItem(welcomeKey) === '1';
-    } catch {
-      // Private mode. Showing the introduction once per session is a far
-      // smaller problem than crashing the whole app on a storage read.
-      seenWelcome = false;
-    }
+    // 'walkthrough' is what Profile -> Help sets to replay this on demand,
+    // for an account that already has a goal and would otherwise never hit
+    // the showWelcome latch again.
+    const replaying = activeView === 'walkthrough';
 
-    if (!hasGoal && !seenWelcome) {
+    if (showWelcome || replaying) {
+      const dismiss = () => {
+        try { localStorage.setItem(welcomeKey, '1'); } catch { /* private mode */ }
+        setShowWelcome(false);
+      };
       return (
         <AppShell
           activeView={activeView}
@@ -4946,9 +4994,14 @@ function App() {
         >
           <Welcome
             name={user.full_name || user.username}
+            hasGoal={hasGoal || replaying}
             onStart={() => {
-              try { localStorage.setItem(welcomeKey, '1'); } catch { /* private mode */ }
-              setActiveView('set-goals');
+              dismiss();
+              setActiveView(hasGoal || replaying ? 'dashboard' : 'set-goals');
+            }}
+            onSkip={() => {
+              dismiss();
+              setActiveView('dashboard');
             }}
           />
         </AppShell>

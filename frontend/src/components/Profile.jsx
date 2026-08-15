@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Flame, Trophy, Pencil, Scale, Ruler, Cake, Activity, Loader2,
-  ChevronRight, Info,
+  ChevronRight, Info, HelpCircle,
 } from 'lucide-react';
 import WorkoutCheckIn from './WorkoutCheckIn';
 import ServerSetup from './ServerSetup';
@@ -501,6 +501,24 @@ export default function Profile({ apiBase, user: authUser, onNavigate }) {
         <div style={{ flex: 1 }}>
           <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>Full progress</div>
           <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Charts, weight trend and history</div>
+        </div>
+        <ChevronRight size={17} color="var(--text-faint)" />
+      </button>
+
+      {/* The one-time walkthrough dismisses itself permanently once seen -
+          this is the only way back to it afterwards. */}
+      <button
+        onClick={() => onNavigate?.('walkthrough')}
+        className="surface lift"
+        style={{
+          padding: '1.125rem', display: 'flex', alignItems: 'center', gap: '0.875rem',
+          textAlign: 'left', cursor: 'pointer', width: '100%',
+        }}
+      >
+        <HelpCircle size={18} color="var(--brand-magenta)" />
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>Help &amp; walkthrough</div>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Replay the "what is this app" introduction</div>
         </div>
         <ChevronRight size={17} color="var(--text-faint)" />
       </button>
