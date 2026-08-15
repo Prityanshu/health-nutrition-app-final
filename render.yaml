@@ -1,14 +1,23 @@
+# One Docker-built service for both the API and the built React site -
+# main.py serves frontend/build itself once it exists (see the StaticFiles
+# mount at the bottom of main.py), so there is nothing for a second, separate
+# frontend service to do. One origin also means no CORS configuration is
+# needed between them, same reasoning as scripts/serve-public.sh's local
+# Tailscale Funnel setup.
+#
+# DATABASE_URL is intentionally `sync: false` - it is not committed here.
+# Paste the Neon connection string into the Render dashboard for this
+# service instead (Environment tab). Same for the Groq keys.
 services:
-  # Backend Service
   - type: web
-    name: nutrition-app-backend
-    env: python
+    name: kayosha
+    env: docker
+    dockerfilePath: ./Dockerfile
     plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
     envVars:
       - key: DATABASE_URL
-        value: sqlite:///./nutrition_app.db
+        sync: false
       - key: SECRET_KEY
         generateValue: true
       - key: GROQ_API_KEY
@@ -21,14 +30,3 @@ services:
         value: production
       - key: DEBUG
         value: false
-
-  # Frontend Service
-  - type: web
-    name: nutrition-app-frontend
-    env: static
-    plan: free
-    buildCommand: cd frontend && npm install && npm run build
-    staticPublishPath: frontend/build
-    envVars:
-      - key: REACT_APP_API_URL
-        value: https://nutrition-app-backend.onrender.com/api
