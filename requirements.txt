@@ -12,6 +12,7 @@ celery==5.3.4
 pandas==2.1.4
 numpy>=1.26.0
 python-dotenv==1.0.0
+requests>=2.31.0
 openai>=1.0.0
 agno>=0.1.0
 exa-py>=1.0.0

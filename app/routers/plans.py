@@ -274,7 +274,7 @@ async def email_plan(
     if not EMAIL_ENABLED:
         raise HTTPException(
             status_code=503,
-            detail="Email is not configured on the server. Set EMAIL_USER and EMAIL_PASS.",
+            detail="Email is not configured on the server. Set BREVO_API_KEY and EMAIL_USER.",
         )
 
     # Checked before doing any work - building a PDF for a request that will be

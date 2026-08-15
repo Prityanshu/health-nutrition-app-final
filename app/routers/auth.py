@@ -211,7 +211,7 @@ async def forgot_password(
         return _NEUTRAL_REPLY
 
     if not email_service.EMAIL_ENABLED:
-        logger.warning("Password reset requested but SMTP is not configured")
+        logger.warning("Password reset requested but email is not configured")
         return _NEUTRAL_REPLY
 
     # The existing per-user hourly cap. Someone hammering the button cannot
@@ -239,7 +239,7 @@ async def forgot_password(
         minutes=minutes,
     )
 
-    # Off the event loop: smtplib blocks, and this endpoint is async.
+    # Off the event loop: the HTTP call to Brevo blocks, and this endpoint is async.
     result = await asyncio.to_thread(
         email_service.send_email,
         to_email=user.email,

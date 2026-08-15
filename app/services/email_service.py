@@ -1,49 +1,52 @@
 """
 Outbound email.
 
-Follows the SMTP_SSL + Gmail app-password approach that already works in
-practice, but with the pieces that matter for a web app rather than a script:
+Sent over Brevo's HTTPS API rather than raw SMTP. SMTP was the original
+approach and is simpler, but it does not work from most PaaS hosts (Render
+included) - they block outbound SMTP ports at the network level to stop the
+platform being used as a spam relay, so the connection never even reaches
+Gmail's servers. HTTPS on 443 is never blocked, which is the entire reason
+for going through an API instead.
+
+The pieces that matter for a web app rather than a script carry over
+unchanged from the SMTP version:
 
   * credentials come from the environment, never the source file
   * absence of configuration is a normal state, not a crash - the rest of the
     app runs fine with email switched off
-  * sending happens off the request thread, because an SMTP handshake takes
-    seconds and would otherwise block the API worker
+  * sending happens off the request thread, because the HTTP call takes real
+    time and would otherwise block the API worker
   * failures are reported to the caller instead of printed
 
 Only sending is implemented. The IMAP polling from the original script has no
 use here: this app sends a plan when a user asks, it does not watch an inbox.
 """
 
+import base64
 import logging
 import os
 import re
-import smtplib
 from dataclasses import dataclass
-from email import encoders
-from email.mime.base import MIMEBase
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.utils import formataddr
 from typing import Optional, Tuple
 
+import requests
 from dotenv import load_dotenv
 
 load_dotenv()
 logger = logging.getLogger(__name__)
 
-SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
+BREVO_API_URL = "https://api.brevo.com/v3/smtp/email"
+BREVO_API_KEY = os.getenv("BREVO_API_KEY", "").strip()
+# The address mail comes FROM. Has to be a sender verified in the Brevo
+# account (Settings -> Senders) - Brevo rejects anything else, which is what
+# stops this being usable as an open relay.
 EMAIL_USER = os.getenv("EMAIL_USER", "").strip()
-# Gmail app passwords are shown as "abcd efgh ijkl mnop"; the spaces are for
-# readability only and must be stripped before authenticating.
-EMAIL_PASS = re.sub(r"\s+", "", os.getenv("EMAIL_PASS", ""))
 EMAIL_FROM_NAME = os.getenv("EMAIL_FROM_NAME", "Kayosha")
 
-EMAIL_ENABLED = bool(EMAIL_USER and EMAIL_PASS)
+EMAIL_ENABLED = bool(BREVO_API_KEY and EMAIL_USER)
 
 if not EMAIL_ENABLED:
-    logger.info("Email is not configured (EMAIL_USER / EMAIL_PASS unset) - sending disabled.")
+    logger.info("Email is not configured (BREVO_API_KEY / EMAIL_USER unset) - sending disabled.")
 
 
 @dataclass
@@ -133,61 +136,71 @@ def send_email(
     if not is_valid_email(to_email):
         return EmailResult(False, f"'{to_email}' does not look like an email address.")
 
+    payload = {
+        "sender": {"name": EMAIL_FROM_NAME, "email": EMAIL_USER},
+        "to": [{"email": to_email}],
+        "subject": subject,
+        "textContent": body,
+    }
+    if html_body:
+        payload["htmlContent"] = html_body
+
+    # Only set when it is a different, valid address - pointing it back at the
+    # sending account would be noise.
+    if reply_to and is_valid_email(reply_to) and reply_to.lower() != EMAIL_USER.lower():
+        payload["replyTo"] = {"email": reply_to}
+
+    if attachment:
+        filename, content, _subtype = attachment
+        payload["attachment"] = [{
+            "name": filename,
+            "content": base64.b64encode(content).decode("ascii"),
+        }]
+
     try:
-        msg = MIMEMultipart()
-        msg["From"] = formataddr((EMAIL_FROM_NAME, EMAIL_USER))
-        msg["To"] = to_email
-        msg["Subject"] = subject
+        response = requests.post(
+            BREVO_API_URL,
+            headers={
+                "accept": "application/json",
+                "content-type": "application/json",
+                "api-key": BREVO_API_KEY,
+            },
+            json=payload,
+            timeout=20,
+        )
+    except requests.exceptions.RequestException as e:
+        logger.error("Email send failed: %s", e, exc_info=True)
+        return EmailResult(False, "Could not reach the mail service. Try again shortly.")
 
-        # Only set Reply-To when it is a different, valid address - pointing it
-        # back at the sending account would be noise.
-        if reply_to and is_valid_email(reply_to) and reply_to.lower() != EMAIL_USER.lower():
-            msg["Reply-To"] = reply_to
-
-        # Plain text first, HTML second: mail clients render the last part they
-        # understand, so this gives HTML where supported and text where not.
-        msg.attach(MIMEText(body, "plain", "utf-8"))
-        if html_body:
-            msg.attach(MIMEText(html_body, "html", "utf-8"))
-
-        if attachment:
-            filename, content, subtype = attachment
-            part = MIMEBase("application", subtype)
-            part.set_payload(content)
-            encoders.encode_base64(part)
-            part.add_header("Content-Disposition", f'attachment; filename="{filename}"')
-            msg.attach(part)
-
-        with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT, timeout=20) as server:
-            server.login(EMAIL_USER, EMAIL_PASS)
-            server.sendmail(EMAIL_USER, [to_email], msg.as_string())
-
+    if response.status_code in (200, 201):
         logger.info("Email sent to %s: %s", to_email, subject)
         return EmailResult(True, f"Sent to {to_email}")
 
-    except smtplib.SMTPAuthenticationError:
-        # By far the most common failure: an ordinary account password used
-        # instead of an app password, or the app password revoked.
-        logger.error("SMTP authentication failed for %s", EMAIL_USER)
+    # By far the most common failure: an invalid/revoked API key, or a
+    # "from" address that has not been verified as a sender in Brevo.
+    if response.status_code == 401:
+        logger.error("Brevo rejected the API key")
         return EmailResult(
             False,
-            "The mail server rejected the login. Check EMAIL_PASS is a Google "
-            "app password (not your normal password) and that it has not been revoked.",
+            "The mail service rejected the API key. Check BREVO_API_KEY on the server.",
         )
-    except smtplib.SMTPRecipientsRefused:
-        return EmailResult(False, f"The mail server refused the address {to_email}.")
-    except (smtplib.SMTPException, OSError) as e:
-        logger.error("Email send failed: %s", e, exc_info=True)
-        return EmailResult(False, "Could not reach the mail server. Try again shortly.")
+
+    logger.error("Brevo send failed (%s): %s", response.status_code, response.text)
+    if response.status_code == 400:
+        return EmailResult(
+            False,
+            f"The mail service rejected the request - is {EMAIL_USER!r} verified "
+            "as a sender in Brevo?",
+        )
+    return EmailResult(False, "Could not send the email. Try again shortly.")
 
 
 def status() -> dict:
     """Configuration state, for a health check or settings screen."""
     return {
         "enabled": EMAIL_ENABLED,
-        "server": SMTP_SERVER,
-        "port": SMTP_PORT,
-        # Never return the password, and only a masked sender.
+        "provider": "Brevo",
+        # Never return the API key, and only a masked sender.
         "sender": (
             f"{EMAIL_USER[:3]}***@{EMAIL_USER.split('@')[-1]}"
             if EMAIL_ENABLED and "@" in EMAIL_USER else None
