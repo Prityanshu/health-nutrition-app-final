@@ -432,6 +432,36 @@ class NutrientAnalyzerService:
                     return value
         return None
 
+    def _match_json_value(self, data: dict, field: str) -> Optional[float]:
+        """
+        Find one nutrient inside a JSON object by what its key MEANS, not what
+        it is spelled exactly - the model has been observed using "calories",
+        "calories_kcal" and "energy_kcal" for the same field across different
+        responses, none of which a plain `data.get("calories")` would catch
+        for the latter two.
+
+        Same alias table as _scan_for (_NUTRIENT_ALIASES / _EXCLUDE_FOR) so a
+        nutrient's recognised names are defined once, not once for prose and
+        again for JSON.
+        """
+        if not isinstance(data, dict):
+            return None
+        aliases = self._NUTRIENT_ALIASES[field]
+        excluded = self._EXCLUDE_FOR.get(field, ())
+
+        for key, value in data.items():
+            if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+                continue
+            normalized = re.sub(r"[_\-]+", " ", str(key).strip().lower())
+            if any(bad in normalized for bad in excluded):
+                continue
+            if any(alias in normalized for alias in aliases):
+                try:
+                    return float(value)
+                except (TypeError, ValueError):
+                    continue
+        return None
+
     def _sanity_check(self, nutrients: dict, food_name: str, serving: str) -> None:
         """
         Catch estimates that contradict themselves, and repair what we can.
@@ -510,38 +540,56 @@ class NutrientAnalyzerService:
                 "health_tags": []
             }
             
-            # First, try to extract from JSON structure if present
+            # First, try to extract from JSON structure if present.
+            #
+            # This used to read exact keys - nutrients_data.get('calories', 0),
+            # .get('protein', 0), etc. - which silently returned 0 for every
+            # field the moment the model wrote "calories_kcal", "protein_g",
+            # "carbohydrate_g" or "fat_g" instead of the bare names, because a
+            # dict .get() with a wrong key is indistinguishable from a real
+            # zero. That mismatch was real and reproducible (not assumed -
+            # tested live against "roti"): a successful JSON parse containing
+            # correct data still produced an all-zero result, AND returned
+            # immediately, so the prose scanner below - which reads the exact
+            # same response's "Calories: 122 kcal" line correctly - never got
+            # a chance to run as a fallback for the fields the JSON branch
+            # silently lost.
+            #
+            # Fixed by matching JSON keys the same way _scan_for already
+            # matches prose lines: substring against _NUTRIENT_ALIASES. One
+            # canonical definition of what each nutrient is called, reused for
+            # both shapes the model produces, rather than a second hardcoded
+            # key list that can drift out of sync with the first.
             json_match = re.search(r'```json\s*(\{.*?\})\s*```', analysis, re.DOTALL)
             if json_match:
                 try:
                     json_data = json.loads(json_match.group(1))
-                    if 'nutrients' in json_data:
-                        nutrients_data = json_data['nutrients']
-                        nutrients["calories"] = float(nutrients_data.get('calories', 0))
-                        
-                        # Handle nested macronutrients structure
-                        if 'macronutrients' in nutrients_data:
-                            macro_data = nutrients_data['macronutrients']
-                            nutrients["protein"] = float(macro_data.get('protein', 0))
-                            nutrients["carbohydrates"] = float(macro_data.get('carbohydrates', 0))
-                            nutrients["fat"] = float(macro_data.get('fat', 0))
-                            nutrients["fiber"] = float(macro_data.get('fiber', 0))
-                        else:
-                            # Handle flat structure
-                            nutrients["protein"] = float(nutrients_data.get('protein', 0))
-                            nutrients["carbohydrates"] = float(nutrients_data.get('carbohydrates', 0))
-                            nutrients["fat"] = float(nutrients_data.get('fat', 0))
-                            nutrients["fiber"] = float(nutrients_data.get('fiber', 0))
-                        
-                        nutrients["sugar"] = float(nutrients_data.get('sugar', 0))
-                        nutrients["sodium"] = float(nutrients_data.get('sodium', 0))
-                        nutrients["cholesterol"] = float(nutrients_data.get('cholesterol', 0))
-                        
-                        if 'health_tags' in json_data:
+                    nutrients_data = json_data.get('nutrients') if isinstance(json_data, dict) else None
+                    if isinstance(nutrients_data, dict):
+                        # Some responses nest macros under "macronutrients",
+                        # some keep everything flat - search both scopes,
+                        # nested first since it's the more specific source.
+                        macro_data = nutrients_data.get('macronutrients')
+                        scopes = [macro_data, nutrients_data] if isinstance(macro_data, dict) else [nutrients_data]
+
+                        found_any = False
+                        for field in self._NUTRIENT_ALIASES:
+                            for scope in scopes:
+                                value = self._match_json_value(scope, field)
+                                if value is not None:
+                                    nutrients[field] = value
+                                    found_any = True
+                                    break
+
+                        if isinstance(json_data.get('health_tags'), list):
                             nutrients["health_tags"] = json_data['health_tags']
-                        
-                        return nutrients
-                except (json.JSONDecodeError, KeyError, ValueError):
+
+                        if found_any:
+                            return nutrients
+                        # A "nutrients" object existed but nothing in it matched
+                        # any known alias - fall through to the prose scanner
+                        # below rather than returning an all-zero result.
+                except (json.JSONDecodeError, KeyError, ValueError, TypeError):
                     pass  # Fall back to regex parsing
             
             # Read every field with one scanner that copes with two- and
