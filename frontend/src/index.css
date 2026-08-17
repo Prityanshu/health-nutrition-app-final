@@ -2081,6 +2081,18 @@ body.theme-dark .chat-typing { color: var(--text-muted); }
   background: var(--border); border-radius: 4px;
 }
 
+/* Fixed to roughly 5 rows - see the leaderboard preview in Profile.jsx,
+   which fetches more entries (15) than fit on screen at once by design. */
+.leaderboard-scroll {
+  max-height: 15.5rem;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.leaderboard-scroll::-webkit-scrollbar { width: 8px; }
+.leaderboard-scroll::-webkit-scrollbar-thumb {
+  background: var(--border); border-radius: 4px;
+}
+
 .chat-thread { display: grid; gap: 1rem; }
 
 /* --- messages ------------------------------------------------------- */

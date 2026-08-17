@@ -328,7 +328,7 @@ export default function Profile({ apiBase, user: authUser, onNavigate }) {
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
-    fetch(`${apiBase}/profile/leaderboard?days=30&limit=5`, { headers: authHeaders() })
+    fetch(`${apiBase}/profile/leaderboard?days=30&limit=15`, { headers: authHeaders() })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => d?.success && setBoard(d))
       .catch(() => {});
@@ -454,7 +454,7 @@ export default function Profile({ apiBase, user: authUser, onNavigate }) {
             <span className="section-title">Last 30 days</span>
             <span style={{ fontSize: '0.6875rem', color: 'var(--text-faint)' }}>rolling window</span>
           </div>
-          <div style={{ display: 'grid', gap: '0.5rem' }}>
+          <div className="leaderboard-scroll" style={{ display: 'grid', gap: '0.5rem', paddingRight: '0.25rem' }}>
             {board.entries.map((e) => (
               <div
                 key={e.user_id}
