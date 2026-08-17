@@ -1,6 +1,7 @@
 import logging
 from agno.agent import Agent
 from app.models.groq_with_fallback import GroqWithFallback
+from app.config.groq_config import get_fast_model, get_reasoning_model
 from dotenv import load_dotenv
 from textwrap import dedent
 import json
@@ -35,17 +36,41 @@ class AdvancedMealPlannerService:
     def __init__(self):
         self.advanced_meal_agent = Agent(
             name="AdvancedMealPlanner",
-            # A seven-day plan is the largest output any agent here produces:
-            # ~12,200 characters (about 3,000 tokens) at 3 meals/day, more at 5.
-            # With no explicit limit the model used its own default and stopped
-            # mid-object, which surfaced as "Agent did not return complete JSON".
+            # A seven-day plan is the largest output any agent here produces.
+            # 6000 was originally tuned against llama-3.3-70b-versatile at
+            # ~12,200 characters for 3 meals/day. gpt-oss-120b (the reasoning
+            # tier, below) is noticeably more verbose for this exact prompt -
+            # tested live at 6000 it truncated JSON even at 3 meals/day
+            # (11,347 chars, invalid).
             #
-            # 6000 rather than something larger because Groq bills
-            # input + max_tokens against the daily quota regardless of how much
-            # is actually generated - so an over-generous reserve is charged on
-            # every request. 6000 covers 5 meals/day with headroom while keeping
-            # roughly 12-13 plans per key per day.
-            model=GroqWithFallback(max_tokens=6000),
+            # NOT simply raised to fix that: at max_tokens=9500 the request
+            # was rejected outright - "Request too large ... tokens per
+            # minute (TPM): Limit 8000, Requested 10531" - a hard per-request
+            # ceiling on this Groq account distinct from the daily quota
+            # this file's comments otherwise talk about. That number blocks
+            # ANY model on this account, not just this one, and the
+            # documented fallback below hit the identical wall on gpt-oss-20b
+            # in the same test, confirming it's the request, not the model,
+            # that gets rejected. Left at 6000 - safely under that ceiling -
+            # rather than picked a number that trades a clear TPM rejection
+            # for a smaller chance of silent-ish truncation; both failure
+            # modes are already surfaced to the caller as a clear error
+            # rather than bad data, so this is a real open tradeoff, not a
+            # settled one. Worth the team checking whether all three Groq
+            # accounts share this same 8000 TPM figure before tuning further.
+            #
+            # Reasoning tier: this is the single largest, most constrained
+            # output any agent here produces - a strict nested JSON schema
+            # across 7 days, each day required to total four separate macro
+            # numbers within range, with zero tolerance for a malformed
+            # object (there is no markdown fallback path for a plan the
+            # frontend cannot parse). Falls back to the fast tier only once
+            # the reasoning tier is fully exhausted on every key; a plan
+            # that's slightly worse at hitting macros is still preferable to
+            # the caller getting nothing.
+            model=GroqWithFallback(
+                id=get_reasoning_model(), fallback_id=get_fast_model(), max_tokens=6000
+            ),
             description=dedent("""\
                 You are AdvancedMealPlanner, a clinically-minded nutritionist & meal planner.
                 Your job: produce a practical, healthy 7-day meal plan tailored to the user's

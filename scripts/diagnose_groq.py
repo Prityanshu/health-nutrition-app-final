@@ -4,9 +4,9 @@ Diagnose Groq connectivity, key health and model availability.
 
 Answers, in order:
   1. Are the API keys loaded and valid?
-  2. Is the model we hardcode still available on Groq?
-  3. Does a plain completion work?
-  4. Does a tool-calling completion work?
+  2. Are the two models the app currently asks for still available on Groq?
+  3. Does a plain completion work on the reasoning model?
+  4. Does a tool-calling completion work on the reasoning model?
   5. Are we actually rate limited?
 
 Run from the project root with the venv active:
@@ -26,8 +26,17 @@ load_dotenv()
 
 GREEN, RED, YELLOW, DIM, RESET = "\033[92m", "\033[91m", "\033[93m", "\033[2m", "\033[0m"
 
-# What the code currently asks for, in conversation_manager.py and every service.
-EXPECTED_MODEL = "llama-3.3-70b-versatile"
+# Read from config rather than hardcoded here, so this script can never drift
+# out of sync with what the app actually requests the way it did when Groq
+# retired llama-3.3-70b-versatile out from under a hardcoded string.
+from app.config.groq_config import get_fast_model, get_reasoning_model  # noqa: E402
+
+FAST_MODEL = get_fast_model()
+REASONING_MODEL = get_reasoning_model()
+# The tool-calling / plain-completion checks below need one concrete target;
+# the reasoning model is the one that actually has to support tool calling
+# (the chat orchestrator), so it's the more important of the two to verify live.
+EXPECTED_MODEL = REASONING_MODEL
 
 
 def main():
@@ -121,27 +130,25 @@ def main():
     # --- model availability -------------------------------------------
     print()
     print("=" * 72)
-    print("MODEL AVAILABILITY")
+    print("MODEL AVAILABILITY (both tiers - see groq_config.py)")
     print("=" * 72)
-    print(f"code requests: {EXPECTED_MODEL}")
-    if EXPECTED_MODEL in available:
-        print(f"{GREEN}✓ still available{RESET}")
-        target = EXPECTED_MODEL
-    else:
-        print(f"{RED}✗ NOT AVAILABLE — this is almost certainly your failure{RESET}")
-        target = None
+
+    tier_ok = True
+    for label, model_id in [("GROQ_FAST_MODEL", FAST_MODEL), ("GROQ_REASONING_MODEL", REASONING_MODEL)]:
+        if model_id in available:
+            print(f"{label:20} {model_id:28} {GREEN}✓ available{RESET}")
+        else:
+            print(f"{label:20} {model_id:28} {RED}✗ NOT AVAILABLE{RESET}")
+            tier_ok = False
+
+    if not tier_ok:
         print(f"\n{DIM}Models your key can currently use:{RESET}")
         for m in available:
             print(f"    {m}")
-        # Suggest the closest tool-capable replacement
-        for candidate in available:
-            low = candidate.lower()
-            if "llama" in low and ("70b" in low or "versatile" in low or "17b" in low):
-                target = candidate
-                break
-        if target:
-            print(f"\n{YELLOW}Suggested replacement: {target}{RESET}")
+        print(f"\n{YELLOW}Update GROQ_FAST_MODEL / GROQ_REASONING_MODEL in .env to one of "
+              f"the above, then re-run this script.{RESET}")
 
+    target = REASONING_MODEL if REASONING_MODEL in available else None
     if not target:
         return 1
 
@@ -202,61 +209,41 @@ def main():
         print(f"    {DIM}Model exists but does not support tools - pick a tool-capable model.{RESET}")
         return 1
 
-    # --- orchestrator candidates --------------------------------------
+    # --- fast tier sanity check -----------------------------------------
     #
-    # Groq quotas are per model, so running the orchestrator on a smaller model
-    # gives it a separate daily bucket. It must support tool calling, which is
-    # the whole point - so test that rather than assume it.
+    # The fast tier is deliberately NOT expected to handle tools (it failed
+    # that test when the split was chosen - see groq_config.py) - this just
+    # confirms it can still do a plain completion, which is all six of the
+    # agents on it ever ask of it.
     print()
     print("=" * 72)
-    print("ORCHESTRATOR CANDIDATES  (separate per-model quota)")
+    print(f"FAST TIER CHECK  ({FAST_MODEL})")
     print("=" * 72)
-
-    small = [
-        m for m in available
-        if any(tag in m.lower() for tag in ("8b", "20b", "instant", "mini", "small", "oss"))
-        and m != target
-    ]
-    if not small:
-        print(f"{DIM}No obviously smaller model available; keeping one model for everything.{RESET}")
+    if FAST_MODEL == target:
+        print(f"{DIM}Fast and reasoning tier are the same model right now - nothing "
+              f"further to check.{RESET}")
+    elif FAST_MODEL not in available:
+        print(f"{RED}✗ not available - see MODEL AVAILABILITY above{RESET}")
     else:
-        print(f"{DIM}Testing tool calling on each (only tool-capable models qualify)...{RESET}\n")
-        winners = []
-        for candidate in small[:5]:
-            try:
-                t0 = time.time()
-                r = client.chat.completions.create(
-                    model=candidate,
-                    messages=[{"role": "user", "content": "Plan a workout for muscle gain at the gym"}],
-                    tools=tools,
-                    tool_choice="auto",
-                    max_tokens=200,
-                )
-                took = time.time() - t0
-                if r.choices[0].message.tool_calls:
-                    print(f"  {GREEN}✓{RESET} {candidate:34} tool calling OK  ({took:.1f}s)")
-                    winners.append(candidate)
-                else:
-                    print(f"  {YELLOW}!{RESET} {candidate:34} replied in text, did not call the tool")
-            except Exception as e:
-                reason = "no tool support" if "tool" in str(e).lower() else str(e)[:60]
-                print(f"  {RED}✗{RESET} {candidate:34} {reason}")
-
-        if winners:
-            print()
-            print(f"{GREEN}Recommended split:{RESET}")
-            print(f"  GROQ_ORCHESTRATOR_MODEL={winners[0]}")
-            print(f"  GROQ_MODEL={target}")
-            print(f"\n{DIM}Add both to .env. The orchestrator carries the tool schemas")
-            print(f"(~80% of per-message tokens) and will draw on its own daily quota,")
-            print(f"leaving the {target} budget for actually generating plans.{RESET}")
+        try:
+            t0 = time.time()
+            r = client.chat.completions.create(
+                model=FAST_MODEL,
+                messages=[{"role": "user", "content": "Say OK and nothing else."}],
+                max_tokens=10,
+            )
+            print(f"{GREEN}✓{RESET} plain completion ({time.time()-t0:.1f}s): "
+                  f"{r.choices[0].message.content!r}")
+        except Exception as e:
+            print(f"{RED}✗ plain completion failed ({time.time()-t0:.1f}s){RESET}\n    {str(e)[:400]}")
 
     print()
     print("=" * 72)
-    if target != EXPECTED_MODEL:
-        print(f"{YELLOW}ACTION: set GROQ_MODEL={target} in .env{RESET}")
+    if tier_ok:
+        print(f"{GREEN}Groq is healthy - both tiers available and working.{RESET}")
     else:
-        print(f"{GREEN}Groq is healthy.{RESET}")
+        print(f"{YELLOW}Reasoning tier works, but see MODEL AVAILABILITY above - "
+              f"one tier is misconfigured.{RESET}")
     print("=" * 72)
     return 0
 

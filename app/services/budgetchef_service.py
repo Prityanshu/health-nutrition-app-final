@@ -1,6 +1,7 @@
 import logging
 from agno.agent import Agent
 from app.models.groq_with_fallback import GroqWithFallback
+from app.config.groq_config import get_fast_model, get_reasoning_model
 from dotenv import load_dotenv
 from textwrap import dedent
 import json
@@ -13,13 +14,28 @@ class BudgetChefService:
         self.budget_meal_agent = Agent(
             name="BudgetChef",
             tools=[],
-            model=GroqWithFallback(),
+            # Reasoning tier: budget (₹) + calories + macros have to be held
+            # simultaneously across a full day's meals, with no deterministic
+            # check afterward the way CulinaryExplorer's macro_target path has
+            # (see macro_targets.py) - the arithmetic-shaped judgment has to
+            # land in the one generation, unverified. Falls back to the fast
+            # tier only once the reasoning tier is fully exhausted across
+            # every key - an imperfect plan beats the plain error this
+            # service returns today when generation fails outright.
+            model=GroqWithFallback(id=get_reasoning_model(), fallback_id=get_fast_model()),
             description=dedent("""\
                 You are BudgetChef, a savvy culinary planner who balances nutrition and cost. 🛒💰
                 
                 Your mission: create meal plans that maximize nutrition and flavor while staying
                 within the user's daily or weekly budget."""),
             instructions=dedent("""\
+                FORMATTING: Never use Markdown tables, including for the daily
+                meal plan or shopping list. The app's renderer and PDF export
+                only understand headings, bullet points, numbered lists and
+                bold text - a table renders as broken pipe-delimited text.
+                Use a bulleted or numbered list for each meal instead, with
+                cost and calories as bold inline text on the same line.
+
                 Approach each meal plan with these steps:
 
                 1. Input Analysis 📝

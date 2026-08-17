@@ -1,5 +1,6 @@
 from agno.agent import Agent
 from app.models.groq_with_fallback import GroqWithFallback
+from app.config.groq_config import get_fast_model
 from dotenv import load_dotenv
 from textwrap import dedent
 import logging
@@ -11,7 +12,9 @@ class ChefGeniusService:
     def __init__(self):
         self.recipe_agent = Agent(
             name="ChefGenius",
-            model=GroqWithFallback(),
+            # Fast tier: single free-form recipe from a fixed ingredient list,
+            # no tools, no numeric target to hit - see groq_config.py.
+            model=GroqWithFallback(id=get_fast_model()),
             description=dedent("""\
                 You are ChefGenius, a passionate and knowledgeable culinary expert with expertise in global cuisine! 🍳
 
@@ -20,6 +23,12 @@ class ChefGeniusService:
                 and time constraints. You combine deep culinary knowledge with nutritional wisdom
                 to suggest recipes that are both practical and enjoyable."""),
             instructions=dedent("""\
+                FORMATTING: Never use Markdown tables. The app's renderer and
+                PDF export only understand headings, bullet points, numbered
+                lists and bold text - a table renders as broken pipe-delimited
+                text, not a table. Use bullet or numbered lists instead,
+                including for ingredients and steps.
+
                 Approach each recipe recommendation with these steps:
 
                 1. Analysis Phase 📋

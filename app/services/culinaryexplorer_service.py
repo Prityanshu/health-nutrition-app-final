@@ -1,6 +1,7 @@
 import logging
 from agno.agent import Agent
 from app.models.groq_with_fallback import GroqWithFallback
+from app.config.groq_config import get_fast_model
 from dotenv import load_dotenv
 from textwrap import dedent
 import json
@@ -38,7 +39,13 @@ class CulinaryExplorerService:
         self.regional_food_agent = Agent(
             name="CulinaryExplorer",
             tools=[],  # Removed ExaTools due to potential API errors
-            model=GroqWithFallback(),
+            # Fast tier: creative regional-recipe generation, no tools. When a
+            # macro_target IS given (see generate_regional_meal_plan below),
+            # the numbers are checked and one corrective retry is issued
+            # deterministically by macro_targets.verify()/retry_brief() - the
+            # arithmetic accuracy that would justify the reasoning tier is
+            # already handled in Python, not left to the model.
+            model=GroqWithFallback(id=get_fast_model()),
             description=dedent("""\
                 You are CulinaryExplorer, a culturally aware and health-focused chef. 🌍🍴
 
@@ -51,6 +58,11 @@ class CulinaryExplorerService:
                 authentic taste and cultural notes.
             """),
             instructions=dedent("""\
+                FORMATTING: Never use Markdown tables. The app's renderer and
+                PDF export only understand headings, bullet points, numbered
+                lists and bold text - a table renders as broken pipe-delimited
+                text, not a table. Use bullet or numbered lists instead.
+
                 Approach each recipe recommendation with these steps:
 
                 1. Input Analysis 📝

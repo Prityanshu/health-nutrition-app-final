@@ -180,7 +180,7 @@ Details in **[ANDROID.md](ANDROID.md)**.
 | SQLAlchemy 2.0 + SQLite | Data, in WAL mode for concurrent reads |
 | Pydantic 2.5 | Validation |
 | python-jose + passlib/bcrypt | JWT auth, password hashing |
-| agno + Groq (`llama-3.3-70b-versatile`) | The AI agents, with key rotation |
+| agno + Groq (`gpt-oss-20b` / `gpt-oss-120b`) | The AI agents, on a fast/reasoning tier split, with key rotation |
 | ReportLab | Plan PDFs |
 | Open Food Facts, USDA FoodData Central | Sourced nutrition data |
 

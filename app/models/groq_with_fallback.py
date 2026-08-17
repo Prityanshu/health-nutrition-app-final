@@ -51,9 +51,21 @@ def _is_retryable(error: Exception) -> bool:
 
 
 class GroqWithFallback(Groq):
-    """Groq model that rotates through configured API keys on rate-limit errors."""
+    """
+    Groq model that rotates through configured API keys on rate-limit errors,
+    and optionally falls back to a second MODEL once every key is exhausted
+    on the first.
 
-    def __init__(self, id: str = None, **kwargs):
+    `fallback_id` is a last resort, not a live alternative: it is only ever
+    tried after the primary model has already failed on every configured key,
+    and only for the plain `response()` / `aresponse()` calls that the agents
+    in this app actually use (agno's Agent.run/arun) - not the streaming
+    variants, which nothing here calls, to keep this from growing into a
+    fallback system nobody exercises. Whether it's safe to set at all is a
+    per-agent decision made by the caller - see each service's own comment.
+    """
+
+    def __init__(self, id: str = None, fallback_id: str = None, **kwargs):
         id = id or get_model_id()
         api_key = groq_config.get_current_api_key()
         if not api_key:
@@ -62,6 +74,8 @@ class GroqWithFallback(Groq):
                 "GROQ_API_KEY_2 / GROQ_API_KEY_3) in your environment."
             )
         super().__init__(id=id, api_key=api_key, **kwargs)
+        self._primary_id = id
+        self.fallback_id = fallback_id if fallback_id != id else None
 
     def _apply_current_key(self) -> bool:
         """
@@ -92,9 +106,16 @@ class GroqWithFallback(Groq):
     def _attempts(self) -> int:
         return max(1, len(groq_config.api_keys))
 
+    def _set_model(self, model_id: str) -> None:
+        if self.id != model_id:
+            self.id = model_id
+            self.client = None
+            self.async_client = None
+
     # ---- sync paths -----------------------------------------------------
 
-    def response(self, *args, **kwargs):
+    def _response_for_model(self, model_id, args, kwargs):
+        self._set_model(model_id)
         last_error = None
         for attempt in range(self._attempts()):
             try:
@@ -105,15 +126,32 @@ class GroqWithFallback(Groq):
             except Exception as e:
                 last_error = e
                 if not _is_retryable(e):
-                    logger.error("Non-retryable Groq error: %s", e)
+                    logger.error("Non-retryable Groq error (%s): %s", model_id, e)
                     raise
                 logger.warning(
-                    "Groq key '%s' failed (attempt %d/%d): %s",
-                    self._current_key_name(), attempt + 1, self._attempts(), e,
+                    "Groq key '%s' failed on %s (attempt %d/%d): %s",
+                    self._current_key_name(), model_id, attempt + 1, self._attempts(), e,
                 )
                 handle_groq_error(e)
-        logger.error("All Groq API keys exhausted. Last error: %s", last_error)
         raise last_error
+
+    def response(self, *args, **kwargs):
+        try:
+            return self._response_for_model(self._primary_id, args, kwargs)
+        except Exception as e:
+            if not self.fallback_id:
+                logger.error("All Groq API keys exhausted. Last error: %s", e)
+                raise
+            logger.warning(
+                "%s exhausted on every key; falling back to %s once.",
+                self._primary_id, self.fallback_id,
+            )
+            try:
+                return self._response_for_model(self.fallback_id, args, kwargs)
+            finally:
+                # Back to the primary model for the NEXT call, not stuck on
+                # the fallback for the rest of this agent's lifetime.
+                self._set_model(self._primary_id)
 
     def response_stream(self, *args, **kwargs):
         last_error = None
@@ -134,7 +172,8 @@ class GroqWithFallback(Groq):
 
     # ---- async paths ----------------------------------------------------
 
-    async def aresponse(self, *args, **kwargs):
+    async def _aresponse_for_model(self, model_id, args, kwargs):
+        self._set_model(model_id)
         last_error = None
         for attempt in range(self._attempts()):
             try:
@@ -145,15 +184,30 @@ class GroqWithFallback(Groq):
             except Exception as e:
                 last_error = e
                 if not _is_retryable(e):
-                    logger.error("Non-retryable Groq error: %s", e)
+                    logger.error("Non-retryable Groq error (%s): %s", model_id, e)
                     raise
                 logger.warning(
-                    "Groq key '%s' failed (attempt %d/%d): %s",
-                    self._current_key_name(), attempt + 1, self._attempts(), e,
+                    "Groq key '%s' failed on %s (attempt %d/%d): %s",
+                    self._current_key_name(), model_id, attempt + 1, self._attempts(), e,
                 )
                 handle_groq_error(e)
-        logger.error("All Groq API keys exhausted. Last error: %s", last_error)
         raise last_error
+
+    async def aresponse(self, *args, **kwargs):
+        try:
+            return await self._aresponse_for_model(self._primary_id, args, kwargs)
+        except Exception as e:
+            if not self.fallback_id:
+                logger.error("All Groq API keys exhausted. Last error: %s", e)
+                raise
+            logger.warning(
+                "%s exhausted on every key; falling back to %s once.",
+                self._primary_id, self.fallback_id,
+            )
+            try:
+                return await self._aresponse_for_model(self.fallback_id, args, kwargs)
+            finally:
+                self._set_model(self._primary_id)
 
     async def aresponse_stream(self, *args, **kwargs):
         last_error = None

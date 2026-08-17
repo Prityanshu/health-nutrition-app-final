@@ -254,41 +254,70 @@ class GroqConfigManager:
         logger.info("Reset all API keys")
 
 # ---------------------------------------------------------------------------
-# Model selection
+# Model selection: two named tiers, not one model everywhere.
+#
+# GROQ_FAST_MODEL  - high-frequency / low-reasoning work: single-food nutrition
+#                    estimates, free-form recipe/regional-cuisine generation.
+#                    No agent on this tier uses tools (grep `tools=` in
+#                    app/services/), so the tool-calling weakness a small model
+#                    has doesn't cost anything here.
+# GROQ_REASONING_MODEL - multi-constraint numeric planning (budget + calories +
+#                    macros at once), injury-safety-adjacent output, strict
+#                    large JSON schemas, and the chat orchestrator's tool
+#                    selection.
+#
+# This is an allocation, not a blanket upgrade: three of the six generator
+# agents (ChefGenius, CulinaryExplorer, NutrientAnalyzer) stay on the fast
+# tier because their output isn't schema-strict and, where it does carry a
+# numeric target (CulinaryExplorer's optional macro_target), a deterministic
+# verify-and-retry already backs the number up - see macro_targets.py. The
+# other three (BudgetChef, FitMentor, AdvancedMealPlanner) and the
+# orchestrator go on the reasoning tier - see each service's own comment for
+# why that one specifically needs it.
 #
 # Groq rate limits are per MODEL as well as per organisation - the 429 body
-# says "Rate limit reached for model `X` ... on tokens per day". So running the
-# orchestrator and the generators on DIFFERENT models gives each its own daily
-# bucket, roughly doubling capacity on the same key.
+# says "Rate limit reached for model `X` ... on tokens per day" - so splitting
+# work across two models gives each its own daily bucket rather than every
+# agent competing for one.
 #
-# The split also matches the work. The orchestrator only decides "converse or
-# call a tool, and with which arguments", but it carries the tool schemas on
-# every request - about 80% of the per-message token cost. That is easy work
-# being billed at a large-model rate. The generators, which actually write
-# recipes and workout plans, are where quality matters.
+# GROQ_MODEL / GROQ_ORCHESTRATOR_MODEL still work as before (checked first,
+# below) so nothing set on an existing deployment breaks; GROQ_FAST_MODEL /
+# GROQ_REASONING_MODEL are the names to reach for going forward.
 #
-# Both are env-overridable because Groq retires models on a rolling basis, and
-# a retired model returns an immediate 400 that key rotation cannot recover
-# from. (llama-3.1-8b-instant was deprecated for free tier on 2026-06-17.)
+# All four are env-overridable because Groq retires models on a rolling basis
+# and a retired model returns an immediate 400 that key rotation cannot
+# recover from. (llama-3.1-8b-instant was deprecated for free tier on
+# 2026-06-17; llama-3.3-70b-versatile was removed from the account entirely by
+# 2026-08-17 - confirmed against GET https://api.groq.com/openai/v1/models
+# rather than assumed, since Groq does not announce these on any fixed
+# schedule.)
 # ---------------------------------------------------------------------------
 
-GENERATOR_MODEL_ID = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-ORCHESTRATOR_MODEL_ID = os.getenv("GROQ_ORCHESTRATOR_MODEL", GENERATOR_MODEL_ID)
+FAST_MODEL_ID = os.getenv("GROQ_FAST_MODEL", os.getenv("GROQ_MODEL", "openai/gpt-oss-20b"))
+REASONING_MODEL_ID = os.getenv(
+    "GROQ_REASONING_MODEL", os.getenv("GROQ_ORCHESTRATOR_MODEL", "openai/gpt-oss-120b")
+)
+
+# Old names, kept as aliases - existing imports (get_model_id, the module
+# constants) keep working unchanged.
+GENERATOR_MODEL_ID = FAST_MODEL_ID
+ORCHESTRATOR_MODEL_ID = REASONING_MODEL_ID
 
 
-def get_model_id() -> str:
-    """Model for the specialist agents that generate recipes, plans, workouts."""
-    return GENERATOR_MODEL_ID
+def get_fast_model() -> str:
+    """High-frequency, low-reasoning tier. See the module comment above."""
+    return FAST_MODEL_ID
 
 
-def get_orchestrator_model() -> str:
-    """
-    Model for the conversation orchestrator (routing + tool selection).
+def get_reasoning_model() -> str:
+    """Multi-constraint / tool-calling tier. See the module comment above."""
+    return REASONING_MODEL_ID
 
-    Defaults to the generator model so behaviour is unchanged until
-    GROQ_ORCHESTRATOR_MODEL is set - opting in is a one-line env change.
-    """
-    return ORCHESTRATOR_MODEL_ID
+
+# Aliases for the names already imported elsewhere in the codebase - unchanged
+# call sites, unchanged behaviour, just backed by the tier split now.
+get_model_id = get_fast_model
+get_orchestrator_model = get_reasoning_model
 
 
 # Global instance

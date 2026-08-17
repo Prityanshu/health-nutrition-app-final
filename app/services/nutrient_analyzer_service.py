@@ -2,6 +2,7 @@ import logging
 from typing import Dict, Optional
 from agno.agent import Agent
 from app.models.groq_with_fallback import GroqWithFallback
+from app.config.groq_config import get_fast_model
 from dotenv import load_dotenv
 from textwrap import dedent
 import json
@@ -60,7 +61,13 @@ class NutrientAnalyzerService:
         self.nutrient_agent = Agent(
             name="NutrientAnalyzer",
             tools=[],  # Removed ExaTools due to potential API errors
-            model=GroqWithFallback(),
+            # Fast tier: the highest-frequency call in the app (every meal-log
+            # food that misses the deterministic Open Food Facts/USDA lookup
+            # in food_lookup.py falls through to here), and a single food's
+            # nutrition estimate for ONE base unit - portion scaling is done
+            # in Python by parse_serving() below, not asked of the model, so
+            # there's no arithmetic reasoning riding on this call at all.
+            model=GroqWithFallback(id=get_fast_model()),
             description=dedent("""\
                 You are NutrientAnalyzer, a health-focused nutrition expert. 🥦📊
 
@@ -70,6 +77,10 @@ class NutrientAnalyzerService:
                 info from known sources and approximate when needed.
             """),
             instructions=dedent("""\
+                FORMATTING: Never use a Markdown table, here or anywhere in
+                your reply. The app's renderer and PDF export only understand
+                headings, bullet points, numbered lists and bold text.
+
                 For each user query follow these steps:
 
                 1. Input Parsing 📝
@@ -93,8 +104,9 @@ class NutrientAnalyzerService:
                    - Adjust all values to the portion given by user
 
                 5. Output Format 📝
-                   - JSON-like structure or table for easy parsing by your backend
-                   - Include "food_name", "serving_size" and "nutrients" keys
+                   - End your reply with a fenced ```json code block (not a table)
+                     containing "food_name", "serving_size" and "nutrients" keys,
+                     for the backend to parse - the prose above it is for the user
 
                 6. Feedback 🔄
                    - If the food is not found, politely ask for clarification or offer closest match

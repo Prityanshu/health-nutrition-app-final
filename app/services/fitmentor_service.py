@@ -2,6 +2,7 @@ import logging
 import re
 from agno.agent import Agent
 from app.models.groq_with_fallback import GroqWithFallback
+from app.config.groq_config import get_fast_model, get_reasoning_model
 from dotenv import load_dotenv
 from textwrap import dedent
 import json
@@ -13,7 +14,18 @@ class FitMentorService:
     def __init__(self):
         self.fitness_agent = Agent(
             name="FitMentor",
-            model=GroqWithFallback(),
+            # Reasoning tier: a 7-day plan has to simultaneously respect
+            # sport-specific demands, equipment/time limits, AND every injury
+            # exclusion in constraints_block below - the most constraints of
+            # any single-shot generation in the app. Safe to fall back to the
+            # fast tier under exhaustion specifically BECAUSE injury safety
+            # here does not depend on which model drafted the plan: the
+            # severity gate above blocks generation outright before any model
+            # is called, and plan_repair.py checks and fixes the output
+            # afterward regardless of source - the model's job is plan
+            # quality within already-enforced bounds, not the safety
+            # decision itself.
+            model=GroqWithFallback(id=get_reasoning_model(), fallback_id=get_fast_model()),
             description=dedent("""\
                 You are FitMentor, a knowledgeable and motivating personal fitness coach. 🏋️‍♂️
                 
@@ -21,6 +33,13 @@ class FitMentorService:
                 activity level, fitness goal, age, weight, available time, and any constraints.
                 You adapt plans weekly based on user feedback and progress."""),
             instructions=dedent("""\
+                FORMATTING: Never use Markdown tables, including for the
+                weekly schedule or sets/reps. The app's renderer and PDF
+                export only understand headings, bullet points, numbered
+                lists and bold text - a table renders as broken pipe-
+                delimited text. Use a bulleted or numbered list per day
+                instead, with sets/reps as bold inline text.
+
                 Approach each plan creation with these steps:
 
                 1. Input Analysis 📝
