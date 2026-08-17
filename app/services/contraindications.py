@@ -522,24 +522,6 @@ VERDICT_UNSAFE = "unsafe"            # classified, and it hits a restriction
 VERDICT_CONDITIONAL = "conditional"  # not confidently classified, injury active
 VERDICT_UNKNOWN = "unknown"          # not classified, no injury to worry about
 
-# Words that make an unclassified line worth questioning rather than ignoring.
-# A line the ontology cannot read is only a risk if it is prescribing effort.
-# Lines that are instructions, not exercises. Without this, "Rest 90 seconds
-# between sets" is unclassifiable + prescriptive-looking, so it becomes
-# CONDITIONAL and gets swapped for a stationary bike.
-_INSTRUCTION = re.compile(
-    r"^\s*(?:rest|recover|recovery(?!\s+day)|tempo|rpe|note|tip|progression|"
-    r"duration|total|focus|remember|aim|target|cue|breathe|hydrat|"
-    r"warm[\s-]?up\s*:?\s*$|cool[\s-]?down\s*:?\s*$)\b",
-    re.I,
-)
-
-_EFFORT_HINTS = (
-    "set", "sets", "rep", "reps", "x8", "x10", "x12", "min", "minute",
-    "second", "sec", "round", "circuit", "drill", "exercise", "hold",
-    "km", "metre", "meter", "mile", "interval",
-)
-
 
 def classify_line(line: str, profiles: list) -> dict:
     """
@@ -549,14 +531,47 @@ def classify_line(line: str, profiles: list) -> dict:
     movement AND the user has an active injury. Treating that as safe is the
     unsafe default this exists to remove - an exercise nobody recognised is
     exactly the one most likely to be a novel name for something restricted.
+
+    Whether a line is even a candidate for judgement at all - as opposed to a
+    heading or a programme instruction like "Rest 90 seconds" - is answered
+    structurally by plan_structure, not by whether the line happens to contain
+    a dosage-shaped word. That used to be the same check: an unclassifiable
+    line only became CONDITIONAL if it also looked like it carried effort
+    ("sets", "rounds", "seconds"...), which meant "- Ankle pogo" and
+    "- Ankle pogo: 4 rounds" - structurally identical, both a bare bulleted
+    item - were judged differently for no reason connected to safety.
     """
     from app.services import movement_ontology as ontology
+    from app.services import plan_structure as structure
 
     text = (line or "").strip()
     if not text:
         return {"line": text, "verdict": VERDICT_SAFE, "patterns": [], "reasons": []}
 
+    role = structure.classify_single_line(text)
     movement = ontology.classify_prescribed(text)
+
+    if role not in (structure.PRESCRIPTION_CANDIDATE, structure.AMBIGUOUS):
+        # A heading or a programme instruction carries no movement, so there
+        # is nothing to judge and nothing to replace. An AMBIGUOUS item -
+        # unlike a definite container/instruction - IS judged: it falls
+        # through to the ontology lookup below exactly like a definite
+        # prescription, which is what lets "Power Pull" or "Push-up" reach
+        # CONDITIONAL/UNSAFE instead of silently passing as structural.
+        #
+        # The one exception, matching safety_subjects_for(): an INSTRUCTION
+        # that nonetheless names a movement the ontology recognises is
+        # still judged. "Perform push-ups with controlled form" prescribes
+        # push-ups whatever its phrasing, and an instructional wrapper must
+        # never be able to hide a real movement from an active injury.
+        instruction_with_movement = (
+            role == structure.INSTRUCTION and profiles and movement.patterns
+        )
+        if not instruction_with_movement:
+            reason = ("instruction, not an exercise" if role == structure.INSTRUCTION
+                      else "not a prescribed item")
+            return {"line": text, "verdict": VERDICT_UNKNOWN, "patterns": [],
+                    "clash": [], "reasons": [reason]}
 
     if movement.patterns:
         restricted: Set[str] = set()
@@ -578,17 +593,10 @@ def classify_line(line: str, profiles: list) -> dict:
             "reasons": reasons,
         }
 
-    # Unclassified from here on.
-    stripped = re.sub(r"^\s*(?:[-*•+]|\d+[.)])\s*", "", text)
-    if _INSTRUCTION.match(stripped):
-        # Programme instructions carry no movement, so there is nothing to
-        # judge and nothing to replace.
-        return {"line": text, "verdict": VERDICT_UNKNOWN, "patterns": [],
-                "clash": [], "reasons": ["instruction, not an exercise"]}
-
-    lowered = text.lower()
-    looks_prescriptive = any(hint in lowered for hint in _EFFORT_HINTS)
-    if profiles and looks_prescriptive:
+    # A prescription candidate the ontology could not read. Cautious by
+    # design when an injury is active - not gated on whether the line also
+    # happens to mention a set/rep/round, which is the bug this replaced.
+    if profiles:
         return {
             "line": text,
             "verdict": VERDICT_CONDITIONAL,
@@ -602,16 +610,115 @@ def classify_line(line: str, profiles: list) -> dict:
 
 
 def assess_plan(plan_text: str, profiles: list) -> List[dict]:
-    """Per-line verdicts for a whole plan. Structured, for callers and logs."""
+    """
+    Per-prescription-block verdicts for a whole plan.
+
+    One verdict per canonical safety subject (`plan_structure.safety_subjects`)
+    - definite prescriptions, plus AMBIGUOUS decorated leaves whenever a
+    profile is active - keyed to that item's primary line number, never per
+    raw line. A dosage continuation line like "3x20 seconds" carries no
+    exercise of its own, so it must not generate a second, independent
+    verdict for the same block; doing so previously meant a plain dosage
+    line could itself look like an unclassifiable prescription and get
+    "repaired", orphaning or duplicating work that belonged to the bullet
+    above it. This is the single entry point for "which items need a
+    verdict" - nothing here filters `item.role` directly.
+    """
+    from app.services import plan_structure as structure
+
+    items = structure.parse(plan_text)
+    subjects = safety_subjects_for(items, constraints_active=bool(profiles))
+
     out = []
-    for line_no, raw in enumerate(plan_text.splitlines()):
-        text = raw.strip()
-        if not text or text.startswith("#"):
-            continue
-        verdict = classify_line(text, profiles)
-        verdict["line_no"] = line_no
+    for item in subjects:
+        verdict = classify_line(item.raw_lines[0], profiles)
+        verdict["line_no"] = item.line_numbers[0]
         out.append(verdict)
     return out
+
+
+def safety_subjects_for(items: list, constraints_active: bool) -> list:
+    """
+    The canonical safety subject list, plus one rule the structural layer
+    cannot express on its own:
+
+        a line that CONTAINS a recognised movement is always audited,
+        however instructional its phrasing.
+
+    plan_structure classifies "Perform push-ups with controlled form" as an
+    instruction - reasonably, since it is phrased as coaching - and that is
+    fine for counting exercises, but it must never decide safety. The
+    movement ontology is the authority on whether text contains a real
+    movement, so this asks it directly and pulls any instruction that names
+    one back into the pipeline.
+
+    Deliberately the smallest possible rule rather than more English
+    grammar: an instruction the ontology finds nothing in ("Rest 90 seconds
+    between sets", "Breathe normally", "Focus on controlled form") stays an
+    instruction and is never touched, because there is no movement in it to
+    be unsafe. Nothing here has to anticipate how a sentence is worded.
+
+    Only applies while a constraint is active. A healthy user has nothing to
+    audit against, so behaviour - and returned text - is unchanged.
+    """
+    from app.services import movement_ontology as ontology
+    from app.services import plan_structure as structure
+
+    subjects = structure.safety_subjects(items, constraints_active=constraints_active)
+    if not constraints_active:
+        return subjects
+
+    seen = {s.line_numbers[0] for s in subjects}
+    for item in items:
+        if item.role != structure.DEFINITE_INSTRUCTION:
+            continue
+        if item.line_numbers[0] in seen:
+            continue
+        if ontology.classify_prescribed(item.raw_lines[0]).patterns:
+            subjects.append(item)
+            seen.add(item.line_numbers[0])
+    subjects.sort(key=lambda it: it.line_numbers[0])
+    return subjects
+
+
+def _is_bare_candidate_probe(plan_text: str) -> bool:
+    """
+    True only for a single bare exercise-name-shaped line with no
+    surrounding document structure - what replacement validation actually
+    passes ("Stationary bike", "Bent over row", never a multi-line plan).
+
+    Deliberately does not use plan_structure.parse() at all: parse() only
+    ever produces items for genuine bulleted/numbered lines, so a bare
+    single line with no marker always parses to an empty list regardless of
+    content - that emptiness is exactly what this function exists to tell
+    apart from "the caller handed me a whole document that legitimately has
+    no exercises in it" (`audit_against_profiles` already checked
+    `all_items` for that before ever calling this). classify_single_line()
+    is the same structural judgement parse() uses per line; it just does
+    not need a document to apply it to.
+    """
+    from app.services import plan_structure as structure
+
+    nonblank = [ln for ln in (plan_text or "").splitlines() if ln.strip()]
+    if len(nonblank) != 1:
+        return False
+    return structure.classify_single_line(nonblank[0]) in (
+        structure.PRESCRIPTION_CANDIDATE, structure.AMBIGUOUS,
+    )
+
+
+def _should_use_bare_fallback(plan_text: str, all_items: list, items: list) -> bool:
+    """
+    The complete gate for the bare-candidate fallback, isolated so it is one
+    single decision rather than something re-derived at each call site.
+
+    All three conditions matter: `items` empty is not enough on its own -
+    that was the original defect (`if not items:`), which treated a real
+    Nutrition-only or Safety-only document (zero prescription candidates,
+    but `all_items` very much non-empty) exactly like an unstructured bare
+    candidate name.
+    """
+    return not items and not all_items and _is_bare_candidate_probe(plan_text)
 
 
 def audit_against_profiles(plan_text: str, profiles: list) -> List[dict]:
@@ -622,14 +729,43 @@ def audit_against_profiles(plan_text: str, profiles: list) -> List[dict]:
     injuries - replacement validation does exactly this - parse the injuries
     once instead of re-parsing them for every candidate. Same logic, same
     single source of truth; only the entry point differs.
+
+    Routed through plan_structure rather than scanning every non-blank line
+    independently. That used to mean a prose sentence under a "### Nutrition"
+    or "### Safety" heading which merely MENTIONED a movement word - "Refuel
+    after running with carbohydrates", "Squats may aggravate knee pain" - was
+    classified and flagged exactly like a real prescription, because nothing
+    here knew it was reading commentary rather than a plan item.
+
+    plan_structure.parse() only recognises genuine bulleted/numbered lines,
+    so a caller checking a single BARE candidate name with no list marker at
+    all (`_find_replacement` validates every catalogue candidate this way)
+    would otherwise vanish from the audit entirely. The fallback below covers
+    exactly that case - but ONLY that case. It must not trigger just because
+    a real multi-line document happened to contain zero prescription
+    candidates (a Nutrition-only or Safety-only plan is a valid, legitimate
+    zero): `_is_bare_candidate_probe` requires the input to be a single bare
+    line with no structure of its own, not merely "parse() found nothing to
+    audit here".
     """
     from app.services import movement_ontology as ontology
+    from app.services import plan_structure as structure
+
+    if not plan_text or not plan_text.strip():
+        return []
+
+    all_items = structure.parse(plan_text)
+    items = safety_subjects_for(all_items, constraints_active=bool(profiles))
+    if _should_use_bare_fallback(plan_text, all_items, items):
+        items = [structure.PlanItem(
+            role=structure.PRESCRIPTION_CANDIDATE, line_numbers=[0],
+            raw_lines=[plan_text], body=plan_text.strip(),
+        )]
 
     findings: List[dict] = []
-    for line_no, raw_line in enumerate(plan_text.splitlines()):
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
+    for item in items:
+        line_no = item.line_numbers[0]
+        line = item.raw_lines[0].strip()
 
         movement = ontology.classify_prescribed(line)
         if not movement.patterns:
@@ -657,6 +793,31 @@ def audit_against_profiles(plan_text: str, profiles: list) -> List[dict]:
     return findings
 
 
+def _prescription_candidates(plan_text: str) -> List[Tuple[int, str]]:
+    """
+    (line_no, raw_line) for every canonical prescription candidate, plus the
+    single bare-line probe fallback - the SAME resolution
+    `audit_against_profiles` uses. `_audit_by_name` and `_intensity_findings`
+    call this instead of scanning `plan_text.splitlines()` themselves, so a
+    "### Nutrition"/"### Safety" bullet, a container label, or an instruction
+    line is invisible to the name/intensity checks for exactly the same
+    reason it is invisible to the pattern-based audit - one canonical
+    resolution, not two independently-parsed ones that can disagree.
+    """
+    from app.services import plan_structure as structure
+
+    if not plan_text or not plan_text.strip():
+        return []
+
+    all_items = structure.parse(plan_text)
+    # Only ever called from _audit_by_name() after it has already confirmed
+    # `constraints` is non-empty, so a constraint is guaranteed active here.
+    items = safety_subjects_for(all_items, constraints_active=True)
+    if _should_use_bare_fallback(plan_text, all_items, items):
+        return [(0, plan_text)]
+    return [(it.line_numbers[0], it.raw_lines[0]) for it in items]
+
+
 def _audit_by_name(plan_text: str, constraints: List[str]) -> List[dict]:
     """
     Find excluded movements that made it into a generated plan.
@@ -671,7 +832,11 @@ def _audit_by_name(plan_text: str, constraints: List[str]) -> List[dict]:
 
     This is a text scan, so it is deterministic and cannot be argued with.
     Returns one entry per offending line, with the injury and movement that
-    triggered it, for the caller to strip or flag.
+    triggered it, for the caller to strip or flag. Scoped to canonical
+    prescription candidates only (`_prescription_candidates`) - a Nutrition
+    bullet that merely MENTIONS an excluded movement word is commentary, not
+    a violation, and must read the same way here as it does to the
+    pattern-based audit.
     """
     if not plan_text or not constraints:
         return []
@@ -686,19 +851,19 @@ def _audit_by_name(plan_text: str, constraints: List[str]) -> List[dict]:
     severity = int(severity_match.group(1)) if severity_match else 5
     stage = stage_for(severity)
 
+    candidates = _prescription_candidates(plan_text)
+
     if not relevant:
         # No exclusion data for this injury - but an injury was still stated,
         # so intensity language is worth flagging. This is what stops an
         # unrecognised condition producing a completely unguarded plan.
-        return _intensity_findings(plan_text, "stated injury", stage) if joined else []
+        return _intensity_findings(candidates, "stated injury", stage) if joined else []
 
     # A line that names an exercise in order to say it is being AVOIDED is not
     # a violation - it is the plan doing the right thing.
     findings: List[dict] = []
-    for line_no, raw_line in enumerate(plan_text.splitlines()):
+    for line_no, raw_line in candidates:
         line = raw_line.lower()
-        if not line.strip():
-            continue
         # Position matters. "Cycling instead of running" is an avoidance;
         # "Squats: 3 sets of 8 (avoid deep squats)" is PRESCRIBING squats and
         # merely qualifying them. Skipping any line containing "avoid" let the
@@ -728,7 +893,7 @@ def _audit_by_name(plan_text: str, constraints: List[str]) -> List[dict]:
     # Impact only matters if at least one active injury is load-bearing.
     impact_sensitive = any(getattr(e, "impact_sensitive", True) for e in relevant)
     for finding in _intensity_findings(
-        plan_text, relevant[0].label, stage, impact_sensitive
+        candidates, relevant[0].label, stage, impact_sensitive
     ):
         if finding["line_no"] not in known_lines:
             findings.append(finding)
@@ -736,8 +901,8 @@ def _audit_by_name(plan_text: str, constraints: List[str]) -> List[dict]:
     return findings
 
 
-def _intensity_findings(plan_text: str, injury_label: str, stage: dict,
-                        impact_sensitive: bool = True) -> List[dict]:
+def _intensity_findings(candidates: List[Tuple[int, str]], injury_label: str,
+                        stage: dict, impact_sensitive: bool = True) -> List[dict]:
     """
     Flag high-intensity language while an injury is still healing.
 
@@ -747,6 +912,10 @@ def _intensity_findings(plan_text: str, injury_label: str, stage: dict,
     this is the only check here that can catch something nobody anticipated.
 
     Skipped in the final stage, where rebuilding speed is the entire point.
+    Takes the same canonical `(line_no, raw_line)` prescription candidates
+    `_audit_by_name` already resolved - not plan_text - so this can never
+    catch "explosive" inside a Safety-section warning that USES the word
+    without prescribing anything.
     """
     if "intensity" not in stage["excludes"]:
         return []
@@ -758,9 +927,9 @@ def _intensity_findings(plan_text: str, injury_label: str, stage: dict,
         markers = markers + IMPACT_INTENSITY_MARKERS
 
     out: List[dict] = []
-    for line_no, raw_line in enumerate(plan_text.splitlines()):
+    for line_no, raw_line in candidates:
         line = raw_line.strip().lower()
-        if not line or line.startswith("#"):
+        if not line:
             continue
         earliest = _earliest_avoidance(line)
         for marker in markers:

@@ -222,19 +222,118 @@ def _find_replacement(line: str, profiles: list, equipment: str,
     return Replacement(line, None, reason, sorted(prohibited), sorted(purpose))
 
 
+# Matches "Exercise Name: 4x8 @ RPE 7" or "Exercise Name - 4x8 @ RPE 7" (en/em
+# dash) - the two separators real generated plans actually use between a name
+# and its prescription. Deliberately NOT a plain ASCII hyphen: exercise names
+# routinely contain one ("Chest-supported row", "Bench-supported row"), and
+# splitting on it would cut a legitimate name in half instead of finding a
+# dosage.
+_DOSAGE_SPLIT = re.compile(r"^(.*?)\s*[:–—]\s*(.+)$")
+
+
+def _dosage_suffix(original_line: str) -> str:
+    """
+    Whatever came after the exercise name - sets, reps, rest, RPE, tempo,
+    side - so a substitution can carry the original prescription forward
+    instead of silently dropping it. "Bench-supported row: 4x8 @ RPE 7, rest
+    90 sec" keeps "4x8 @ RPE 7, rest 90 sec" regardless of which exercise
+    replaces the name before the separator. Returns "" when the line never
+    had a dosage to begin with - nothing is fabricated that was not there.
+    """
+    body = re.sub(r"^\s*(?:[-*•+]|\d+[.)])?\s*", "", original_line).strip()
+    body = re.sub(r"^[*_]{1,2}", "", body).strip()
+    m = _DOSAGE_SPLIT.match(body)
+    if not m:
+        return ""
+    dosage = m.group(2).strip()
+    dosage = re.sub(r"^\*+|\*+$", "", dosage).strip()  # leftover bold marker
+    # Pure decoration is not a prescription. A decorated label splits on its
+    # en-dash into name + "🏋️‍♂️", and carrying that forward produced
+    # "Stationary bike, steady pace: 🏋️‍♂️" - a dosage of nothing. Real
+    # dosage always contains a digit or a word ("4x8", "RPE 7", "each side").
+    if not re.search(r"[0-9A-Za-z]", dosage):
+        return ""
+    return dosage
+
+
 def _apply(plan_text: str, decisions: Dict[int, Replacement]) -> str:
-    """Rewrite the plan, keeping the original bullet formatting."""
+    """
+    Rewrite the plan, keeping the original bullet formatting.
+
+    Operates on whole prescription blocks - a bulleted line plus any dosage
+    continuation lines beneath it (plan_structure.parse) - not on isolated
+    lines. A removal takes its dosage lines with it instead of leaving
+    "3x20 seconds" behind with nothing above it; a replacement keeps them,
+    since sets/reps/tempo apply just as well to whatever exercise now heads
+    the block. Plans with no continuation lines - every existing single-line
+    "Name: dosage" plan - behave exactly as before.
+    """
+    from app.services import plan_structure as structure
+
+    lines = plan_text.splitlines()
+    items = structure.parse(plan_text)
+    item_by_line: Dict[int, structure.PlanItem] = {}
+    for item in items:
+        for ln in item.line_numbers:
+            item_by_line[ln] = item
+
+    # Resolve every decision to the canonical owned block FIRST, then emit
+    # in strict document order. `plan_structure.owned_block_lines` is the
+    # single definition of block membership: the item's own lines plus any
+    # nested dosage/coaching-context children, never a nested exercise.
+    #
+    # Emitting in document order (rather than writing a block's remaining
+    # lines out immediately after its replacement) matters because an
+    # item's owned context lines are not necessarily contiguous - an
+    # independent exercise can sit between an exercise and a later "RPE 7"
+    # bullet that still belongs to the first one - and appending eagerly
+    # would silently reorder the plan.
+    dropped: Set[int] = set()
+    replaced: Dict[int, Replacement] = {}
+    for index, decision in decisions.items():
+        item = item_by_line.get(index)
+        block = structure.owned_block_lines(item, items) if item else [index]
+        if decision.replacement is None:
+            dropped.update(block)   # nothing safe does this job; block goes
+        else:
+            replaced[index] = decision   # owned context lines simply survive
+
     out = []
-    for index, raw in enumerate(plan_text.splitlines()):
-        decision = decisions.get(index)
+    for index, raw in enumerate(lines):
+        if index in dropped:
+            continue
+        decision = replaced.get(index)
         if decision is None:
             out.append(raw)
             continue
-        if decision.replacement is None:
-            continue  # nothing safe does this job; the line goes
         prefix = re.match(r"^\s*(?:[-*•+]|\d+[.)])?\s*", raw).group(0)
-        out.append(f"{prefix}{decision.replacement}")
+        dosage = _dosage_suffix(raw)
+        line = f"{decision.replacement}: {dosage}" if dosage else decision.replacement
+        out.append(f"{prefix}{line}")
     return "\n".join(out)
+
+
+def _strip_blocks(plan_text: str, line_numbers: Set[int]) -> str:
+    """
+    Remove these lines, taking any owned dosage/context lines with them.
+
+    Used by the final audit passes below - removing just the primary line of
+    a block that has separate dosage lines (folded-in continuations OR
+    nested dosage bullets) would leave them orphaned in the returned plan.
+    Block membership comes from the same canonical
+    `plan_structure.owned_block_lines` that `_apply` uses; there is
+    deliberately no second definition of what a block is.
+    """
+    from app.services import plan_structure as structure
+
+    lines = plan_text.splitlines()
+    items = structure.parse(plan_text)
+    item_by_line = {ln: item for item in items for ln in item.line_numbers}
+    to_remove: Set[int] = set()
+    for ln in line_numbers:
+        item = item_by_line.get(ln)
+        to_remove.update(structure.owned_block_lines(item, items) if item else [ln])
+    return "\n".join(line for i, line in enumerate(lines) if i not in to_remove)
 
 
 # ---------------------------------------------------------------------------
@@ -285,22 +384,33 @@ def regeneration_brief(profiles: list, quality: Optional[dict]) -> str:
     for profile in profiles:
         restricted |= profile.restricted_patterns()
 
-    lines = ["The previous plan had to have exercises removed for safety.",
-             "Produce a revised plan that AVOIDS these movement types entirely:"]
-    for pattern in sorted(restricted):
-        lines.append(f"  - {descriptions.get(pattern, pattern.replace('_', ' '))}")
+    # No injury profiles means nothing was removed for safety - this is a
+    # pure quality regeneration (wrong duration, wrong sport/goal alignment,
+    # unmeasurable progression...). The two cases need different opening
+    # wording: claiming a safety removal that never happened would send the
+    # model looking for a restriction that does not exist.
+    if restricted:
+        lines = ["The previous plan had to have exercises removed for safety.",
+                 "Produce a revised plan that AVOIDS these movement types entirely:"]
+        for pattern in sorted(restricted):
+            lines.append(f"  - {descriptions.get(pattern, pattern.replace('_', ' '))}")
 
-    lines.append("")
-    lines.append("This applies to warm-ups, cool-downs and recovery days too. "
-                 "Avoiding a named exercise is not enough - any variation with "
-                 "the same movement is equally out.")
-
-    if quality and quality.get("issues"):
         lines.append("")
-        lines.append("The filtered plan was also inadequate:")
-        for issue in quality["issues"]:
+        lines.append("This applies to warm-ups, cool-downs and recovery days too. "
+                     "Avoiding a named exercise is not enough - any variation with "
+                     "the same movement is equally out.")
+
+        if quality and quality.get("issues"):
+            lines.append("")
+            lines.append("The filtered plan was also inadequate:")
+            for issue in quality["issues"]:
+                lines.append(f"  - {issue}")
+            lines.append("Build a full session from what IS available rather than a short one.")
+    else:
+        lines = ["The previous plan did not meet the brief. Fix the following "
+                 "without changing anything that already works:"]
+        for issue in (quality or {}).get("issues", []):
             lines.append(f"  - {issue}")
-        lines.append("Build a full session from what IS available rather than a short one.")
 
     safe = sorted({p for prof in profiles for p in prof.keep_patterns()} - restricted)
     if safe:
@@ -327,24 +437,27 @@ def repair(
     """
     Make a generated plan safe, then make it usable if it can be.
 
+    Runs the same way whether or not there are injury profiles. There used to
+    be a separate early-return for a healthy user - evaluate quality, skip
+    straight to returning it - but that meant the ENTIRE quality/regeneration
+    loop below (duration realism, goal and sport alignment, equipment
+    violations, measurable progression) only ever ran for someone with an
+    injury constraint, and silently never for anyone else. `_repair_once`
+    already handles an empty profile list correctly - the injury audit just
+    finds nothing to flag - so the two paths were doing the same work with
+    extra code, for a worse result on the common case.
+
     `regenerate` is a callback taking a brief and returning a new plan, so this
     module has no knowledge of the model or its client. Omit it and repair
     still runs - it simply cannot regenerate, which is exactly what the tests
     want and what an offline caller needs.
     """
     from app.services import injury_taxonomy as taxonomy
-    from app.services import plan_quality
-    from app.services.contraindications import audit_against_profiles
+    from app.services.contraindications import (
+        VERDICT_CONDITIONAL, assess_plan, audit_against_profiles,
+    )
 
     profiles = [p for p in (taxonomy.parse(c) for c in (constraints or [])) if p]
-
-    # Healthy user: nothing to do, and nothing that could go wrong. Returning
-    # early guarantees the repair path cannot introduce a false positive.
-    if not profiles:
-        quality = plan_quality.evaluate(plan_text, requested_minutes=requested_minutes,
-                                        goal=goal, sport=sport, equipment=equipment,
-                                        level=level)
-        return RepairResult(plan=plan_text, quality=quality.as_dict())
 
     attempt = 0
     result = _repair_once(plan_text, profiles, equipment, requested_minutes, goal, sport, level)
@@ -381,23 +494,48 @@ def repair(
         if result.quality.get("adequate"):
             break
 
-    # FINAL audit. Whatever happened above, nothing prohibited leaves here.
+    # FINAL audit, sweep one: strip whatever is still wrong from the plan
+    # BEFORE the adjustment note is appended below - the note describes
+    # `result.removed`/`result.replacements`, so it has to be built from the
+    # final set of removals, not before them. Two separate sweeps, not one:
+    # a pattern-clash violation and an unclassified prescription candidate
+    # during an active injury are different failure modes, and a plan can
+    # carry either without the other. `_strip_blocks` removes each finding's
+    # whole prescription block (any dosage lines with it), never just the
+    # one line a finding happened to point at.
     leftover = audit_against_profiles(result.plan, profiles)
     if leftover:
         logger.error("Final audit found %d prohibited line(s) after repair - removing.",
                      len(leftover))
-        bad = {f["line_no"] for f in leftover}
-        result.plan = "\n".join(
-            line for i, line in enumerate(result.plan.splitlines()) if i not in bad
-        )
+        result.plan = _strip_blocks(result.plan, {f["line_no"] for f in leftover})
         result.removed += [f["line"] for f in leftover]
-        # Re-check, so `audit_clean` is a measured fact rather than an assumption.
-        result.audit_clean = not audit_against_profiles(result.plan, profiles)
-    else:
-        result.audit_clean = True
+
+    unresolved = [v for v in assess_plan(result.plan, profiles)
+                  if v["verdict"] == VERDICT_CONDITIONAL]
+    if unresolved:
+        logger.error("Final audit found %d unresolved conditional item(s) after "
+                     "repair - removing.", len(unresolved))
+        result.plan = _strip_blocks(result.plan, {v["line_no"] for v in unresolved})
+        result.removed += [v["line"] for v in unresolved]
 
     result.still_inadequate = not result.quality.get("adequate", True)
     result.plan = _append_note(result)
+
+    # FINAL audit, sweep two: audit_clean is measured against the EXACT
+    # string this function is about to return - note included - not the
+    # pre-note plan. A note whose own bullets were misread as prescriptions
+    # would otherwise leave audit_clean=True while the actual returned text
+    # still carried an unresolved candidate; `_append_note` structures the
+    # note under a recognised plan_structure non-exercise heading precisely
+    # so that does not happen, and this is what actually verifies it rather
+    # than assuming it. Read-only on purpose - nothing strips further from
+    # an already-assembled note; a finding here is a bug to fix in how the
+    # note is built, not something to silently repair away.
+    result.audit_clean = (
+        not audit_against_profiles(result.plan, profiles)
+        and not any(v["verdict"] == VERDICT_CONDITIONAL
+                    for v in assess_plan(result.plan, profiles))
+    )
     return result
 
 
@@ -430,14 +568,25 @@ def _repair_once(plan_text, profiles, equipment, requested_minutes, goal, sport,
         if verdict["line_no"] in decisions:
             continue
         decision = _find_replacement(verdict["line"], profiles, equipment, used)
-        decision.reason = ("could not be classified while an injury is active, "
-                           "so it was replaced with something known to be safe")
+        # FAIL CLOSED: whether or not a substitute was found, this line
+        # always gets a decision recorded now. The previous version only
+        # recorded one when `decision.replacement` was truthy - if nothing
+        # safe could be proposed, the line was never added to `decisions` at
+        # all, so _apply() left it in the plan completely unchanged. An
+        # unclassifiable movement during an active injury with no validated
+        # safe substitute must be REMOVED, not kept on the assumption that
+        # "could not classify" means "probably fine".
         if decision.replacement:
+            decision.reason = ("could not be classified while an injury is active, "
+                               "so it was replaced with something known to be safe")
             used.add(decision.replacement)
-            decisions[verdict["line_no"]] = decision
         else:
-            logger.warning("Unclassifiable line kept with no safe substitute: %r",
+            decision.reason = ("could not be classified while an injury is active, "
+                               "and no validated safe substitute exists - removed "
+                               "rather than kept unverified")
+            logger.warning("Unclassifiable line removed (no safe substitute): %r",
                            verdict["line"][:60])
+        decisions[verdict["line_no"]] = decision
 
     repaired = _apply(plan_text, decisions)
     replacements = [d for d in decisions.values() if d.substituted]
@@ -467,16 +616,22 @@ def _append_note(result: RepairResult) -> str:
     """
     Explain what changed, in structured-enough prose.
 
-    The note is deliberately written so the auditor's negation handling spares
-    it - it leads with "swapped"/"removed" before naming anything - but the
-    caller should prefer `result.as_dict()` as the source of truth. Parsing
-    this back would be exactly the mistake that made a safety note trigger the
-    safety filter.
+    "Adjustment Notes" is deliberately a heading plan_structure's category
+    vocabulary recognises as non-exercise (see plan_structure's
+    _CATEGORY_ROOTS/_CATEGORY_MODIFIERS - "adjustment" is a modifier next to
+    the "notes" root), so every bullet under it is classified NON_EXERCISE
+    and can never re-enter the audit as a prescription candidate. That is the
+    actual mechanism now: repair()'s final audit runs on this exact,
+    note-appended string. The wording still leads with "Swapped"/"Removed"
+    before naming anything, which independently spares it from
+    movement_ontology's own negation handling - a second, unrelated line of
+    defence, not the one doing the real work. The caller should still prefer
+    `result.as_dict()` as the source of truth over parsing this text back.
     """
     if not result.replacements and not result.removed:
         return result.plan
 
-    parts = ["\n\n---", "**Adjusted for your injury**"]
+    parts = ["\n\n---", "**Adjustment Notes**"]
     for swap in result.replacements:
         parts.append(f"- Swapped *{swap.original}* for **{swap.replacement}** — {swap.reason}.")
     for line in result.removed:

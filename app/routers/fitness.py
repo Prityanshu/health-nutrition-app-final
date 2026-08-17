@@ -77,6 +77,20 @@ class WorkoutAdaptationRequest(BaseModel):
         default=None,
         description="Additional progress notes (optional)"
     )
+    # Same free-text injury strings generate-workout-plan takes. Optional so
+    # existing callers keep working, but without it an adapted plan for
+    # someone with an active injury gets no deterministic safety check at
+    # all - only the original generation did. Pass the same constraints used
+    # to generate current_plan.
+    constraints: List[str] = Field(
+        default=[],
+        description="Same injury/limitation strings as generate-workout-plan, if any are active",
+    )
+    equipment: Optional[str] = Field(default=None, description="Equipment available, for a safe substitution")
+    time_per_day: Optional[int] = Field(default=None, ge=15, le=180)
+    fitness_goal: Optional[str] = Field(default=None)
+    sport: Optional[str] = Field(default=None, max_length=60)
+    activity_level: Optional[str] = Field(default=None)
 
 @router.post("/generate-workout-plan", status_code=201)
 async def generate_workout_plan(request: WorkoutPlanRequest):
@@ -154,7 +168,13 @@ async def adapt_workout_plan(request: WorkoutAdaptationRequest):
         result = await fitmentor_service.adapt_workout_plan(
             current_plan=request.current_plan,
             feedback=expanded,
-            progress_notes=request.progress_notes
+            progress_notes=request.progress_notes,
+            constraints=request.constraints,
+            equipment=request.equipment or "gym",
+            time_per_day=request.time_per_day,
+            fitness_goal=request.fitness_goal,
+            sport=request.sport,
+            activity_level=request.activity_level,
         )
 
         if result["success"]:

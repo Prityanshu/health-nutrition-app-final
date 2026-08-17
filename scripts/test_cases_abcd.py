@@ -181,9 +181,12 @@ Increase weight if too easy. Reduce rest time."""
 
     q = pq.evaluate(plan, requested_minutes=120, goal="endurance",
                     equipment="gym", level="advanced", sport="football")
-    joined = " ".join(q.issues)
-    check("under-programming detected against 120 minutes",
-          "under-programmed" in joined, f"{q.estimated_minutes} min, issues={q.issues}")
+    # Duration is advisory, not a gating issue - see the `advisory` field's
+    # own comment. It is reported here, not in `issues`, specifically so a
+    # measurement it gets wrong can never force a wasted regeneration.
+    joined = " ".join(q.advisory)
+    check("under-programming detected against 120 minutes (advisory, not gating)",
+          "under-programmed" in joined, f"{q.estimated_minutes} min, advisory={q.advisory}")
     check("field equipment flagged in a gym-only plan",
           any("field" in v for v in q.equipment_violations), f"{q.equipment_violations}")
     check("vague progression flagged",
@@ -262,6 +265,123 @@ def healthy_controls():
     check("no LLM regeneration for a healthy user", calls["n"] == 0)
 
 
+def duration_and_parsing():
+    """
+    Regression suite for the duration/exercise-count estimator.
+
+    Added after live FitMentor testing surfaced real plans - well-formed,
+    realistic 7-day plans, not malformed ones - being judged as needing
+    hundreds of minutes for a 20-90 minute request. Traced to concrete,
+    fixable bugs in exercise_lines()/estimate_minutes()/split_days(), not to
+    the model producing bad content. Each case below is a minimal, offline,
+    hand-built fixture reproducing one of those bugs - no LLM call involved,
+    matching what was actually seen rather than a synthetic worst case.
+    """
+    from app.services import plan_quality as pq
+    print(f"\n{BOLD}Duration/exercise-count estimation{RESET}")
+
+    # A real 7-day beginner plan (this exact text was generated and reviewed
+    # earlier in the session that added this test) - 5 exercises/day, proper
+    # warm-up/main/cool-down structure, requested at 30 min/day. This must
+    # NOT be flagged as needing hundreds of minutes, and must not be
+    # gate-blocked (advisory only) even if the estimate is imperfect.
+    real_plan = """**Your 7-Day Beginner General-Fitness Plan**
+*30 minutes per day - no equipment needed*
+
+### Day 1 - Full-Body Strength
+**Warm-up (5 min)**
+- March in place - 1 min
+- Arm circles (forward & backward) - 30 s each
+
+**Main (20 min)**
+- **Squat to Chair** - **12 reps x 2 sets**
+- **Incline Push-Ups** - **10 reps x 2 sets**
+- **Glute Bridge** - **15 reps x 2 sets**
+- **Bird-Dog** - **8 reps per side x 2 sets**
+- **Wall Sit** - **30 s x 2 sets**
+
+**Cool-down (5 min)**
+- Standing hamstring stretch - 30 s each leg
+- Child's pose - 1 min
+
+**Progression tip:** Add 2 reps to each movement every week.
+
+### Day 2 - Cardio + Core
+**Warm-up (5 min)**
+- Light jogging in place - 2 min
+
+**Main (20 min) - Perform the circuit 3 times, 30 s work / 30 s rest**
+- **High Knees**
+- **Standing Bicycle Crunches**
+- **Plank (knees if needed)** - **30 s**
+
+**Cool-down (5 min)**
+- Seated forward fold - 1 min
+
+**Progression tip:** Increase work interval to 35 s after week 2.
+
+### Day 7 - Rest & Light Mobility
+- Take a leisurely walk or gentle stretching for 20-30 min.
+
+**Progression tip:** Use this day to note any sore spots.
+
+### General Nutrition Tips (optional)
+- Aim for balanced meals with protein, complex carbs, and healthy fats.
+- Stay hydrated - roughly 2 L water daily.
+- For recovery, include a source of vitamin C and magnesium.
+
+### Safety & Warnings
+- Keep movements controlled; avoid bouncing on squats or push-ups.
+- If any exercise causes sharp pain, stop immediately.
+- Warm-up and cool-down are mandatory for injury prevention."""
+
+    q = pq.evaluate(real_plan, requested_minutes=30, goal="general_fitness",
+                    equipment="none", level="beginner")
+    check("real 30-min plan is not gate-blocked by duration/count",
+          q.adequate or not any(("will not fit" in i or "under-programmed" in i
+                                  or "exercises in one day" in i) for i in q.issues),
+          f"issues={q.issues}")
+    check("estimate is in a plausible range, not hundreds of minutes",
+          q.estimated_minutes < 90, f"estimated {q.estimated_minutes} min")
+    check("nutrition-tip bullets are not counted as exercises",
+          not any("balanced meals" in l or "hydrated" in l for l in pq.exercise_lines(real_plan)))
+    check("safety-warning bullets are not counted as exercises",
+          not any("sharp pain" in l or "mandatory" in l for l in pq.exercise_lines(real_plan)))
+
+    # Distance-based intervals must not be read as sets x reps.
+    sprint_plan = "* Sprint intervals: 8x100m\n* Cool-down walk: 5 min"
+    lines = pq.exercise_lines(sprint_plan)
+    mins = pq.estimate_minutes(lines)
+    check("8x100m is not read as 800 reps", mins < 30, f"estimated {mins} min for: {lines}")
+
+    # A day heading style split_days() does NOT recognise (weekday names, no
+    # literal "Day N") must still leave the plan usable - degrading to
+    # whole-plan estimation, not crashing or wildly misjudging a short plan.
+    monday_style = "### Monday\n* Push-ups: 3x10\n### Tuesday\n* Squats: 3x10"
+    days = pq.split_days(monday_style)
+    check("an unrecognised day-heading style is not a crash",
+          isinstance(days, list) and len(days) >= 1, f"{days!r}")
+
+    # Progression section text must never be counted as a prescribed exercise.
+    prog_plan = "* Bench press: 3x8\n### Progression\n* Add 2.5kg when all sets hit 8 reps."
+    lines = pq.exercise_lines(prog_plan)
+    check("a bulleted progression-section line is not counted as an exercise",
+          len(lines) == 1, f"{lines!r}")
+
+    # Warm-up/cool-down are detected, and duration scales sanely 20 -> 90 min.
+    for minutes in (20, 30, 60, 90):
+        plan = (
+            "* Warm-up: 5 min easy cardio\n"
+            "* Squat: 3 sets of 10\n* Push-up: 3 sets of 10\n* Row: 3 sets of 10\n"
+            "* Cool-down: 5 min stretch"
+        )
+        q = pq.evaluate(plan, requested_minutes=minutes, equipment="none")
+        check(f"{minutes}-min request: short realistic plan is not gate-blocked",
+              q.adequate, f"issues={q.issues}")
+    check("warm-up detected", q.has_warm_up)
+    check("cool-down detected", q.has_cool_down)
+
+
 def mutation():
     """Sabotage the new patterns; the Case A tests must fail."""
     from app.services import injury_taxonomy as tax
@@ -312,7 +432,7 @@ def main():
         mutation()
     else:
         case_a(); case_b(); case_c(); case_d()
-        unknown_handling(); healthy_controls(); mutation()
+        unknown_handling(); healthy_controls(); duration_and_parsing(); mutation()
     print(f"\n{BOLD}{passed} passed, {failed} failed{RESET}\n")
     return 1 if failed else 0
 

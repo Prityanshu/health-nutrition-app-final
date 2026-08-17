@@ -159,7 +159,10 @@ const STAGES = [
  * Refines the plan in place by calling /fitness/adapt-workout-plan directly,
  * so FitMentor is fully usable on its own without going through the assistant.
  */
-function FeedbackPanel({ apiBase, plan, onAdapted }) {
+function FeedbackPanel({
+  apiBase, plan, onAdapted,
+  constraints, equipment, timePerDay, fitnessGoal, sport, activityLevel,
+}) {
   const [selected, setSelected] = useState(null);
   const [detail, setDetail] = useState('');
   const [freeText, setFreeText] = useState('');
@@ -186,6 +189,13 @@ function FeedbackPanel({ apiBase, plan, onAdapted }) {
           current_plan: plan,
           feedback,
           progress_notes: null,
+          // Same injury/context the plan was generated with, so an
+          // adaptation goes through the identical deterministic safety
+          // check a fresh generation does - see fitmentor_service.py's
+          // adapt_workout_plan for why this matters.
+          constraints: constraints || [],
+          equipment, time_per_day: timePerDay, fitness_goal: fitnessGoal,
+          sport, activity_level: activityLevel,
         }),
       });
       const data = await res.json();
@@ -664,6 +674,12 @@ export default function FitMentor({ apiBase }) {
             apiBase={apiBase}
             plan={currentPlan}
             onAdapted={setAdapted}
+            constraints={constraints.map(encodeInjury)}
+            equipment={equipment}
+            timePerDay={minutes}
+            fitnessGoal={goal}
+            sport={sport.trim() || null}
+            activityLevel={level}
           />
         </>
       )}

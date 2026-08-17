@@ -48,14 +48,63 @@ OVERUSE_FRACTION = 1.4
 
 # Equipment implied by particular words. Used to catch a "home" plan that
 # quietly assumes a cable stack, or a "gym" plan that needs a football pitch.
+#
+# "field" deliberately excluded as its own bare marker: it matches inside
+# "on-field performance", "off-field conditioning" and similar phrases that
+# describe a SPORT, not equipment the session itself requires. "pitch",
+# "cone drill" etc. carry the same signal without that false-positive shape.
+# "shuttle" is excluded for the same kind of reason - a shuttle run / pro
+# agility shuttle is routine gym-floor or indoor-court programming
+# (basketball, tennis, football conditioning all use it indoors), not
+# something that actually implies grass or an outdoor field.
 _EQUIPMENT_MARKERS = {
-    "gym": ("barbell", "cable", "machine", "leg press", "lat pulldown", "smith",
-            "bench press", "squat rack", "dumbbell", "kettlebell", "treadmill",
+    "gym": ("barbell", "cable machine", "cable row", "leg press", "lat pulldown",
+            "smith machine", "bench press", "squat rack", "treadmill",
             "rowing machine", "elliptical", "pec deck", "hack squat"),
-    "field": ("pitch", "field", "cones", "cone drill", "ladder drill", "track",
-              "shuttle", "agility ladder", "grass", "turf", "hill sprint"),
+    "field": ("pitch", "cone drill", "ladder drill", "agility ladder",
+              "hill sprint", "on grass", "on turf"),
     "pool": ("swim", "pool", "aqua"),
+    # What "home" equipment means, per this app's OWN /fitness/equipment-
+    # options description: "Basic equipment like dumbbells, resistance
+    # bands". These used to sit in the "gym" list above, which meant a plan
+    # correctly built for equipment="home" and mentioning a dumbbell - the
+    # thing home equipment IS - was flagged as assuming gym-only kit it
+    # explicitly did not have.
+    "home": ("dumbbell", "kettlebell", "resistance band", "bench"),
 }
+
+_EQUIPMENT_ALLOWED = {
+    "none": set(),
+    "home": {"home"},
+    "gym": {"gym", "home"},
+}
+
+_EQUIPMENT_NEGATION = r"(?:no|not|without|skip|avoid(?:ing)?|don'?t|do\s+not|isn'?t|is\s+not)"
+_EQUIPMENT_OPTIONAL = r"(?:optional|if\s+you\s+have|if\s+available|where\s+available|not\s+required|not\s+needed)"
+
+
+def _mentions_required(lowered: str, marker: str) -> bool:
+    """
+    Does the plan actually assume this piece of kit, rather than just
+    mentioning it to say it is not needed or is optional?
+
+    Checked per occurrence, both directions: "no dumbbells required" and
+    "dumbbells optional" both name the word without requiring it. A plain
+    substring search could not tell "assumes a barbell" from "no barbell
+    needed" apart - both simply contain the word "barbell".
+    """
+    pattern = re.escape(marker)
+    for m in re.finditer(rf"\b{pattern}\b", lowered):
+        window_before = lowered[max(0, m.start() - 24):m.start()]
+        window_after = lowered[m.end():m.end() + 24]
+        if re.search(rf"{_EQUIPMENT_NEGATION}\s*(?:[a-z]+\s+){{0,3}}$", window_before):
+            continue
+        if re.search(rf"^\s*(?:[a-z]+\s+){{0,2}}{_EQUIPMENT_OPTIONAL}", window_after):
+            continue
+        if re.search(_EQUIPMENT_OPTIONAL, window_before):
+            continue
+        return True
+    return False
 
 # Goals and the movement patterns a plan for them should actually contain.
 # Deliberately loose - this catches a plan that ignores the goal entirely,
@@ -68,6 +117,84 @@ _GOAL_EXPECTATIONS = {
     "weight_loss": {"low_impact", "cardio_intensity", "squat", "horizontal_push"},
     "general_fitness": {"squat", "horizontal_push", "horizontal_pull", "low_impact"},
 }
+
+# What a sport's performance actually depends on, expressed in the same
+# movement-pattern vocabulary movement_ontology already uses - not a second
+# taxonomy, just this module reusing the one that exists. Matched by substring
+# against whatever free text the user typed as their sport, so "football",
+# "American football" and "5-a-side football" all resolve without listing
+# every phrasing.
+#
+# Deliberately archetypal rather than exhaustive: most sports converge onto a
+# handful of physical demands (repeat-sprint invasion sports, rotational
+# racquet sports, steady-state endurance, grappling/striking combat sports,
+# strength/power sports), and a sport this dict has never heard of is meant to
+# fall through cleanly - see sport_qualities() below - not be treated as
+# needing nothing.
+SPORT_QUALITIES = {
+    # field/court invasion sports - repeat sprint, cutting, jumping
+    "football": {"high_speed", "cutting", "hip_hinge"},
+    "soccer": {"high_speed", "cutting", "hip_hinge"},
+    "rugby": {"high_speed", "cutting", "hip_hinge"},
+    "basketball": {"jumping", "cutting", "high_speed"},
+    "hockey": {"high_speed", "cutting"},
+    "handball": {"jumping", "cutting", "high_speed"},
+    "volleyball": {"jumping", "vertical_push"},
+    "cricket": {"high_speed", "spinal_rotation"},
+    # racquet / rotational sports
+    "tennis": {"cutting", "spinal_rotation", "unilateral"},
+    "badminton": {"cutting", "high_speed"},
+    "squash": {"cutting", "high_speed"},
+    "table tennis": {"spinal_rotation"},
+    # endurance
+    "running": {"running", "hip_hinge", "calf_raise"},
+    "marathon": {"running", "hip_hinge", "calf_raise"},
+    "triathlon": {"running", "horizontal_pull"},
+    "cycling": {"squat", "hip_hinge"},
+    "swimming": {"horizontal_pull", "vertical_pull", "overhead"},
+    # combat
+    "boxing": {"gripping", "hip_hinge", "cardio_intensity"},
+    "mma": {"gripping", "hip_hinge", "cardio_intensity"},
+    "wrestling": {"gripping", "hip_hinge"},
+    "judo": {"gripping", "hip_hinge"},
+    "kickboxing": {"cutting", "cardio_intensity"},
+    # strength/power/other
+    "powerlifting": {"squat", "hip_hinge", "horizontal_push"},
+    "weightlifting": {"squat", "hip_hinge", "vertical_push"},
+    "crossfit": {"squat", "hip_hinge", "cardio_intensity"},
+    "climbing": {"gripping", "vertical_pull"},
+    "golf": {"spinal_rotation", "hip_hinge"},
+}
+
+
+def sport_qualities(sport: Optional[str]) -> Optional[Set[str]]:
+    """
+    The movement patterns a named sport's performance depends on.
+
+    Returns None - not an empty set - for free text that matches nothing,
+    and callers MUST treat that as "skip this check", never as "this sport
+    needs no particular qualities". An empty set would silently pass any
+    plan; None makes the absence of an opinion explicit and unmissable.
+    """
+    if not sport or not sport.strip():
+        return None
+    lowered = sport.lower()
+    matched: Set[str] = set()
+    for key, qualities in SPORT_QUALITIES.items():
+        if key in lowered:
+            matched |= qualities
+    return matched or None
+
+
+# Movements that ask more of an unpracticed nervous system and connective
+# tissue than a beginner has built up, regardless of how good the coaching
+# cues are. Keyword match on purpose - the point is catching the model
+# reaching for these AT ALL for a beginner, not classifying every variant.
+_ADVANCED_ONLY_MARKERS = (
+    "snatch", "clean and jerk", "clean pull", "power clean", "clean & jerk",
+    "muscle-up", "muscle up", "depth jump", "box jump (high)", "plyometric",
+    "contrast set", "1rm", "max effort", "maximal effort",
+)
 
 # Progression language that can actually be followed.
 _MEASURABLE_PROGRESSION = (
@@ -94,6 +221,18 @@ class Quality:
     progression_measurable: Optional[bool] = None
     score: int = 100
     issues: List[str] = field(default_factory=list)
+    # Reported, but never gates `adequate` or drives regeneration - unlike
+    # `issues`. Per-day duration and exercise-count live here specifically
+    # because they depend on split_days() correctly finding day headings in
+    # free-form model markdown, which - tested live, repeatedly, against a
+    # variety of real FitMentor output - is not reliable enough to trust as a
+    # hard gate: a plan that is actually fine can get misjudged as absurdly
+    # over-length purely from a heading style the splitter did not recognise,
+    # and regenerating against a measurement error fixes nothing while
+    # tripling real Groq token cost for no benefit. Keeping the number
+    # visible (logged, returned to the caller) is still worth doing; forcing
+    # a doomed regeneration attempt on it is not.
+    advisory: List[str] = field(default_factory=list)
 
     @property
     def removed_fraction(self) -> float:
@@ -119,38 +258,70 @@ class Quality:
             "score": self.score,
             "adequate": self.adequate,
             "issues": list(self.issues),
+            "advisory": list(self.advisory),
         }
 
 
-# Lines that are structure, not exercises. Counting a day heading as an
-# exercise would make a two-exercise plan look like a six-exercise one.
-_STRUCTURAL = re.compile(
-    r"^\s*(?:#{1,6}\s|\*\*|day\s*\d|week\s|rest day|progression|nutrition|"
-    r"warm[\s-]?up\s*:?\s*$|cool[\s-]?down\s*:?\s*$|notes?\s*:|tips?\s*:|"
-    r"removed|important|overview|summary|plan\b)",
-    re.I,
-)
-_EXERCISE_LINE = re.compile(r"^\s*(?:[-*•+]|\d+[.)])\s*\S")
+# A genuine table row: at least two "| ... |" cells, not just a stray pipe
+# character inside a sentence.
+_TABLE_ROW = re.compile(r"^\s*\|.+\|.*\|\s*$", re.M)
 
 
 def exercise_lines(plan_text: str) -> List[str]:
     """
     The lines that actually prescribe something.
 
-    Deliberately conservative: a line has to look like a list item AND not
-    look like a heading. Over-counting would hide sparsity, which is the exact
-    failure this module exists to catch.
+    A thin wrapper over plan_structure.quality_subjects() - the single
+    canonical parser for "is this a prescribed item, a heading, an
+    instruction, or commentary" - see that module's docstring for why
+    splitting that question from movement classification mattered. This
+    used to be its own independent regex-based parser; keeping two meant
+    they could (and did) disagree.
+
+    quality_subjects() includes AMBIGUOUS leaves alongside definite
+    prescriptions (never definite containers, whose own decorated label
+    text - "Vertical Push (25 min)" - must not inflate the count while its
+    nested exercises are already being counted independently), so a
+    decorated unknown exercise like "Power Pull (2 min)" is still counted
+    as one exercise even though plan_structure could not prove what it was.
     """
-    out = []
-    for raw in (plan_text or "").splitlines():
-        line = raw.strip()
-        if not line or not _EXERCISE_LINE.match(line):
-            continue
-        body = re.sub(r"^\s*(?:[-*•+]|\d+[.)])\s*", "", line)
-        if _STRUCTURAL.match(body):
-            continue
-        out.append(body)
-    return out
+    from app.services import plan_structure as structure
+
+    items = structure.parse(plan_text)
+    return [item.body for item in structure.quality_subjects(items)]
+
+
+_DAY_HEADING = re.compile(r"^\s*#{0,6}\s*\*{0,2}\s*day\s*\d+\b", re.I | re.M)
+
+
+def split_days(plan_text: str) -> List[str]:
+    """
+    Break a multi-day plan into one chunk per day.
+
+    WHY THIS EXISTS
+    ----------------
+    requested_minutes and the beginner exercise-count limit are PER-DAY
+    budgets, but FitMentor always generates a full 7-day plan in one string.
+    Summing exercise_lines() across the whole text and comparing that against
+    a single day's minute budget makes any realistic week look absurd - a
+    genuinely well-formed 30-minutes/day plan, 7 days of it, reads as "550
+    minutes will not fit in 30" purely from being added up wrong, not from
+    being wrong. This was never caught because every existing test plan is
+    single-session text with no day structure at all.
+
+    A plan with fewer than two recognisable day headings comes back as one
+    section - i.e. unchanged behaviour for exactly the single-session shape
+    every existing test and the injury-repair path already use.
+    """
+    text = plan_text or ""
+    marks = list(_DAY_HEADING.finditer(text))
+    if len(marks) < 2:
+        return [text]
+    sections = []
+    for i, m in enumerate(marks):
+        end = marks[i + 1].start() if i + 1 < len(marks) else len(text)
+        sections.append(text[m.start():end])
+    return sections
 
 
 def estimate_minutes(lines: List[str]) -> int:
@@ -166,10 +337,18 @@ def estimate_minutes(lines: List[str]) -> int:
     for line in lines:
         lowered = line.lower()
 
-        # "3 sets of 8-12 reps", "3x8", "4 x 6"
+        # "3 sets of 8-12 reps", "3x8", "4 x 6" - but NOT "8x100m" or
+        # "6x400m", which are distance intervals in the same "NxM" shape.
+        # Treating "100m" as 100 reps at ~3.5s each overcounted a single
+        # sprint-interval line by 45+ minutes; distance/pace notation is
+        # routine for running, swimming, cycling and sprint drills, so this
+        # needs its own case rather than silently falling into reps.
         sets = reps = None
-        m = re.search(r"(\d+)\s*(?:sets?\s*(?:of|x)?|x)\s*(\d+)", lowered)
-        if m:
+        m = re.search(
+            r"(\d+)\s*(?:sets?\s*(?:of|x)?|x)\s*(\d+)\s*(m|km|meters|metres|miles|yards?)?",
+            lowered,
+        )
+        if m and not m.group(3):
             sets, reps = int(m.group(1)), int(m.group(2))
 
         # Timed work: "20 min", "3x45s", "30-60 seconds"
@@ -221,7 +400,7 @@ def _equipment_issues(plan_text: str, equipment: Optional[str]) -> List[str]:
     if not equipment:
         return []
     lowered = (plan_text or "").lower()
-    allowed = {"none": set(), "home": set(), "gym": {"gym"}}.get(equipment, {"gym"})
+    allowed = _EQUIPMENT_ALLOWED.get(equipment, {"gym", "home"})
 
     violations = []
     for kind, markers in _EQUIPMENT_MARKERS.items():
@@ -231,7 +410,7 @@ def _equipment_issues(plan_text: str, equipment: Optional[str]) -> List[str]:
         # the one that genuinely cannot be assumed.
         if kind == "pool" and equipment == "gym":
             continue
-        found = sorted({m for m in markers if m in lowered})
+        found = sorted({m for m in markers if _mentions_required(lowered, m)})
         if found:
             violations.append(f"{kind}: {', '.join(found[:4])}")
     return violations
@@ -266,7 +445,19 @@ def evaluate(
     lowered = (plan_text or "").lower()
     quality.has_warm_up = bool(re.search(r"warm[\s-]?up", lowered))
     quality.has_cool_down = bool(re.search(r"cool[\s-]?down|stretch", lowered))
-    quality.estimated_minutes = estimate_minutes(lines)
+
+    # Duration and the beginner exercise-count limit are PER-DAY budgets.
+    # requested_minutes is "how long is today's session", not "how long is
+    # the whole week" - split into days first (see split_days()) and use the
+    # single busiest day, not the week summed. A plan with no day structure
+    # (one section, per split_days()) behaves exactly as before: the busiest
+    # "day" is just the whole text, unchanged from the old flat calculation.
+    day_sections = split_days(plan_text)
+    per_day_lines = [exercise_lines(section) for section in day_sections]
+    per_day_minutes = [estimate_minutes(day) for day in per_day_lines]
+    busiest_day_minutes = max(per_day_minutes, default=0)
+    busiest_day_exercises = max((len(day) for day in per_day_lines), default=0)
+    quality.estimated_minutes = busiest_day_minutes
 
     # Pattern spread - a plan can have eight exercises and train one thing.
     counts: Dict[str, int] = {}
@@ -279,8 +470,21 @@ def evaluate(
     contextual = {"unilateral", "isometric", "weight_bearing", "loaded_stance",
                   "seated_supported", "non_weight_bearing", "impact", "low_impact"}
     quality.distinct_patterns = len(set(counts) - contextual)
+
+    # Computed once here, reused below for both the repetition exemption and
+    # the goal/sport alignment checks, rather than twice.
+    expected = _GOAL_EXPECTATIONS.get((goal or "").lower())
+    sport_needs = sport_qualities(sport)
+
+    # A pattern the goal or sport actually REQUIRES appearing often is not
+    # repetition, it is the point - a runner's week is running on most days
+    # by design, and flagging that as "repetitive: running" would regenerate
+    # a plan that is already correct. Only penalise a pattern repeating that
+    # nothing about the stated goal or sport called for.
+    required_repeats = (expected or set()) | (sport_needs or set())
     quality.duplicate_patterns = sorted(
-        p for p, n in counts.items() if n >= 4 and p not in contextual
+        p for p, n in counts.items()
+        if n >= 4 and p not in contextual and p not in required_repeats
     )
 
     # --- issues ---------------------------------------------------------
@@ -293,7 +497,14 @@ def evaluate(
             f"{quality.removed_fraction:.0%} of the plan was removed "
             f"({quality.removed} of {quality.exercises + quality.removed})"
         )
-    if quality.exercises >= MIN_EXERCISES and quality.distinct_patterns < MIN_DISTINCT_PATTERNS:
+    # A plan whose patterns are entirely accounted for by what the stated
+    # sport/goal actually calls for is narrow BECAUSE that is correct, not
+    # because it lacks range - a pure running week for an endurance goal is
+    # supposed to be mostly "running", not evidence the plan is thin.
+    non_required_patterns = set(counts) - contextual - required_repeats
+    narrow_on_purpose = bool(required_repeats) and not non_required_patterns
+    if (quality.exercises >= MIN_EXERCISES and quality.distinct_patterns < MIN_DISTINCT_PATTERNS
+            and not narrow_on_purpose):
         quality.issues.append(
             f"only {quality.distinct_patterns} distinct movement patterns - "
             "the session trains too narrow a range"
@@ -303,14 +514,14 @@ def evaluate(
             f"repetitive: {', '.join(quality.duplicate_patterns)} appears in most of the plan"
         )
     if requested_minutes and quality.estimated_minutes < requested_minutes * UNDERUSE_FRACTION:
-        quality.issues.append(
-            f"about {quality.estimated_minutes} minutes of actual work against "
-            f"{requested_minutes} available - under-programmed"
+        quality.advisory.append(
+            f"about {quality.estimated_minutes} minutes of actual work on the "
+            f"busiest day against {requested_minutes} available - under-programmed"
         )
     if requested_minutes and quality.estimated_minutes > requested_minutes * OVERUSE_FRACTION:
-        quality.issues.append(
-            f"about {quality.estimated_minutes} minutes of work will not fit in "
-            f"{requested_minutes}"
+        quality.advisory.append(
+            f"about {quality.estimated_minutes} minutes of work on the busiest "
+            f"day will not fit in {requested_minutes}"
         )
 
     # --- equipment ------------------------------------------------------
@@ -322,18 +533,37 @@ def evaluate(
         )
 
     # --- goal alignment --------------------------------------------------
-    expected = _GOAL_EXPECTATIONS.get((goal or "").lower())
     if expected and counts:
         if not (set(counts) & expected):
             quality.issues.append(
                 f"nothing in the plan addresses the stated goal ({goal})"
             )
 
+    # --- sport alignment ---------------------------------------------------
+    # A different check from goal alignment on purpose: goal is what the plan
+    # is FOR, sport is a floor that has to survive regardless of goal - a
+    # footballer training for muscle gain still needs to be able to play
+    # football. sport_qualities() returns None for anything unrecognised, and
+    # that is treated as "no opinion", not "needs nothing" - an unmatched
+    # sport is never penalised for it.
+    if sport_needs and counts:
+        if not (set(counts) & sport_needs):
+            quality.issues.append(
+                f"nothing in the plan trains the qualities {sport} actually depends on"
+            )
+
     # --- level -----------------------------------------------------------
-    if (level or "").lower() == "beginner" and quality.exercises > 12:
-        quality.issues.append(
-            f"{quality.exercises} exercises is a lot for a beginner session"
-        )
+    if (level or "").lower() == "beginner":
+        if busiest_day_exercises > 12:
+            quality.advisory.append(
+                f"{busiest_day_exercises} exercises in one day is a lot for a beginner"
+            )
+        lowered_lines = " ".join(lines).lower()
+        advanced_found = sorted({m for m in _ADVANCED_ONLY_MARKERS if m in lowered_lines})
+        if advanced_found:
+            quality.issues.append(
+                f"beginner session includes advanced work: {', '.join(advanced_found)}"
+            )
 
     # --- progression ------------------------------------------------------
     progression_text = _progression_section(plan_text)
@@ -349,18 +579,32 @@ def evaluate(
                 "saying by how much or against what"
             )
 
+    # --- formatting --------------------------------------------------------
+    # The prompt already says never to use a Markdown table, explicitly and
+    # more than once - this catches the times that gets ignored anyway,
+    # deterministically, instead of trusting compliance. The app's renderer
+    # and PDF export have no table support at all, so a table here is not a
+    # style problem, it renders as broken pipe-delimited text on screen.
+    if _TABLE_ROW.search(plan_text or ""):
+        quality.issues.append(
+            "contains a Markdown table, which the app cannot render - use "
+            "headings and bullet/numbered lists instead"
+        )
+
     # --- score -------------------------------------------------------------
     # Transparent and blunt: every issue costs, weighted by how much it
     # affects whether the plan is worth following. This never gates safety;
-    # it is reported alongside it.
+    # it is reported alongside it. Advisory items cost less and separately -
+    # they inform the score without ever being able to flip `adequate`
+    # (which reads only `issues`), for the reasons on the `advisory` field.
     weights = {
         "remain": 20, "removed": 15, "distinct": 12, "repetitive": 10,
-        "under-programmed": 12, "will not fit": 8, "equipment": 10,
-        "goal": 15, "beginner": 5, "progression": 8,
+        "equipment": 10, "goal": 15, "depends on": 15, "advanced work": 15,
+        "beginner": 5, "progression": 8, "markdown table": 12,
     }
-    penalty = 0
-    for issue in quality.issues:
-        penalty += next((w for k, w in weights.items() if k in issue), 8)
+    penalty = sum(next((w for k, w in weights.items() if k in issue), 8)
+                  for issue in quality.issues)
+    penalty += sum(4 for _ in quality.advisory)
     quality.score = max(0, 100 - penalty)
 
     return quality

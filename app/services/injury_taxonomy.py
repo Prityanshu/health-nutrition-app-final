@@ -499,6 +499,14 @@ class InjuryProfile:
     side: Optional[str]          # left | right | bilateral | None
     stage: Stage
     red_flags: List[str] = field(default_factory=list)
+    # Movement patterns explicitly named as restricted in the SAME free text,
+    # independent of whatever condition/region also matched - see
+    # parse_explicit_restriction() below. "wrist pain (severity 0/10); avoid
+    # jumping" must keep BOTH: the wrist finding (which may carry no
+    # restrictions of its own at severity 0) and the explicit "no jumping"
+    # restriction, which is not graded by severity at all. Merged in by
+    # restricted_patterns() below, never in place of the condition's own.
+    extra_restricted: Set[str] = field(default_factory=set)
 
     @property
     def label(self) -> str:
@@ -514,7 +522,7 @@ class InjuryProfile:
 
     def restricted_patterns(self) -> Set[str]:
         if self.condition:
-            return self.condition.restricted(self.stage)
+            return self.condition.restricted(self.stage) | self.extra_restricted
 
         # Unrecognised condition. Two levels of caution, because "I don't know
         # what this is" must never mean "so anything goes":
@@ -527,10 +535,180 @@ class InjuryProfile:
                            "maximal_effort", "cardio_intensity"}
         if self.region and ("primary" in self.stage.tiers or "secondary" in self.stage.tiers):
             restricted |= _REGION_FALLBACK.get(self.region, set())
-        return restricted
+        return restricted | self.extra_restricted
 
     def keep_patterns(self) -> Set[str]:
-        return set(self.condition.keep) if self.condition else set()
+        """
+        Patterns this condition considers definitely safe - used elsewhere to
+        let a specific "this is fine" override a broader fallback
+        restriction (a shoulder injury's keep list must not lose to its own
+        region fallback and end up blocking squats).
+
+        Explicitly restricted patterns are subtracted out here rather than
+        left to win by coincidence: a condition's keep list is a MEDICAL
+        judgement about that condition, and must never be read as also
+        overriding a stated, non-medical preference like "avoid jumping" -
+        the wrist condition's keep list legitimately includes "jumping"
+        (a wrist injury does not care about jumping), which said nothing
+        about whether THIS user wants to jump.
+        """
+        keep = set(self.condition.keep) if self.condition else set()
+        return keep - self.extra_restricted
+
+
+# ---------------------------------------------------------------------------
+# explicit, non-medical restrictions - "no jumping", "avoid overhead"
+# ---------------------------------------------------------------------------
+#
+# A stated preference like this is not a diagnosis and must not be run
+# through the condition/region/stage machinery above, which exists to model
+# how an injury's tolerance changes as it heals - there is no healing curve
+# for "I don't want to jump". But it still needs to carry deterministic
+# authority in the same audit, not live only as a hint in the prompt, or it
+# is exactly as easy for the model to ignore as anything else in free text.
+#
+# The mechanism is deliberately the smallest one that works: a negation word
+# next to a recognised movement WORD (not an exercise name) maps straight to
+# the pattern(s) that word already means in movement_ontology's own
+# vocabulary. No new taxonomy, no invented severity or recovery stage.
+
+_EXPLICIT_STAGE = Stage(
+    "explicit", "Explicit restriction",
+    "The user asked to avoid this movement outright - not a graduated "
+    "recovery, just don't include it.",
+    (), True,
+)
+
+_NEGATION = r"(?:no|not|avoid(?:ing)?|don'?t|do\s+not|can'?t|cannot|skip|without)"
+
+# word -> the movement_ontology pattern(s) it means. Deliberately short and
+# direct rather than exhaustive - see the module docstring's own stance on
+# coverage: an unrecognised phrase falls through to no restriction here,
+# same as an unrecognised condition falls through to a cautious default
+# above, not to a fabricated one.
+_RESTRICTION_WORDS: Dict[str, Set[str]] = {
+    "jump": {"jumping"}, "jumping": {"jumping"}, "hop": {"jumping"}, "hopping": {"jumping"},
+    "overhead": {"overhead", "vertical_push"},
+    "run": {"running", "high_speed"}, "running": {"running", "high_speed"},
+    "sprint": {"high_speed"}, "sprinting": {"high_speed"},
+    "squat": {"squat"}, "squatting": {"squat"}, "squats": {"squat"},
+    "lunge": {"lunge"}, "lunging": {"lunge"}, "lunges": {"lunge"},
+    "deadlift": {"hip_hinge"}, "deadlifting": {"hip_hinge"},
+    "hinge": {"hip_hinge"}, "hinging": {"hip_hinge"},
+    "twist": {"spinal_rotation"}, "twisting": {"spinal_rotation"}, "rotation": {"spinal_rotation"},
+    "cutting": {"cutting"},
+    "impact": {"impact"},
+}
+
+# Words that mean the negation governs a SYMPTOM or a meta-concept, not the
+# movement that happens to follow it in the same clause - "no PAIN when
+# jumping" negates pain, not jumping; "no RESTRICTION on jumping" negates
+# the restriction itself, which is the opposite of stating one. Proximity
+# alone could not tell these apart from "no jumping", because in both cases
+# a negation word and a movement word sit a few tokens apart in the same
+# clause - only what sits BETWEEN them says which one is actually negated.
+_BLOCKING_WORDS = (
+    "pain", "discomfort", "hurt", "hurts", "hurting", "ache", "aches",
+    "aching", "sore", "soreness", "issue", "issues", "problem", "problems",
+    "trouble", "difficulty", "restriction", "restrictions", "symptom",
+    "symptoms", "avoiding", "avoided",
+)
+
+# "not avoiding jumping" - AVOIDING is itself one of the negation triggers,
+# so without this check the same sentence gets read twice: once correctly
+# rejected ("not" governs "avoiding", not "jumping" - caught by
+# _BLOCKING_WORDS above, since "avoiding" is itself a blocking word) and
+# once WRONGLY accepted, because "avoiding jumping" on its own reads as a
+# direct, ungoverned negation-then-movement pair. This catches that second
+# reading: an "avoid(ing)" trigger immediately preceded by another negation
+# word is itself negated, so it does not restrict anything.
+_META_NEGATED_AVOID = re.compile(r"\b(?:not|no|never|isn'?t|is\s+not)\s*$")
+
+
+def _negates(lowered: str, word: str) -> bool:
+    """
+    Does a negation word DIRECTLY govern `word` in the same clause - not
+    merely appear somewhere before it?
+
+    Checked per known restriction word rather than by capturing "the phrase
+    after the negation" as one generic group - a capture group has to guess
+    where the phrase ends, and a short non-greedy guess matches the first
+    word after the negation ("cannot DO squats" capturing "do") rather than
+    the one that actually matters. Searching for each candidate word within a
+    short distance of a negation finds the pair; the checks below then rule
+    out the pairs where something between them - a symptom noun, a negated
+    "avoiding" - means the negation was never actually about the movement:
+    "no pain when jumping", "not avoiding jumping" and "no restriction on
+    jumping" all put a negation word and "jumping" in the same short clause,
+    exactly like "no jumping" does, and proximity alone cannot tell them
+    apart.
+    """
+    pattern = re.compile(
+        rf"\b(?P<neg>{_NEGATION})\b(?P<gap>[^.?!;]{{0,20}}?)\b{re.escape(word)}\b"
+    )
+    for m in pattern.finditer(lowered):
+        gap = m.group("gap")
+        if any(re.search(rf"\b{b}\b", gap) for b in _BLOCKING_WORDS):
+            continue
+        neg = m.group("neg")
+        if neg.startswith("avoid"):
+            preceding = lowered[max(0, m.start() - 12):m.start()]
+            if _META_NEGATED_AVOID.search(preceding):
+                continue
+        return True
+    return False
+
+
+@dataclass
+class ExplicitRestriction(InjuryProfile):
+    """
+    A user-stated movement restriction with no diagnosis behind it.
+
+    Deliberately an InjuryProfile subclass rather than a new interface:
+    contraindications.py and plan_repair.py already know how to read
+    `.label`, `.severity`, `.stage.key`, `.restricted_patterns()` and
+    `.keep_patterns()` - reusing that shape means the audit/repair pipeline
+    needs zero changes to also enforce this. `restricted_patterns()` is
+    overridden because there is no condition/region/stage to derive it from;
+    it is exactly what the user's words meant, nothing inferred.
+    """
+    explicit_label: str = "stated restriction"
+    explicit_patterns: Set[str] = field(default_factory=set)
+
+    @property
+    def label(self) -> str:
+        return self.explicit_label
+
+    def restricted_patterns(self) -> Set[str]:
+        return set(self.explicit_patterns)
+
+    def keep_patterns(self) -> Set[str]:
+        return set()
+
+
+def parse_explicit_restriction(text: str) -> Optional[ExplicitRestriction]:
+    """
+    "no jumping", "avoid overhead exercise", "no running" -> a restriction
+    with the same deterministic authority a diagnosed injury has, without
+    treating a preference as a diagnosis.
+    """
+    if not text or not text.strip():
+        return None
+    lowered = text.lower()
+    matched: Set[str] = set()
+    hit_words: List[str] = []
+    for word, patterns in _RESTRICTION_WORDS.items():
+        if _negates(lowered, word):
+            matched |= patterns
+            hit_words.append(word)
+    if not matched:
+        return None
+    return ExplicitRestriction(
+        raw=text.strip(), condition=None, region=None, severity=10, side=None,
+        stage=_EXPLICIT_STAGE, red_flags=[],
+        explicit_label=f"avoid {'/'.join(sorted(hit_words))}",
+        explicit_patterns=matched,
+    )
 
 
 def _detect_side(text: str) -> Optional[str]:
@@ -588,6 +766,14 @@ def parse(text: str, severity: Optional[int] = None) -> Optional[InjuryProfile]:
     flags = [f for f in RED_FLAGS if f in lowered]
 
     if not condition and not region and not flags:
+        # Nothing recognisable as a medical condition. Before giving up
+        # entirely, check whether this is an explicit, non-medical
+        # restriction instead - "no jumping", "avoid overhead exercise" says
+        # something real and actionable even though it is not an injury.
+        explicit = parse_explicit_restriction(text)
+        if explicit:
+            return explicit
+
         # Nothing recognisable. Treat it as an injury anyway if the text reads
         # like one OR carries a severity rating - somebody typing
         # "costochondritis 6/10" has told us they are hurt even though no rule
@@ -602,7 +788,7 @@ def parse(text: str, severity: Optional[int] = None) -> Optional[InjuryProfile]:
             return None
 
     resolved = resolved_severity if resolved_severity is not None else 5
-    return InjuryProfile(
+    profile = InjuryProfile(
         raw=text.strip(),
         condition=condition,
         region=region,
@@ -611,6 +797,19 @@ def parse(text: str, severity: Optional[int] = None) -> Optional[InjuryProfile]:
         stage=stage_for_severity(resolved),
         red_flags=flags,
     )
+
+    # A recognised condition/region does not preclude the SAME text ALSO
+    # stating an explicit, non-medical restriction - "wrist pain (severity
+    # 0/10); avoid jumping" must keep both. This used to be checked only
+    # inside the "nothing else recognised at all" branch above, so a
+    # recognised injury silently swallowed any explicit restriction stated
+    # alongside it - a severity-0 complaint on one joint could erase an
+    # unrelated "avoid jumping" the user stated in the same breath.
+    explicit = parse_explicit_restriction(text)
+    if explicit:
+        profile.extra_restricted = set(explicit.explicit_patterns)
+
+    return profile
 
 
 # ---------------------------------------------------------------------------

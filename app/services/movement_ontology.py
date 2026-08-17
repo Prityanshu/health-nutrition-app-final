@@ -159,7 +159,7 @@ _RULES: List[tuple] = [
      r"meadows row|kroc row|dead row|seal row(?!.*chest)|"
      r"deadlift|dl\b|pendlay|t[\s-]?bar row|barbell row|yates row|"
      r"back extension|hyperextension|reverse hyper|glute[\s-]?ham|ghr\b|"
-     r"kettlebell swing|kb swing|clean pull|snatch pull|"
+     r"kettlebell swing|kb swing|clean pull|snatch pull|high pull|"
      r"single[\s-]?leg (?:rdl|deadlift)",
      {"hip_hinge"}),
 
@@ -180,7 +180,7 @@ _RULES: List[tuple] = [
      {"hip_abduction"}),
     (r"adduction|copenhagen|adductor|inner thigh",
      {"hip_adduction"}),
-    (r"glute bridge|hip thrust|hip extension|\bbridge\b|frog pump|"
+    (r"glute bridge|hip thrust|hip extension|\bbridges?\b|frog pump|"
      r"single[\s-]?leg bridge",
      {"hip_extension"}),
 
@@ -235,7 +235,7 @@ _RULES: List[tuple] = [
      r"accel\b|top speed|stride[\s-]?out|striding|\d+\s?m dash|"
      r"hill sprint|resisted run|sled sprint",
      {"running", "high_speed", "impact"}),
-    (r"\brun\b|running|\bjog\b|jogging|treadmill|road work|tempo run|"
+    (r"\bruns?\b|running|\bjog\b|jogging|treadmill|road work|tempo run|"
      r"fartlek|interval run|shuttle|beep test|yo[\s-]?yo test|"
      r"\d+\s?km|\d+\s?mile",
      {"running", "impact"}),
@@ -258,7 +258,7 @@ _RULES: List[tuple] = [
      r"farmer|carry|carries|suitcase|yoke|sled push|sled drag|"
      r"kettlebell swing|thruster|lunge|step[\s-]?up|split squat",
      {"weight_bearing", "loaded_stance"}),
-    (r"\bsquat|\blunge|step[\s-]?up|calf raise|jump|hop\b|bound|"
+    (r"\bsquat|\blunge|step[\s-]?up|calf raise|jump|hops?\b|bound|"
      r"\brun|sprint|walk|stand|balance|agility|shuttle|cutting|"
      r"plyometric|skater|pistol",
      {"weight_bearing"}),
@@ -303,7 +303,7 @@ _RULES: List[tuple] = [
      {"end_range_stretch"}),
     (r"cycle|cycling|bike|elliptical|rowing machine|erg\b|ergometer|"
      r"ski erg|air bike|assault bike|swim|swimming|pool|aqua|stationary|"
-     r"\bwalk\b|walking(?! lunge)|brisk walk|incline walk|ruck|hike",
+     r"\bwalks?\b|walking(?! lunge)|brisk walk|incline walk|ruck|hike",
      {"low_impact"}),
     (r"single[\s-]?arm|single[\s-]?leg|one[\s-]?arm|one[\s-]?leg|unilateral|"
      r"split stance|staggered",
