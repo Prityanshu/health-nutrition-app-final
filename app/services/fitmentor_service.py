@@ -174,6 +174,31 @@ class FitMentorService:
               mentioned one below
             """
 
+            # Sport + a resistance goal is the combination that reliably comes
+            # back gutted: practices and matches get treated as if they
+            # REPLACED the gym work, and the week returns as two light
+            # sessions and five rest days. Sport is training load, but it is
+            # not the stimulus a muscle-gain or strength goal asked for, and
+            # the answer is to schedule around the fixed commitments rather
+            # than delete the sessions. plan_quality re-checks the resistance
+            # volume deterministically afterwards, so this block is here to
+            # make the first attempt right - it is not what enforces it.
+            if (fitness_goal or "").lower() in ("muscle_gain", "strength"):
+                sport_block += f"""
+            RESISTANCE VOLUME IS THE POINT OF MY GOAL - do not trade it away:
+            - {sport} practices and matches are training LOAD, but they do not
+              replace resistance training. Do not convert a practice or match
+              day into a reason to drop a gym session.
+            - Keep the weekly resistance volume appropriate to my stated level.
+              Work the gym sessions AROUND my fixed {sport} commitments; do not
+              remove them to make room.
+            - Manage fatigue by distributing volume and intensity, not by adding
+              rest days I did not ask for. Near a match, prefer an upper-body or
+              lower-stress session over deleting the session entirely.
+            - Do keep genuinely high-fatigue lower-body work away from the day
+              before an important match.
+            """
+
             preference_block = (
                 f"\n            PREFERENCES: {preferences}\n"
                 "            If this mentions match days, practice days, work/school "

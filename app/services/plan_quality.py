@@ -118,6 +118,63 @@ _GOAL_EXPECTATIONS = {
     "general_fitness": {"squat", "horizontal_push", "horizontal_pull", "low_impact"},
 }
 
+# Patterns a goal legitimately hits over and over, exempt from the
+# "repetitive" check but NOT counted as evidence the goal was addressed.
+#
+# Separate from _GOAL_EXPECTATIONS on purpose, because the two answer
+# different questions: that one asks "does this plan address the goal at
+# all", this one asks "is repeating this pattern a problem". A hypertrophy
+# week reaches knee_extension through the back squat, the lunge, the leg
+# press AND the leg extension - four occurrences, which tripped the
+# repetition check even though accumulating exactly that volume is the
+# entire point of the goal. Adding it to _GOAL_EXPECTATIONS instead would
+# have meant a plan of nothing but leg extensions counted as "addresses
+# muscle gain".
+_GOAL_ACCESSORY = {
+    "muscle_gain": {"knee_extension", "knee_flexion", "elbow_flexion",
+                    "elbow_extension", "hip_extension", "calf_raise",
+                    "shoulder_rotation", "axial_load", "lunge"},
+    "strength": {"knee_extension", "hip_extension", "axial_load", "lunge",
+                 "elbow_extension"},
+}
+
+# Movement patterns that represent actual resistance-training stimulus, in
+# movement_ontology's own vocabulary rather than a second taxonomy. Used to
+# answer one question: does this week contain enough loaded work to serve a
+# muscle-gain or strength goal? Conditioning, mobility and stance/context
+# descriptors are deliberately absent - running hard is training, but it is
+# not the stimulus a hypertrophy goal asked for.
+_RESISTANCE_PATTERNS = {
+    "hip_hinge", "squat", "lunge", "knee_flexion", "knee_extension",
+    "calf_raise", "hip_abduction", "hip_adduction", "hip_extension",
+    "vertical_push", "horizontal_push", "vertical_pull", "horizontal_pull",
+    "elbow_flexion", "elbow_extension", "shoulder_rotation", "axial_load",
+    "spinal_flexion", "spinal_extension", "spinal_rotation", "anti_rotation",
+}
+
+# Goals whose whole point is a resistance stimulus. For these, a week that
+# has been hollowed out - typically by treating sport practices and matches
+# as if they replaced the gym work - is a failure of the plan, not a
+# training decision.
+_RESISTANCE_GOALS = {"muscle_gain", "strength"}
+
+# Below this the week is not a muscle-gain week by any reading, whatever the
+# schedule looks like. Deliberately low: it is a floor for "the resistance
+# work was removed", not a prescription for optimal volume, because
+# plan_quality cannot see the user's stated training days and must not
+# force a regeneration on someone who genuinely trains twice a week.
+MIN_RESISTANCE_EXERCISES = 8
+
+# What a week should realistically contain at each level. Reported as
+# advisory only - missing it is worth telling the user about, but it is not
+# grounds for spending a regeneration when the schedule may simply not allow
+# it.
+TARGET_RESISTANCE_EXERCISES = {
+    "beginner": 10,
+    "intermediate": 14,
+    "advanced": 18,
+}
+
 # What a sport's performance actually depends on, expressed in the same
 # movement-pattern vocabulary movement_ontology already uses - not a second
 # taxonomy, just this module reusing the one that exists. Matched by substring
@@ -218,6 +275,9 @@ class Quality:
     has_warm_up: bool = False
     has_cool_down: bool = False
     equipment_violations: List[str] = field(default_factory=list)
+    # How many exercises in the week are actual loaded resistance work.
+    # Only populated for goals whose point is that stimulus.
+    resistance_exercises: Optional[int] = None
     progression_measurable: Optional[bool] = None
     score: int = 100
     issues: List[str] = field(default_factory=list)
@@ -254,6 +314,7 @@ class Quality:
             "has_warm_up": self.has_warm_up,
             "has_cool_down": self.has_cool_down,
             "equipment_violations": list(self.equipment_violations),
+            "resistance_exercises": self.resistance_exercises,
             "progression_measurable": self.progression_measurable,
             "score": self.score,
             "adequate": self.adequate,
@@ -291,7 +352,30 @@ def exercise_lines(plan_text: str) -> List[str]:
     return [item.body for item in structure.quality_subjects(items)]
 
 
-_DAY_HEADING = re.compile(r"^\s*#{0,6}\s*\*{0,2}\s*day\s*\d+\b", re.I | re.M)
+# A heading that starts a new day. Both formats FitMentor actually produces:
+# "Day 1" and plain weekday names.
+#
+# Weekday names were missing, and the gap was not cosmetic - it silently
+# disabled every per-week check for a whole common output format. A
+# "### Monday / ### Tuesday" plan split into ONE section, so
+# `is_multi_day` was False and the weekly resistance-volume gate never ran:
+# a severely under-programmed strength week could bypass it entirely just by
+# labelling its days the ordinary way.
+#
+# Full weekday names only, deliberately not three-letter abbreviations:
+# "### Sun Salutations" is a real yoga heading and `\bsun\b` would split the
+# plan on it. Requiring the "day" suffix costs nothing real - a model
+# writing "### Mon" is rare - and removes that whole class of false split.
+#
+# Still anchored to HEADING shapes (optional #'s or bold markers), so a
+# bulleted "- Monday: rest" stays a list item rather than becoming a day
+# boundary.
+_DAY_HEADING = re.compile(
+    r"^\s*#{0,6}\s*\*{0,2}\s*"
+    r"(?:day\s*\d+|(?:mon|tues|wednes|thurs|fri|satur|sun)day)"
+    r"\b",
+    re.I | re.M,
+)
 
 
 def split_days(plan_text: str) -> List[str]:
@@ -473,15 +557,19 @@ def evaluate(
 
     # Computed once here, reused below for both the repetition exemption and
     # the goal/sport alignment checks, rather than twice.
-    expected = _GOAL_EXPECTATIONS.get((goal or "").lower())
+    goal_key = (goal or "").lower()
+    expected = _GOAL_EXPECTATIONS.get(goal_key)
+    accessory = _GOAL_ACCESSORY.get(goal_key, set())
     sport_needs = sport_qualities(sport)
 
     # A pattern the goal or sport actually REQUIRES appearing often is not
     # repetition, it is the point - a runner's week is running on most days
     # by design, and flagging that as "repetitive: running" would regenerate
     # a plan that is already correct. Only penalise a pattern repeating that
-    # nothing about the stated goal or sport called for.
-    required_repeats = (expected or set()) | (sport_needs or set())
+    # nothing about the stated goal or sport called for. `accessory` covers
+    # the patterns a goal legitimately accumulates volume in without them
+    # counting as evidence the goal was addressed.
+    required_repeats = (expected or set()) | accessory | (sport_needs or set())
     quality.duplicate_patterns = sorted(
         p for p, n in counts.items()
         if n >= 4 and p not in contextual and p not in required_repeats
@@ -531,6 +619,56 @@ def evaluate(
             "assumes equipment that was not available: "
             + "; ".join(quality.equipment_violations)
         )
+
+    # --- resistance volume -------------------------------------------------
+    # A muscle-gain or strength week has to actually contain loaded work.
+    #
+    # The failure this catches: a plan for someone who plays a sport AND
+    # asked for muscle gain, where the sport's practices and matches were
+    # treated as if they replaced the gym sessions - the week comes back as
+    # two light sessions and five rest/practice days. Sport IS training load,
+    # but it is not the resistance stimulus the goal asked for, and the fix
+    # is to distribute the gym work around the fixed commitments rather than
+    # delete it.
+    #
+    # Counted per EXERCISE across the whole week, not per day: it uses
+    # exercise_lines() and the movement ontology, neither of which depends on
+    # split_days() correctly recognising the model's day-heading style - the
+    # unreliability that made the duration checks advisory-only.
+    # Only meaningful for a plan that IS a week. split_days() is used here for
+    # the one thing it is reliable at - noticing whether day headings exist at
+    # all - not for the per-day budget arithmetic that made the duration
+    # checks advisory-only. A single-session plan (one section, no day
+    # headings) genuinely cannot be judged against a WEEKLY floor: five
+    # resistance exercises is a complete strength session and a gutted week,
+    # and nothing here can tell which was asked for.
+    is_multi_day = len(day_sections) >= 2
+
+    if goal_key in _RESISTANCE_GOALS and is_multi_day:
+        resistance = sum(
+            1 for line in lines
+            if ontology.classify_prescribed(line).patterns & _RESISTANCE_PATTERNS
+        )
+        quality.resistance_exercises = resistance
+
+        if resistance < MIN_RESISTANCE_EXERCISES:
+            quality.issues.append(
+                f"only {resistance} resistance exercises in the week - a "
+                f"{goal_key.replace('_', ' ')} plan needs loaded work, and sport "
+                f"practice does not replace it"
+            )
+        else:
+            wanted = TARGET_RESISTANCE_EXERCISES.get((level or "").lower())
+            if wanted and resistance < wanted:
+                # Advisory, not gating: plan_quality cannot see how many days
+                # a week the person actually said they can train, so a light
+                # week may be exactly right. Worth surfacing, never worth
+                # forcing a regeneration over.
+                quality.advisory.append(
+                    f"{resistance} resistance exercises is light for an "
+                    f"{level} {goal_key.replace('_', ' ')} week "
+                    f"(around {wanted} would be typical)"
+                )
 
     # --- goal alignment --------------------------------------------------
     if expected and counts:
@@ -600,6 +738,7 @@ def evaluate(
     weights = {
         "remain": 20, "removed": 15, "distinct": 12, "repetitive": 10,
         "equipment": 10, "goal": 15, "depends on": 15, "advanced work": 15,
+        "resistance exercises": 20,
         "beginner": 5, "progression": 8, "markdown table": 12,
     }
     penalty = sum(next((w for k, w in weights.items() if k in issue), 8)

@@ -354,13 +354,82 @@ def duration_and_parsing():
     mins = pq.estimate_minutes(lines)
     check("8x100m is not read as 800 reps", mins < 30, f"estimated {mins} min for: {lines}")
 
-    # A day heading style split_days() does NOT recognise (weekday names, no
-    # literal "Day N") must still leave the plan usable - degrading to
-    # whole-plan estimation, not crashing or wildly misjudging a short plan.
+    # Weekday headings are a real day-heading style and must split, exactly
+    # like "Day N". They used to be unrecognised, which silently disabled
+    # every per-week check for that whole output format - see
+    # weekly_resistance_volume() below for the gate it was bypassing.
     monday_style = "### Monday\n* Push-ups: 3x10\n### Tuesday\n* Squats: 3x10"
     days = pq.split_days(monday_style)
-    check("an unrecognised day-heading style is not a crash",
-          isinstance(days, list) and len(days) >= 1, f"{days!r}")
+    check("weekday headings split into days", len(days) == 2, f"{days!r}")
+    check("all seven weekday names are recognised",
+          len(pq.split_days("\n".join(
+              f"### {d}\n* Push-ups: 3x10" for d in
+              ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
+               "Saturday", "Sunday")))) == 7)
+    check("'Day N' headings still split", len(pq.split_days(
+        "### Day 1\n* Push-ups: 3x10\n### Day 2\n* Squats: 3x10")) == 2)
+
+    # Not every line mentioning a weekday is a day boundary.
+    check("'Sun Salutations' does not split the plan on 'Sun'",
+          len(pq.split_days("### Sun Salutations\n* Flow x5\n"
+                            "### Sun Salutations B\n* Flow x5")) == 1)
+    check("a bulleted '- Monday: rest' is a list item, not a heading",
+          len(pq.split_days("- Monday: rest\n- Tuesday: rest")) == 1)
+    check("a weekday mid-sentence does not split the plan",
+          len(pq.split_days("Train on Monday and Tuesday if you can.")) == 1)
+
+
+def weekly_resistance_volume():
+    """
+    The weekly resistance-volume gate must apply to every multi-day format.
+
+    It is deliberately skipped for a SINGLE session, because a weekly floor
+    cannot judge one day - five resistance exercises is both a complete
+    strength session and a gutted week, and nothing here can tell which was
+    asked for. That exemption is only safe if "is this multi-day?" is
+    answered correctly for every heading style the generator produces.
+    """
+    from app.services import plan_quality as pq
+    print(f"\n{BOLD}Weekly resistance volume across day-heading styles{RESET}")
+
+    single = ("* Back squat: 4 sets of 6\n* Romanian deadlift: 3 sets of 8\n"
+              "* Bench press: 4 sets of 6\n* Chest-supported row: 4 sets of 10\n"
+              "* Plank: 3x45s")
+    weekday = ("### Monday\n- Bench press: 3x8\n- Row: 3x8\n\n"
+               "### Tuesday\n- Squat: 3x8\n- Deadlift: 3x8")
+    day_n = weekday.replace("Monday", "Day 1").replace("Tuesday", "Day 2")
+
+    q = pq.evaluate(single, goal="muscle_gain", level="advanced", equipment="gym")
+    check("a single session is not judged against a WEEKLY floor",
+          q.resistance_exercises is None, q.resistance_exercises)
+    check("...and is not gated by a resistance issue",
+          not any("resistance" in i for i in q.issues), q.issues)
+
+    for label, plan in (("'Day N'", day_n), ("weekday", weekday)):
+        q = pq.evaluate(plan, goal="muscle_gain", level="advanced", equipment="gym")
+        check(f"an under-programmed {label} week IS counted",
+              q.resistance_exercises == 4, q.resistance_exercises)
+        check(f"...and IS gated by the resistance issue ({label})",
+              any("resistance" in i for i in q.issues), q.issues)
+
+    # Both formats must reach the identical verdict - the bypass was that
+    # they did not.
+    a = pq.evaluate(day_n, goal="muscle_gain", level="advanced", equipment="gym")
+    b = pq.evaluate(weekday, goal="muscle_gain", level="advanced", equipment="gym")
+    check("both day-heading styles produce the same resistance verdict",
+          a.resistance_exercises == b.resistance_exercises
+          and a.adequate == b.adequate,
+          f"day_n={a.resistance_exercises}/{a.adequate} "
+          f"weekday={b.resistance_exercises}/{b.adequate}")
+
+    # A properly programmed weekday week is not flagged.
+    good = "\n".join(
+        f"### {d}\n- Back squat: 4x6\n- Bench press: 4x8\n- Seated cable row: 4x10"
+        for d in ("Monday", "Tuesday", "Wednesday", "Thursday"))
+    q = pq.evaluate(good, goal="muscle_gain", level="advanced", equipment="gym")
+    check("a well-programmed weekday week is not flagged",
+          not any("resistance" in i for i in q.issues),
+          (q.resistance_exercises, q.issues))
 
     # Progression section text must never be counted as a prescribed exercise.
     prog_plan = "* Bench press: 3x8\n### Progression\n* Add 2.5kg when all sets hit 8 reps."
@@ -432,7 +501,8 @@ def main():
         mutation()
     else:
         case_a(); case_b(); case_c(); case_d()
-        unknown_handling(); healthy_controls(); duration_and_parsing(); mutation()
+        unknown_handling(); healthy_controls(); duration_and_parsing()
+        weekly_resistance_volume(); mutation()
     print(f"\n{BOLD}{passed} passed, {failed} failed{RESET}\n")
     return 1 if failed else 0
 
