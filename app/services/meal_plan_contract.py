@@ -59,6 +59,63 @@ AMBIGUOUS = "ambiguous"
 
 _FENCE = re.compile(r"^\s*```[a-zA-Z0-9_-]*\s*\n?|\n?\s*```\s*$")
 
+_ROOT_OBJECT_RULE = (
+    "  - Return exactly ONE JSON object as the entire response.\n"
+    "  - Put meta, plan (containing day_1 through day_7) and summary inside "
+    "that SAME root object.\n"
+    "  - Do NOT emit one object per day or per meal, and do NOT emit "
+    "JSON Lines (one object per line).\n"
+    "  - Do NOT include an example or partial object before the real one.\n"
+    "  - Do NOT re-send fragments or patches of the previous attempt; write "
+    "the whole plan again from scratch."
+)
+
+_FORMAT_BRIEF_GENERIC = (
+    "Fix the output format:\n" + _ROOT_OBJECT_RULE +
+    "\n  - No commentary and no Markdown code fences around the JSON."
+)
+
+_FORMAT_BRIEFS = {
+    TRUNCATED: (
+        "The response stopped mid-way, so the JSON never closed. This is a "
+        "LENGTH problem, not a structure problem:\n"
+        "  - Keep every field, but write compactly - short recipe_name "
+        "values, no prose notes, no whitespace padding.\n"
+        "  - Do not add optional fields beyond the schema.\n"
+        "  - Close every brace and bracket; the last character of your "
+        "response must be the closing brace of the root object.\n"
+        + _ROOT_OBJECT_RULE
+    ),
+    MALFORMED: (
+        "The JSON is invalid. Most often this is a trailing comma before a "
+        "closing brace or bracket, a single-quoted string, an unquoted key, "
+        "or a comment:\n"
+        "  - Use double quotes for every key and string value.\n"
+        "  - No trailing comma after the last item of any object or array.\n"
+        "  - No comments, no NaN, no Infinity.\n"
+        + _ROOT_OBJECT_RULE
+    ),
+    AMBIGUOUS: (
+        "Several separate top-level JSON objects arrived, so there was no "
+        "single answer to use:\n" + _ROOT_OBJECT_RULE
+    ),
+    NOT_OBJECT: (
+        "The top level was the wrong JSON type. An array of days is not "
+        "accepted - the days belong under the 'plan' key of one root "
+        "object:\n" + _ROOT_OBJECT_RULE
+    ),
+    EMPTY: (
+        "The response was empty. Return the plan itself, not an "
+        "acknowledgement:\n" + _ROOT_OBJECT_RULE
+    ),
+}
+
+_TRUNCATED_MESSAGE = (
+    "The plan was cut off before it finished. This happens when the week is "
+    "too large to generate in one go - try fewer meals per day, then add "
+    "snacks separately."
+)
+
 
 def strip_code_fences(text: str) -> str:
     """Remove a surrounding markdown fence, if present."""
@@ -73,81 +130,170 @@ def strip_code_fences(text: str) -> str:
     return cleaned.strip()
 
 
-def extract_json_object(text: Any) -> Tuple[Optional[dict], Optional[str], str]:
+def _top_level_starts(text: str, respect_strings: bool = True
+                      ) -> Tuple[List[int], List[int], bool]:
+    """
+    Positions of `{` and `[` that open a TOP-LEVEL value, plus whether the
+    text ended before its structure closed.
+
+    This is a lexer, not a parser: it tracks nesting depth and (by default)
+    string literals with their escapes, and reports only the openers found at
+    depth 0. raw_decode still does all real parsing - this decides only WHERE
+    a top-level value could start.
+
+    Why it is needed: the previous version treated every `{` in the response
+    as a candidate start. That is correct only while the enclosing object
+    decodes, because a successful decode skipped its own interior. The moment
+    the outer object failed - one trailing comma, one truncation - the scan
+    fell INTO it and reported each nested day/meal/macro dictionary as a
+    separate top-level answer. A single malformed plan came back as "19
+    separate JSON objects". Depth is what distinguishes "the model sent two
+    plans" from "the model sent one broken plan"; nothing else can.
+
+    An unbalanced opener leaves depth above 0 for the rest of the text, which
+    is exactly right: everything after a truncated root IS inside it.
+    """
+    objects: List[int] = []
+    arrays: List[int] = []
+    depth = 0
+    in_string = False
+    escaped = False
+
+    for index, char in enumerate(text):
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if respect_strings and char == '"':
+            in_string = True
+        elif char == "{":
+            if depth == 0:
+                objects.append(index)
+            depth += 1
+        elif char == "[":
+            if depth == 0:
+                arrays.append(index)
+            depth += 1
+        elif char in "}]":
+            depth = max(0, depth - 1)
+
+    # Ending at depth > 0, or inside an unterminated string, means the text
+    # stopped before its structure closed. That is a deterministic truncation
+    # signal - far sounder than matching decoder error strings, because a
+    # response cut mid-string reports the error at the string's START, which
+    # is nowhere near the end of the text.
+    return objects, arrays, depth > 0 or in_string
+
+
+def _decode_at(cleaned: str, starts: List[int]) -> Tuple[List[dict], Optional[json.JSONDecodeError]]:
+    """Decode each candidate start; return the objects and the first error."""
+    decoder = json.JSONDecoder()
+    found: List[dict] = []
+    first_error: Optional[json.JSONDecodeError] = None
+    for position in starts:
+        try:
+            value, _end = decoder.raw_decode(cleaned, position)
+        except json.JSONDecodeError as exc:
+            if first_error is None:
+                first_error = exc
+            continue
+        if isinstance(value, dict):
+            found.append(value)
+    return found, first_error
+
+
+def extract_json_object(text: Any, meals_per_day: Optional[int] = None
+                        ) -> Tuple[Optional[dict], Optional[str], str]:
     """
     Pull exactly one JSON OBJECT out of a model response.
 
     Returns (object, error_code, message). Exactly one of object/error_code is
     set.
 
-    Uses JSONDecoder.raw_decode rather than counting braces. Manual brace
-    counting cannot see that a brace inside a quoted string - "notes": "use
-    the {small} pan" - is not structural, so it closed the object in the wrong
-    place and produced either a parse error or, worse, a silently truncated
-    plan. raw_decode is the actual JSON grammar and has no such blind spot.
+    Only TOP-LEVEL objects are candidates (see `_top_level_starts`). Nested
+    day, meal, macro and ingredient dictionaries are never candidates, so a
+    malformed or truncated plan is diagnosed as malformed or truncated rather
+    than mistaken for a pile of competing answers.
 
     Prose either side of one complete object is tolerated, because models
-    routinely add "Here is your plan:". TWO complete objects is rejected
-    rather than guessed at - picking the first or the largest would be an
-    arbitrary rule that silently discards half the response.
+    routinely add "Here is your plan:".
+
+    When several genuine top-level objects arrive, the choice is never made on
+    position or size - "first" and "largest" are arbitrary rules that silently
+    discard half the response. If `meals_per_day` is supplied, the canonical
+    structural validator is asked which of them is a complete week; a single
+    complete plan beside example or metadata objects is then recoverable
+    without spending a generation. Two complete plans stay AMBIGUOUS, because
+    at that point the model really did send two answers and picking one would
+    be a guess. Without `meals_per_day` no selection is attempted at all.
     """
     cleaned = strip_code_fences(text)
     if not cleaned:
         return None, EMPTY, "The model returned nothing."
 
-    decoder = json.JSONDecoder()
-    starts = [i for i, ch in enumerate(cleaned) if ch == "{"]
+    starts, arrays, unclosed = _top_level_starts(cleaned)
+    if not starts and "{" in cleaned:
+        # Prose containing an odd number of quote characters can desynchronise
+        # the string tracker and hide a perfectly good object. Rescan ignoring
+        # quotes; depth still prevents descending into nested fragments, so
+        # this can only ever recover candidates, never invent extra ones.
+        starts, arrays, unclosed = _top_level_starts(cleaned, respect_strings=False)
 
     if not starts:
-        # No object anywhere. If the whole thing is valid JSON of another
-        # shape, say so precisely - "[]" is a different bug from "hello".
+        # No top-level object anywhere. If the whole thing is valid JSON of
+        # another shape, say so precisely - "[]" is a different bug from
+        # "hello", and an array of days is a different bug from either.
         try:
             value = json.loads(cleaned)
         except json.JSONDecodeError:
+            if arrays and unclosed:
+                return None, TRUNCATED, _TRUNCATED_MESSAGE
             return None, MALFORMED, "The model did not return JSON."
         return None, NOT_OBJECT, (
             f"Expected a JSON object, got {type(value).__name__}."
         )
 
-    found: List[dict] = []
-    last_error: Optional[json.JSONDecodeError] = None
-    index = 0
-    while index < len(starts):
-        position = starts[index]
-        try:
-            value, end = decoder.raw_decode(cleaned, position)
-        except json.JSONDecodeError as exc:
-            last_error = exc
-            index += 1
-            continue
-        if isinstance(value, dict):
-            found.append(value)
-            # Skip any "{" that was nested inside the object just consumed.
-            index = next((k for k in range(index + 1, len(starts))
-                          if starts[k] >= end), len(starts))
-        else:
-            index += 1
+    found, first_error = _decode_at(cleaned, starts)
 
     if not found:
-        # Truncated vs malformed: a response cut off mid-generation fails at
-        # the very end of the text, while genuinely broken JSON usually fails
-        # somewhere in the middle. The two need different advice - one is
-        # "the week was too big", the other is "the model wrote nonsense".
-        if last_error is not None and last_error.pos >= len(cleaned) - 2:
-            return None, TRUNCATED, (
-                "The plan was cut off before it finished. This happens when the "
-                "week is too large to generate in one go - try fewer meals per "
-                "day, then add snacks separately."
-            )
-        detail = f" ({last_error.msg})" if last_error else ""
+        # Truncated vs malformed: a response cut off mid-generation ends with
+        # its structure still open, while genuinely broken JSON - a trailing
+        # comma, a bare word - closes properly and fails somewhere inside.
+        # The two need different advice: one is "the week was too big", the
+        # other is "the model wrote invalid JSON". Both diagnoses were
+        # unreachable before, because some nested fragment always decoded and
+        # turned the whole thing into AMBIGUOUS.
+        if unclosed or (first_error is not None
+                        and first_error.pos >= len(cleaned) - 2):
+            return None, TRUNCATED, _TRUNCATED_MESSAGE
+        detail = f" ({first_error.msg})" if first_error else ""
         return None, MALFORMED, f"Could not parse the model's JSON{detail}."
 
-    if len(found) > 1:
-        return None, AMBIGUOUS, (
-            f"The model returned {len(found)} separate JSON objects; refusing to "
-            f"guess which one is the plan."
-        )
-    return found[0], None, ""
+    if len(found) == 1:
+        return found[0], None, ""
+
+    if meals_per_day:
+        complete = [obj for obj in found
+                    if validate_structure(obj, meals_per_day).ok]
+        if len(complete) == 1:
+            return complete[0], None, ""
+        if len(complete) > 1:
+            return None, AMBIGUOUS, (
+                f"The model returned {len(complete)} complete 7-day plans; "
+                f"refusing to guess which one to use."
+            )
+
+    return None, AMBIGUOUS, (
+        f"The model returned {len(found)} separate top-level JSON objects and "
+        f"none of them is a complete 7-day plan on its own."
+        if meals_per_day else
+        f"The model returned {len(found)} separate top-level JSON objects; "
+        f"refusing to guess which one is the plan."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -561,11 +707,15 @@ class PlanCandidate:
             # brief, so the one corrective generation was skipped entirely -
             # the caller got the parse failure back having spent no retry on
             # the most recoverable failure there is.
-            parts.append(
-                f"OUTPUT FORMAT - {self.parse_error} Return exactly ONE complete "
-                f"JSON object, with no prose before or after it and no second "
-                f"object."
-            )
+            #
+            # The instruction is chosen by parse code, because the retry only
+            # helps if it names the failure that actually happened. Telling a
+            # model that emitted ONE truncated plan to "stop sending multiple
+            # objects" - which is what a single generic brief did - describes
+            # a problem it does not have, and the second attempt fails the
+            # same way as the first.
+            parts.append(f"OUTPUT FORMAT - {self.parse_error}")
+            parts.append(_FORMAT_BRIEFS.get(self.parse_code, _FORMAT_BRIEF_GENERIC))
         if self.structure and self.structure.errors:
             parts.append("STRUCTURE - the plan must be a JSON object with meta, "
                          "plan and summary; plan must contain exactly day_1 to "

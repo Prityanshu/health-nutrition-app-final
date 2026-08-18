@@ -8,7 +8,9 @@ agent. No Groq call is ever made, so this is safe to run on any quota.
     python scripts/test_advanced_meal_planner.py
 """
 
+import inspect
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -1285,6 +1287,364 @@ def review_mutations():
           dr.forbidden_hit("vegan cheese with cow milk", dr.VEGAN) is not None)
 
 
+# ---------------------------------------------------------------------------
+# 13. top-level extraction: the "19 separate JSON objects" failure
+# ---------------------------------------------------------------------------
+
+def _trailing_commas(text):
+    """The single most common model JSON error: a comma before a closing brace."""
+    return re.sub(r'\]\n(\s*)\}', r'],\n\1}', text)
+
+
+def top_level_extraction():
+    from app.services import meal_plan_contract as mpc
+    print(f"\n{BOLD}13. Top-level extraction (the 19-object failure){RESET}")
+
+    good = json.dumps(plan(), indent=1)
+
+    # --- the production scenario -------------------------------------------
+    broken = _trailing_commas(good)
+    cut = broken[:int(len(broken) * 0.88)]
+    obj, code, msg = mpc.extract_json_object(cut)
+    check("a malformed+truncated plan is NOT reported as many objects",
+          code == mpc.TRUNCATED, f"code={code} msg={msg[:90]}")
+    check("...and the message names no object count",
+          "separate JSON objects" not in msg
+          and "separate top-level" not in msg, msg[:90])
+
+    # It is one plan however far through it was cut.
+    codes = {mpc.extract_json_object(good[:n])[1]
+             for n in range(40, len(good), 11)}
+    check("every truncation point of a valid plan reads as truncated",
+          codes == {mpc.TRUNCATED}, codes)
+    codes = {mpc.extract_json_object(broken[:n])[1]
+             for n in range(40, len(broken), 11)}
+    check("...and so does every truncation of a comma-broken plan",
+          codes == {mpc.TRUNCATED}, codes)
+
+    # A complete but invalid plan stays MALFORMED - the diagnoses are distinct.
+    check("a complete plan with trailing commas is malformed, not truncated",
+          mpc.extract_json_object(broken)[1] == mpc.MALFORMED,
+          mpc.extract_json_object(broken)[1])
+
+    # --- A/B: one object, with decoration ----------------------------------
+    for label, text in (
+        ("a deeply nested 7-day plan", good),
+        ("a fenced plan", f"```json\n{good}\n```"),
+        ("a plan surrounded by prose", f"Here is your plan:\n{good}\nEnjoy!"),
+    ):
+        obj, code, _ = mpc.extract_json_object(text)
+        check(f"{label} -> exactly one object", code is None and obj is not None,
+              f"code={code}")
+
+    check("braces inside strings do not split the object",
+          mpc.extract_json_object('{"notes":"use the {small} pan","a":1}')[0]
+          == {"notes": "use the {small} pan", "a": 1})
+    check("escaped quotes and braces inside notes are safe",
+          mpc.extract_json_object(r'{"n":"say \"hi\" about {x}","a":1}')[0]
+          == {"n": 'say "hi" about {x}', "a": 1})
+
+    # --- C: genuinely independent objects ----------------------------------
+    check("two adjacent complete plans stay ambiguous",
+          mpc.extract_json_object(f"{good}\n{good}", 3)[1] == mpc.AMBIGUOUS)
+    check("two generic objects stay ambiguous",
+          mpc.extract_json_object('{"a":1}\n{"b":2}')[1] == mpc.AMBIGUOUS)
+    check("JSONL of meal objects is rejected honestly",
+          mpc.extract_json_object(
+              '{"meal_label":"a"}\n{"meal_label":"b"}\n{"meal_label":"c"}',
+              3)[1] == mpc.AMBIGUOUS)
+
+    # --- F: arrays are the wrong top-level shape ---------------------------
+    array_of_days = json.dumps([plan()["plan"]["day_1"], plan()["plan"]["day_2"]])
+    obj, code, msg = mpc.extract_json_object(array_of_days, 3)
+    check("an array of day objects is not_object, not ambiguous",
+          code == mpc.NOT_OBJECT, f"code={code} msg={msg}")
+    check("...and says which type arrived", "list" in msg, msg)
+    check("an array is never accepted as a plan", obj is None)
+
+    # --- G/12/13/14: structural uniqueness ---------------------------------
+    obj, code, _ = mpc.extract_json_object(f'{{"note":"example"}}\n{good}', 3)
+    check("one complete plan beside metadata is recovered deterministically",
+          code is None and obj is not None and "plan" in (obj or {}), f"code={code}")
+    obj, code, _ = mpc.extract_json_object(
+        f'Thinking: an example is {{"day_1":[]}}\nFinal answer:\n{good}', 3)
+    check("a preamble example followed by the real plan is recovered",
+          code is None and obj is not None, f"code={code}")
+    check("two complete plans plus metadata remain ambiguous",
+          mpc.extract_json_object(f'{{"note":"x"}}\n{good}\n{good}', 3)[1]
+          == mpc.AMBIGUOUS)
+    check("without meals_per_day no selection is attempted",
+          mpc.extract_json_object(f'{{"note":"example"}}\n{good}')[1]
+          == mpc.AMBIGUOUS)
+    check("selection respects meals_per_day, not just shape",
+          mpc.extract_json_object(f'{{"note":"example"}}\n{good}', 4)[1]
+          == mpc.AMBIGUOUS)
+
+    # --- H: nested fragments are never candidates --------------------------
+    starts, _arrays, _unclosed = mpc._top_level_starts(good)
+    check("a valid plan exposes exactly one top-level start", len(starts) == 1,
+          len(starts))
+    starts, _arrays, unclosed = mpc._top_level_starts(cut)
+    check("a truncated plan still exposes exactly one top-level start",
+          len(starts) == 1, len(starts))
+    check("...and is reported unclosed", unclosed is True)
+    check("a complete malformed plan is NOT reported unclosed",
+          mpc._top_level_starts(broken)[2] is False)
+
+    # --- multiple fences, empty, prose, scalars ----------------------------
+    check("two fenced objects stay ambiguous",
+          mpc.extract_json_object(
+              '```json\n{"a":1}\n```\n```json\n{"b":2}\n```')[1] == mpc.AMBIGUOUS)
+    for label, text, want in (("empty output", "   ", mpc.EMPTY),
+                              ("plain prose", "I cannot help", mpc.MALFORMED),
+                              ("a scalar", "42", mpc.NOT_OBJECT),
+                              ("a list", "[]", mpc.NOT_OBJECT)):
+        check(f"{label} -> {want}", mpc.extract_json_object(text)[1] == want,
+              mpc.extract_json_object(text)[1])
+
+    # --- known trade-offs of depth-based discovery, pinned deliberately ----
+    # An UNBALANCED brace in prose swallows the rest of the text, so a plan
+    # after it is no longer found. This costs one retry; it never returns a
+    # wrong plan. Recovering it would need a heuristic about where a decode
+    # error sits, which could misfire on the truncation case this fix exists
+    # to diagnose - so the retry is accepted as the cheaper failure.
+    check("an unbalanced brace in prose costs a retry, not a wrong plan",
+          mpc.extract_json_object(f"Note: use the {{ pan\n{good}", 3)[0] is None)
+    # A BALANCED stray brace in prose is fine.
+    check("a balanced stray brace in prose is tolerated",
+          mpc.extract_json_object(f"Note: use the {{small}} pan\n{good}", 3)[0]
+          is not None)
+    # A second plan that was cut off is not a competing answer - it never
+    # decodes, so the one complete plan is returned.
+    obj, code, _ = mpc.extract_json_object(f"{good}\n{good[:len(good)//2]}", 3)
+    check("a half-emitted second plan does not create ambiguity",
+          code is None and obj is not None, f"code={code}")
+
+    # --- corrective brief targets the real failure -------------------------
+    briefs = {}
+    for code_name in (mpc.TRUNCATED, mpc.MALFORMED, mpc.AMBIGUOUS,
+                      mpc.NOT_OBJECT, mpc.EMPTY):
+        candidate = mpc.PlanCandidate(plan=None, raw_text="x",
+                                      parse_error="failed", parse_code=code_name)
+        briefs[code_name] = candidate.issues_brief()
+        check(f"the {code_name} brief demands one root object",
+              "exactly ONE JSON object" in briefs[code_name], briefs[code_name][:80])
+        for phrase in ("one object per day", "JSON Lines",
+                       "example or partial object", "fragments or patches",
+                       "day_1 through day_7"):
+            check(f"...{code_name} brief covers {phrase!r}",
+                  phrase in briefs[code_name], briefs[code_name][:120])
+
+    check("the truncated brief names LENGTH, not multiple objects",
+          "LENGTH problem" in briefs[mpc.TRUNCATED], briefs[mpc.TRUNCATED][:90])
+    check("the malformed brief names trailing commas",
+          "trailing comma" in briefs[mpc.MALFORMED], briefs[mpc.MALFORMED][:90])
+    check("the briefs are not all identical",
+          len({b[:200] for b in briefs.values()}) == len(briefs))
+
+
+def top_level_service():
+    from app.services import meal_plan_contract as mpc
+    print(f"\n{BOLD}13b. Service behaviour after the extraction fix{RESET}")
+
+    good = json.dumps(plan(), indent=1)
+    broken = _trailing_commas(good)
+    cut = broken[:int(len(broken) * 0.88)]
+
+    result, agent = generate(good)
+    check("a valid first response costs one agent call", agent.calls == 1,
+          agent.calls)
+    check("...and succeeds", result["success"], result.get("error"))
+
+    # Deterministic recovery must not spend a generation.
+    result, agent = generate(f'{{"note":"example"}}\n{good}')
+    check("a recoverable example+plan response costs one call", agent.calls == 1,
+          agent.calls)
+    check("...and succeeds", result["success"], result.get("error"))
+
+    # Unrecoverable formatting failure, then a corrected response.
+    result, agent = generate(cut, extra_responses=(good,))
+    check("truncated then corrected costs exactly two calls", agent.calls == 2,
+          agent.calls)
+    check("...and succeeds", result["success"], result.get("error"))
+    check("the retry brief carried the single-root-object rule",
+          "exactly ONE JSON object" in agent.prompts[1], agent.prompts[1][-400:])
+    check("...and the length diagnosis, not a multi-object one",
+          "LENGTH problem" in agent.prompts[1], agent.prompts[1][-400:])
+
+    # Two ambiguous responses: two calls, then honest failure.
+    two = f"{good}\n{good}"
+    result, agent = generate(two, extra_responses=(two,))
+    check("two ambiguous responses cost exactly two calls", agent.calls == 2,
+          agent.calls)
+    check("...then fail closed", result["success"] is False, result.get("error"))
+    check("...reporting ambiguity, not success", "guess" in result.get("error", ""),
+          result.get("error"))
+
+    # The retry output stays subject to the whole pipeline.
+    short_week = json.dumps(plan(days=5))
+    result, agent = generate(cut, extra_responses=(short_week,))
+    check("a corrected-but-incomplete week is still rejected",
+          result["success"] is False, result.get("error"))
+
+    wrong_meals = json.dumps(plan(meals_per_day=2))
+    result, agent = generate(cut, extra_responses=(wrong_meals,))
+    check("a corrected plan with the wrong meal count is rejected",
+          result["success"] is False, result.get("error"))
+
+    no_qty = plan()
+    no_qty["plan"]["day_1"][0]["ingredients"] = [{"name": "oats"}]
+    result, agent = generate(cut, extra_responses=(json.dumps(no_qty),))
+    check("a corrected plan missing ingredient quantities is rejected",
+          result["success"] is False, result.get("error"))
+
+    beef = plan(ingredients=[{"name": "beef mince", "qty": "100g"}])
+    result, agent = generate(cut, extra_responses=(json.dumps(beef),),
+                             payload={"dietary_restrictions": ["vegetarian"]})
+    check("a corrected plan breaking a dietary restriction is rejected",
+          result["success"] is False, result.get("error"))
+
+    hungry = json.dumps(plan(per_meal={"calories": 200, "protein": 10,
+                                       "carbs": 25, "fat": 6}))
+    result, agent = generate(cut, extra_responses=(hungry,))
+    check("a corrected plan far off the calorie target does not pass verified",
+          not result.get("verification", {}).get("calories", {}).get("hit", False),
+          result.get("verification", {}).get("calories"))
+
+    # A nested fragment can never be returned as a plan.
+    fragment = json.dumps(plan()["plan"]["day_1"][0])
+    result, agent = generate(fragment, extra_responses=(fragment,))
+    check("a single meal object is never a successful plan",
+          result["success"] is False, result.get("error"))
+    day_only = json.dumps({"day_1": plan()["plan"]["day_1"]})
+    result, agent = generate(day_only, extra_responses=(day_only,))
+    check("a single day object is never a successful plan",
+          result["success"] is False, result.get("error"))
+
+    # No parse-driven regeneration loop.
+    result, agent = generate(cut, extra_responses=(cut,))
+    check("two unparseable responses stop at two calls", agent.calls == 2,
+          agent.calls)
+    check("...and fail with the parse diagnosis", result["success"] is False,
+          result.get("error"))
+
+
+def top_level_mutations():
+    from app.services import meal_plan_contract as mpc
+    print(f"\n{BOLD}13c. Mutations — the extraction guards are load-bearing{RESET}")
+
+    good = json.dumps(plan(), indent=1)
+    broken = _trailing_commas(good)
+    cut = broken[:int(len(broken) * 0.88)]
+
+    # M1: replay the OLD scanner exactly - every "{" is a candidate, and a
+    # successful decode skips only its own interior. On the production
+    # fixture it reports the reported 19 objects for what is one broken plan.
+    def legacy_scan(cleaned):
+        decoder = json.JSONDecoder()
+        starts = [i for i, ch in enumerate(cleaned) if ch == "{"]
+        found, index = [], 0
+        while index < len(starts):
+            try:
+                value, end = decoder.raw_decode(cleaned, starts[index])
+            except json.JSONDecodeError:
+                index += 1
+                continue
+            if isinstance(value, dict):
+                found.append(value)
+                index = next((k for k in range(index + 1, len(starts))
+                              if starts[k] >= end), len(starts))
+            else:
+                index += 1
+        return found
+
+    legacy = legacy_scan(cut)
+    check("M1 the old scanner reports 19 objects for one broken plan",
+          len(legacy) == 19, len(legacy))
+    check("M1 ...every one of them a nested fragment, not a plan",
+          all(not mpc.validate_structure(o, 3).ok for o in legacy),
+          [list(o)[:3] for o in legacy[:3]])
+    check("M1 ...while the fixed extractor calls it truncated",
+          mpc.extract_json_object(cut)[1] == mpc.TRUNCATED)
+
+    # M2: selecting the first object accepts the wrong candidate.
+    text = f'{{"note":"example"}}\n{good}'
+    found, _err = mpc._decode_at(text, mpc._top_level_starts(text)[0])
+    check("M2 taking the first object would return the example, not the plan",
+          found[0] == {"note": "example"} and "plan" not in found[0], found[0])
+    check("M2 ...while structural selection returns the real plan",
+          "plan" in mpc.extract_json_object(text, 3)[0])
+
+    # M3: selecting the largest object can accept a structurally invalid one.
+    bloated = json.dumps({"note": "x" * (len(good) * 2), "day_1": []})
+    text = f"{bloated}\n{good}"
+    found, _err = mpc._decode_at(text, mpc._top_level_starts(text)[0])
+    largest = max(found, key=lambda o: len(json.dumps(o)))
+    check("M3 the largest object is the invalid one",
+          not mpc.validate_structure(largest, 3).ok, list(largest))
+    check("M3 ...while structural selection returns the valid plan",
+          mpc.validate_structure(mpc.extract_json_object(text, 3)[0], 3).ok)
+
+    # M4: removing the two-plan guard accepts competing plans.
+    original_validate = mpc.validate_structure
+    mpc.validate_structure = lambda obj, meals_per_day: mpc.StructureResult(
+        ok=(obj is not None and "plan" in obj))
+    try:
+        obj, code, _ = mpc.extract_json_object(f"{good}\n{good}", 3)
+    finally:
+        mpc.validate_structure = original_validate
+    check("M4 a weakened uniqueness check still refuses two complete plans",
+          code == mpc.AMBIGUOUS and obj is None, f"code={code}")
+
+    # M5: bypassing structural validation lets a nested fragment succeed.
+    fragment = json.dumps({"day_1": plan()["plan"]["day_1"]})
+    from app.services import advanced_meal_planner_service as mod
+    original_structure = mpc.validate_structure
+    mpc.validate_structure = lambda obj, meals_per_day: mpc.StructureResult(ok=True)
+    try:
+        result, _agent = generate(fragment)
+        bypassed = result["success"]
+    finally:
+        mpc.validate_structure = original_structure
+    check("M5 bypassing structural validation lets a day fragment through",
+          bypassed)
+    result, _agent = generate(fragment, extra_responses=(fragment,))
+    check("M5 ...and it is rejected once restored", result["success"] is False)
+
+    # M6: an extra application retry would exceed two agent calls.
+    original_attempt = mod.AdvancedMealPlannerService._attempt
+
+    def three_attempts(self, prompt, **assess):
+        first = self._assess(self._run_agent(prompt), **assess)
+        for _ in range(2):
+            if not self._needs_retry(first):
+                break
+            first = self._assess(self._run_agent(prompt), **assess)
+        return first
+
+    mod.AdvancedMealPlannerService._attempt = three_attempts
+    try:
+        _result, agent = generate(cut, extra_responses=(cut, cut, cut))
+        extra = agent.calls
+    finally:
+        mod.AdvancedMealPlannerService._attempt = original_attempt
+    check("M6 an extra application retry causes more than two calls", extra > 2,
+          extra)
+    _result, agent = generate(cut, extra_responses=(cut,))
+    check("M6 ...and the real service stays at two", agent.calls == 2, agent.calls)
+
+    # M7: the transport retry bound is set on the planner only.
+    from app.models.groq_with_fallback import GroqWithFallback
+    bounded = GroqWithFallback(id="x", fallback_id="y", max_retries=1)
+    check("M7 the planner's client bounds SDK retries to 1",
+          bounded._get_client_params().get("max_retries") == 1)
+    check("M7 ...and other agents are untouched",
+          GroqWithFallback(id="x")._get_client_params().get("max_retries") is None)
+    source = inspect.getsource(mod)
+    check("M7 the bound is declared at the planner's model construction",
+          "max_retries=1" in source)
+
+
 def main():
     print(f"\n{BOLD}ADVANCED MEAL PLANNER — validation & dietary safety{RESET}")
     structural_failures()
@@ -1299,6 +1659,9 @@ def main():
     review_mutations()
     codex_findings()
     separator_boundaries()
+    top_level_extraction()
+    top_level_service()
+    top_level_mutations()
     print(f"\n{BOLD}{passed} passed, {failed} failed{RESET}\n")
     return 1 if failed else 0
 

@@ -50,8 +50,20 @@ class AdvancedMealPlannerService:
             # the reasoning tier is fully exhausted on every key; a plan
             # that's slightly worse at hitting macros is still preferable to
             # the caller getting nothing.
+            #
+            # max_retries bounds the GROQ SDK's own retrying, which defaults
+            # to 2 (three HTTP attempts per logical call) with exponential
+            # backoff. On a 429 that backoff is pure waste here: this app
+            # already handles rate limits by rotating to another API key, and
+            # GroqWithFallback cannot rotate until the SDK finishes sleeping.
+            # The production log shows one corrective generation waiting 32s
+            # then 21s on a key that was already exhausted. One retry keeps
+            # resilience against a transient network blip; the key rotation
+            # handles the rest. Set here rather than in GroqWithFallback so
+            # the five other agents that share it are unaffected.
             model=GroqWithFallback(
-                id=get_reasoning_model(), fallback_id=get_fast_model(), max_tokens=6000
+                id=get_reasoning_model(), fallback_id=get_fast_model(),
+                max_tokens=6000, max_retries=1,
             ),
             description=dedent("""\
                 You are AdvancedMealPlanner, a clinically-minded nutritionist & meal planner.
@@ -245,7 +257,7 @@ class AdvancedMealPlannerService:
         there is deliberately no way to obtain a candidate without running the
         whole pipeline over it.
         """
-        parsed, code, message = mpc.extract_json_object(text)
+        parsed, code, message = mpc.extract_json_object(text, meals_per_day)
         if parsed is None:
             return mpc.PlanCandidate(plan=None, raw_text=text or "",
                                      parse_error=message, parse_code=code)
@@ -594,7 +606,9 @@ def _describe_candidate(candidate: "mpc.PlanCandidate") -> str:
     notes into the application log on every request.
     """
     if candidate.parse_error:
-        return f"parse={candidate.parse_code}"
+        # Length and classification only - enough to tell a truncated week
+        # from a model sending two plans, without the body reaching the log.
+        return f"parse={candidate.parse_code} chars={len(candidate.raw_text or '')}"
     structure = candidate.structure
     dietary = candidate.dietary
     parts = [
