@@ -1344,7 +1344,13 @@ function App() {
           'Content-Type': 'application/json',
           ...headers
         },
-        body: JSON.stringify(culinaryAdaptationForm)
+        body: JSON.stringify({
+          ...culinaryAdaptationForm,
+          // The restrictions the plan was BUILT with. Without these the
+          // backend has nothing to enforce and "make it creamier" can
+          // quietly return dairy to a vegan plan.
+          dietary_restrictions: culinaryexplorerPlan?.dietary_restrictions || []
+        })
       });
 
       if (response.ok) {
@@ -1356,6 +1362,11 @@ function App() {
             meal_plan: data.data.adapted_plan,
             feedback: data.data.feedback,
             new_cuisine_preference: data.data.new_cuisine_preference,
+            // The merged, authoritative set the backend returned - so a
+            // second adaptation inherits everything, not just the newest.
+            dietary_restrictions: data.data.dietary_restrictions
+              || prevPlan.dietary_restrictions,
+            verification: data.data.verification,
             new_dietary_restrictions: data.data.new_dietary_restrictions
           }));
           setCulinaryAdaptationForm({ current_plan: '', feedback: '', new_cuisine_preference: null, new_dietary_restrictions: null });
@@ -3963,6 +3974,61 @@ function App() {
               </h2>
               
               <div className="bg-orange-50 border border-orange-200 rounded-lg p-6 mb-6">
+                {/* Deterministic status only. The plan text itself may carry
+                    "🌿 Vegan" emoji the model wrote; those are a claim, not a
+                    check, and must never be presented as verification. */}
+                {culinaryexplorerPlan.fallback && (
+                  <div className="bg-slate-50 border border-slate-200 rounded p-3 mb-4">
+                    <p className="text-slate-700 text-sm">
+                      The AI service was busy, so this is a general outline rather
+                      than a personalised plan.
+                    </p>
+                  </div>
+                )}
+                {culinaryexplorerPlan.verification?.dietary?.violations?.length > 0 && (
+                  <div className="bg-red-50 border border-red-200 rounded p-3 mb-4">
+                    <h4 className="font-semibold text-red-800 mb-1">Dietary conflict</h4>
+                    <p className="text-red-700 text-sm">
+                      {culinaryexplorerPlan.verification.dietary.summary}
+                    </p>
+                  </div>
+                )}
+                {culinaryexplorerPlan.verification?.dietary?.advisories?.length > 0 && (
+                  <div className="bg-amber-50 border border-amber-200 rounded p-3 mb-4">
+                    <h4 className="font-semibold text-amber-800 mb-2">Worth checking</h4>
+                    <ul className="text-amber-700 text-sm list-disc list-inside space-y-1">
+                      {culinaryexplorerPlan.verification.dietary.advisories.map((note, i) => (
+                        <li key={i}>{note}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {culinaryexplorerPlan.verification?.dietary?.checked?.length > 0 &&
+                 culinaryexplorerPlan.verification.dietary.violations?.length === 0 && (
+                  <div className="bg-green-50 border border-green-200 rounded p-3 mb-4">
+                    <p className="text-green-700 text-sm">
+                      Checked against: {culinaryexplorerPlan.verification.dietary.checked
+                        .map((r) => r.replace(/_/g, ' ')).join(', ')} — no forbidden
+                      ingredients found in the listed dishes.
+                    </p>
+                  </div>
+                )}
+                {culinaryexplorerPlan.verification?.macros?.checked === false && (
+                  <div className="bg-slate-50 border border-slate-200 rounded p-3 mb-4">
+                    <p className="text-slate-700 text-sm">
+                      Macros could not be read from this plan, so they are unverified.
+                    </p>
+                  </div>
+                )}
+                {culinaryexplorerPlan.verification?.macros?.checked &&
+                 !culinaryexplorerPlan.verification.macros.hit && (
+                  <div className="bg-orange-50 border border-orange-200 rounded p-3 mb-4">
+                    <h4 className="font-semibold text-orange-800 mb-1">Macros are off target</h4>
+                    <p className="text-orange-700 text-sm">
+                      {culinaryexplorerPlan.verification.macros.summary}
+                    </p>
+                  </div>
+                )}
                 <div className="prose max-w-none" dangerouslySetInnerHTML={{ __html: culinaryexplorerPlan.meal_plan.replace(/\n/g, '<br>') }} />
               </div>
               

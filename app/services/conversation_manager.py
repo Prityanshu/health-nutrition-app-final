@@ -818,7 +818,11 @@ class ConversationManager:
                     return self._unwrap(result, "adapted_plan")
                 if artifact == "recipe":
                     result = await self.culinaryexplorer.adapt_regional_plan(
-                        current_plan=previous, feedback=feedback
+                        current_plan=previous, feedback=feedback,
+                        # The user's own restrictions, resolved above. Without
+                        # them an adaptation carries no dietary requirement at
+                        # all and the audit has nothing to enforce.
+                        dietary_restrictions=diet,
                     )
                     return self._unwrap(result, "adapted_plan")
                 result = await asyncio.to_thread(

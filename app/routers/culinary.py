@@ -104,7 +104,12 @@ class RegionalPlanAdaptationRequest(BaseModel):
     current_plan: str = Field(..., description="The current meal plan in markdown format")
     feedback: str = Field(..., description="User's feedback on the current plan")
     new_cuisine_preference: Optional[str] = Field(default=None, description="New cuisine preference (optional)")
-    new_dietary_restrictions: Optional[List[str]] = Field(default=None, description="New dietary restrictions (optional)")
+    # The restrictions the plan was ORIGINALLY built with. Sent back by the
+    # client from the generation response, because plans are not persisted
+    # per user in this pass - see the service docstring. Additions go in
+    # new_dietary_restrictions; nothing here can remove a restriction.
+    dietary_restrictions: List[str] = Field(default=[], description="Restrictions the plan was built with")
+    new_dietary_restrictions: Optional[List[str]] = Field(default=None, description="Additional restrictions to ADD")
 
 @router.get("/culinary/macro-targets")
 async def get_macro_targets(
@@ -194,7 +199,9 @@ async def generate_regional_meal_plan(
                 result["macro_target"] = target.as_dict()
             return {"success": True, "message": "Regional meal plan generated successfully", "data": result}
         else:
-            raise HTTPException(status_code=500, detail=result.get("error", "Failed to generate regional meal plan"))
+            raise HTTPException(
+                status_code=503 if result.get("error_type") == "rate_limit" else 422,
+                detail=result.get("error", "Failed to generate regional meal plan"))
     except HTTPException:
         raise  # keep the specific reason instead of re-wrapping it
     except Exception as e:
@@ -202,7 +209,10 @@ async def generate_regional_meal_plan(
         raise HTTPException(status_code=500, detail=f"Explorer error — {type(e).__name__}: {e}" if str(e) else f"Explorer error — {type(e).__name__}")
 
 @router.post("/culinary/generate-recipe", status_code=201)
-async def generate_regional_recipe(request: RegionalRecipeRequest):
+async def generate_regional_recipe(
+    request: RegionalRecipeRequest,
+    current_user: User = Depends(get_current_active_user),
+):
     """
     Generate a specific regional recipe using CulinaryExplorer AI agent.
     """
@@ -218,7 +228,9 @@ async def generate_regional_recipe(request: RegionalRecipeRequest):
         if result["success"]:
             return {"success": True, "message": "Regional recipe generated successfully", "data": result}
         else:
-            raise HTTPException(status_code=500, detail=result.get("error", "Failed to generate regional recipe"))
+            raise HTTPException(
+                status_code=503 if result.get("error_type") == "rate_limit" else 422,
+                detail=result.get("error", "Failed to generate regional recipe"))
     except HTTPException:
         raise  # keep the specific reason instead of re-wrapping it
     except Exception as e:
@@ -226,7 +238,10 @@ async def generate_regional_recipe(request: RegionalRecipeRequest):
         raise HTTPException(status_code=500, detail=f"Explorer error — {type(e).__name__}: {e}" if str(e) else f"Explorer error — {type(e).__name__}")
 
 @router.post("/culinary/adapt-plan", status_code=200)
-async def adapt_regional_plan(request: RegionalPlanAdaptationRequest):
+async def adapt_regional_plan(
+    request: RegionalPlanAdaptationRequest,
+    current_user: User = Depends(get_current_active_user),
+):
     """
     Adapt an existing regional meal plan based on user feedback using CulinaryExplorer AI agent.
     """
@@ -235,12 +250,15 @@ async def adapt_regional_plan(request: RegionalPlanAdaptationRequest):
             current_plan=request.current_plan,
             feedback=request.feedback,
             new_cuisine_preference=request.new_cuisine_preference,
-            new_dietary_restrictions=request.new_dietary_restrictions
+            new_dietary_restrictions=request.new_dietary_restrictions,
+            dietary_restrictions=request.dietary_restrictions,
         )
         if result["success"]:
             return {"success": True, "message": "Regional meal plan adapted successfully", "data": result}
         else:
-            raise HTTPException(status_code=500, detail=result.get("error", "Failed to adapt regional meal plan"))
+            raise HTTPException(
+                status_code=503 if result.get("error_type") == "rate_limit" else 422,
+                detail=result.get("error", "Failed to adapt regional meal plan"))
     except HTTPException:
         raise  # keep the specific reason instead of re-wrapping it
     except Exception as e:

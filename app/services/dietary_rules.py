@@ -672,3 +672,333 @@ def restriction_brief(restrictions: Optional[Iterable[Any]]) -> str:
                  "after generation, so a substitution you did not actually make "
                  "will be caught.")
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Markdown projection
+# ---------------------------------------------------------------------------
+#
+# CulinaryExplorer returns Markdown prose, not the structured day/meal object
+# audit_plan() expects. Rather than inventing a second vocabulary for it, this
+# projects Markdown down to the same question the structured auditor asks -
+# "which food names is this line PRESCRIBING?" - and then reuses
+# forbidden_hit(), the exemptions, and the precautionary handling unchanged.
+#
+# TWO THINGS MARKDOWN NEEDS THAT AN INGREDIENT LIST DOES NOT
+#
+# 1. NEGATION. An ingredient list never contains an entry called "without
+#    milk"; prose contains it constantly, and so do "no cream", "instead of
+#    ghee" and "use plant-based milk, not cow milk". forbidden_hit() has no
+#    notion of negation - correctly, for its own input shape - so the line is
+#    cut at the first avoidance phrase and only the part BEFORE it is treated
+#    as prescribed. Same positional rule contraindications._earliest_avoidance
+#    already uses for exercises: "Chicken curry, no rice" still reports the
+#    chicken, because the avoidance comes after it.
+#
+# 2. CONFIDENCE BY LINE SHAPE. A bulleted ingredient, a numbered step, a
+#    heading and a bold dish name are PRESCRIPTIONS. A loose prose paragraph
+#    might be describing, comparing or warning. Both are checked, but only the
+#    structural shapes are treated as hard conflicts; prose is advisory, which
+#    is what stops an explanatory sentence being reported with the same
+#    confidence as an ingredient line.
+#
+# This is not allergen certification and does not claim to be. It catches a
+# plan that openly prescribes a forbidden food, which is the failure that
+# actually happens.
+
+_MD_BULLET = re.compile(r"^\s*(?:[-*•+]|\d+[.)])\s+(.*\S)\s*$")
+_MD_HEADING = re.compile(r"^\s*#{1,6}\s+(.*?)\s*#*\s*$")
+_MD_BOLD_LEAD = re.compile(r"^\s*\*{1,2}([^*]+?)\*{1,2}\s*:?\s*(.*)$")
+
+# A Markdown table row. Models reach for tables whenever they are asked for
+# quantities, and "| Milk | 200ml |" is every bit as much a prescription as
+# "- Milk, 200ml". The alignment row (|---|:--:|) is not content.
+_MD_TABLE_ROW = re.compile(r"^\s*\|(.+)\|\s*$")
+_MD_TABLE_RULE = re.compile(r"^\s*\|[\s:|-]+\|\s*$")
+
+# "Ingredients: chicken, salt" is the single most common recipe shape there
+# is, and without this it reads as prose. Only these labels promote the text
+# after the colon - a general "short label + colon" rule would swallow
+# "Note: some families add cheese", which genuinely is commentary.
+_MD_LABELLED = re.compile(
+    r"^\s*(ingredients?|method|steps?|serves?\s+with|serving\s+suggestions?|"
+    r"sides?|accompaniments?|garnish|breakfast|lunch|dinner|snacks?|"
+    r"meal\s*\d*|dish|main|starter|dessert|beverages?|drinks?)\s*:\s*(.+)$",
+    re.I,
+)
+
+# Clause boundaries that end an exclusion. Deliberately excludes "and"/"or",
+# so "without milk or cream" excludes both - only a real break in the
+# sentence ends the avoidance.
+_CLAUSE_END = re.compile(r"[,;.\n]|\bbut\b", re.I)
+
+# Phrases meaning the food named after them is being EXCLUDED, not served.
+_AVOIDANCE = re.compile(
+    r"\b(?:no|not|non|without|avoid(?:ing)?|omit(?:ting)?|skip(?:ping)?|"
+    r"instead\s+of|in\s+place\s+of|rather\s+than|replace(?:s|d)?|"
+    r"replacing|substitut\w*|swap(?:ped|ping)?|switch(?:ed|ing)?|"
+    r"exchang(?:e|ed|ing)|remov(?:e|es|ed|ing)|drop(?:ped|ping)?|"
+    r"discard(?:ed|ing)?|cut\s+out|forgo|free\s+from|hold\s+the|minus|"
+    r"sans|except|excluding|leave\s+out|left\s+out|leave\s+off)\b",
+    re.I,
+)
+
+# The subset of the above that takes a REPLACEMENT TARGET: "replace X with Y"
+# names Y as the thing now being served. "instead of" and "rather than" are
+# deliberately NOT here - in "coconut oil instead of butter" the food after
+# the phrase is the one being dropped, not the one being added.
+_REPLACEMENT_VERB = re.compile(
+    r"^(?:replace(?:s|d)?|replacing|substitut\w*|swap(?:ped|ping)?|"
+    r"switch(?:ed|ing)?|exchang(?:e|ed|ing))$",
+    re.I,
+)
+
+# What introduces the replacement target after such a verb.
+_REPLACE_TARGET = re.compile(r"\b(?:with|for|by)\b", re.I)
+
+# A connector that ends an exclusion by starting a new PRESCRIPTION.
+# "and cream" is still part of the exclusion; "and serve cream" is not - the
+# serving verb is what makes the difference, so a bare conjunction never
+# resumes and "without milk or cream" keeps excluding both.
+_RESUME = re.compile(
+    r"\b(?:and|then|plus|also|before|after)\s+(?:also\s+|instead\s+)?"
+    r"(?:add(?:s|ing)?|serve[sd]?|serving|use[sd]?|using|include[sd]?|"
+    r"including|top(?:ped|ping)?\s+with|garnish(?:ed|ing)?\s+with|"
+    r"finish(?:ed|ing)?\s+with|stir(?:red|ring)?\s+in|mix(?:ed|ing)?\s+in|"
+    r"pair(?:ed|ing)?\s+with|swap\s+in|put\s+in)\b",
+    re.I,
+)
+
+# Wording that makes an item conditional rather than prescribed. Reported as
+# an advisory: "optional chicken" is not served to a vegetarian by default,
+# but it is absolutely worth telling them it is on the page.
+_OPTIONAL = re.compile(
+    r"\boptional(?:ly)?\b|\bif\s+(?:you\s+)?(?:like|prefer|wish|desired?|"
+    r"available|not\s+vegan|non[\s-]?veg)\b|\bto\s+taste\b|\bor\s+omit\b",
+    re.I,
+)
+
+# Emoji/label noise the agent is explicitly told to emit, which would
+# otherwise read as content ("🍗 Contains meat/poultry" is a legend entry).
+_LEGEND_LINE = re.compile(
+    r"^\s*[^\w]*\s*(?:contains|vegetarian|vegan|gluten[\s-]?free|"
+    r"healthier\s+version)\b.{0,40}$",
+    re.I,
+)
+
+
+def split_prescription(line: str) -> tuple:
+    """
+    Split a line into (prescribed, excluded) text.
+
+    A modification instruction names TWO foods with opposite meanings, and
+    collapsing them into one string gets the safety answer wrong in both
+    directions. "Replace tofu with paneer" served paneer to a vegan while
+    "Remove paneer and use tofu" reported a paneer violation that was never
+    on the plate. Only the prescribed side is scanned for forbidden foods.
+
+        "Replace tofu with paneer"      -> ("paneer",        "tofu")
+        "Swap tofu for chicken"         -> ("chicken",       "tofu")
+        "No ghee and add paneer"        -> ("paneer",        "ghee")
+        "Without milk and serve cheese" -> ("cheese",        "milk")
+        "Omit butter then add cheese"   -> ("cheese",        "butter")
+        "Drop tofu, add paneer"         -> ("paneer",        "tofu")
+        "Chicken curry, no rice"        -> ("Chicken curry", "rice")
+        "Cooked without milk or cream"  -> ("Cooked",        "milk or cream")
+        "Coconut oil instead of butter" -> ("Coconut oil",   "butter")
+
+    The line is walked as alternating runs. It starts prescribed; an
+    avoidance phrase opens an excluded run; the run closes at whichever comes
+    first of a clause boundary, a connector that starts a new prescription
+    ("and add", "then serve"), or - after a replacement verb only - the
+    "with"/"for" that introduces what is being served in its place. A bare
+    conjunction never closes it, so "without milk or cream" excludes both.
+    """
+    text = line or ""
+    prescribed, excluded = [], []
+    pos, replacement = 0, False
+    excluding = False
+
+    for _ in range(16):                      # bounded; lines are short
+        if pos >= len(text):
+            break
+        if not excluding:
+            match = _AVOIDANCE.search(text, pos)
+            if not match:
+                prescribed.append(text[pos:])
+                break
+            prescribed.append(text[pos:match.start()])
+            replacement = bool(_REPLACEMENT_VERB.match(match.group(0)))
+            pos, excluding = match.end(), True
+            continue
+
+        ends = [m for m in (_CLAUSE_END.search(text, pos),
+                            _RESUME.search(text, pos)) if m]
+        if replacement:
+            target = _REPLACE_TARGET.search(text, pos)
+            if target:
+                ends.append(target)
+        if not ends:
+            excluded.append(text[pos:])
+            break
+        nearest = min(ends, key=lambda m: m.start())
+        excluded.append(text[pos:nearest.start()])
+        # A clause boundary is kept as a separator on the prescribed side; a
+        # connector or replacement target is consumed.
+        pos = nearest.start() if nearest.re is _CLAUSE_END else nearest.end()
+        excluding, replacement = False, False
+
+    # Joined with a separator forbidden_hit() already splits on, so two runs
+    # never fuse into one phrase.
+    return ", ".join(p for p in prescribed if p.strip()), \
+           ", ".join(e for e in excluded if e.strip())
+
+
+def _prescribed_part(line: str) -> str:
+    """The part of a line that is actually being served."""
+    return split_prescription(line)[0]
+
+
+def markdown_food_candidates(text: str) -> List[tuple]:
+    """
+    (food_text, shape, heading) for each line worth auditing.
+
+    `shape` is "structural" for headings, bullets, numbered items and bold
+    dish names - things a plan PRESCRIBES - and "prose" for everything else.
+    """
+    out: List[tuple] = []
+    heading = ""
+    items = 0                       # structural ITEM lines, headings excluded
+    for raw in (text or "").splitlines():
+        line = raw.rstrip()
+        if not line.strip():
+            continue
+
+        head = _MD_HEADING.match(line)
+        if head:
+            heading = head.group(1).strip()
+            out.append((heading, "structural", heading))
+            continue
+
+        if _LEGEND_LINE.match(line.strip()):
+            continue
+
+        bullet = _MD_BULLET.match(line)
+        if bullet:
+            out.append((bullet.group(1), "structural", heading))
+            items += 1
+            continue
+
+        if _MD_TABLE_RULE.match(line):
+            continue
+        row = _MD_TABLE_ROW.match(line)
+        if row:
+            for cell in row.group(1).split("|"):
+                if cell.strip():
+                    out.append((cell.strip(), "structural", heading))
+            items += 1
+            continue
+
+        labelled = _MD_LABELLED.match(line)
+        if labelled:
+            out.append((labelled.group(2).strip(), "structural", heading))
+            items += 1
+            continue
+
+        bold = _MD_BOLD_LEAD.match(line)
+        if bold:
+            label, rest = bold.group(1).strip(), (bold.group(2) or "").strip()
+            out.append((label, "structural", heading))
+            if rest:
+                out.append((rest, "structural", heading))
+            items += 1
+            continue
+
+        out.append((line.strip(), "prose", heading))
+
+    # "Prose is only advisory" is a concession to STRUCTURED documents, where
+    # the bullets carry the prescription and the paragraphs comment on it.
+    # A document with no item structure has no bullets to defer to - there,
+    # the paragraphs ARE the plan, and treating them as advisory let an
+    # entirely prose-written "you will prepare chicken curry" reach a
+    # vegetarian as a clean success. Fail closed instead.
+    if items < 2:
+        out = [(food, "structural", head) for food, _shape, head in out]
+    return out
+
+
+def audit_markdown(text: str, restrictions: Optional[Iterable[Any]],
+                   macro_totals: Optional[Dict[str, float]] = None) -> DietaryAudit:
+    """
+    Audit a Markdown plan or recipe, returning the same DietaryAudit shape
+    audit_plan() returns so callers can treat both identically.
+
+    Structural lines produce hard violations. Prose, optional wording and
+    precautionary labels produce advisories - surfaced, never silently
+    passed, but not claimed as proof.
+    """
+    names = canonical_set(restrictions)
+    audit = DietaryAudit(restrictions=names)
+
+    ingredient_names = [r for r in names if r in INGREDIENT_RESTRICTIONS]
+    audit.checked = list(ingredient_names)
+
+    for restriction in names:
+        if restriction in UNVERIFIABLE_RESTRICTIONS:
+            audit.unverifiable.append(restriction)
+        elif restriction not in INGREDIENT_RESTRICTIONS and restriction not in MACRO_RESTRICTIONS:
+            audit.unverifiable.append(restriction)
+
+    if ingredient_names and text:
+        for food, shape, heading in markdown_food_candidates(text):
+            optional = bool(_OPTIONAL.search(food))
+            matchable = food
+            if precautionary(food):
+                note = (f"{food.strip()!r} carries a precautionary allergen "
+                        f"warning - not proof, but check the packaging.")
+                if note not in audit.advisories:
+                    audit.advisories.append(note)
+                matchable = strip_precautionary(food)
+
+            matchable = _prescribed_part(matchable)
+            if not matchable.strip():
+                continue
+
+            for restriction in ingredient_names:
+                hit = forbidden_hit(matchable, restriction)
+                if not hit:
+                    continue
+                where = heading or "plan"
+                if shape == "structural" and not optional:
+                    audit.violations.append(Finding(
+                        day=where, meal=food.strip()[:80],
+                        restriction=restriction, ingredient=food.strip()[:120],
+                        matched=hit, source="markdown",
+                    ))
+                else:
+                    reason = "optional" if optional else "mentioned in prose"
+                    note = (f"{where}: {food.strip()[:80]!r} names {hit!r}, "
+                            f"which is not {restriction.replace('_', ' ')} "
+                            f"({reason}) - check before cooking.")
+                    if note not in audit.advisories:
+                        audit.advisories.append(note)
+
+    macro_names = [r for r in names if r in MACRO_RESTRICTIONS]
+    if macro_names:
+        if macro_totals:
+            audit.checked.extend(macro_names)
+            audit.advisories.extend(
+                _macro_breaches(r, {"the plan": macro_totals}) for r in macro_names)
+            audit.advisories = [a for a in audit.advisories if a]
+            audit.advisories = [a for sub in audit.advisories
+                                for a in (sub if isinstance(sub, list) else [sub])]
+        else:
+            audit.unverifiable.extend(macro_names)
+
+    if audit.unverifiable:
+        audit.advisories.append(
+            "These were requested but cannot be confirmed from the text: "
+            + ", ".join(r.replace("_", " ") for r in audit.unverifiable)
+            + ". Treat them as unchecked."
+        )
+    return audit
