@@ -610,9 +610,17 @@ def test_structured_verification():
 
     check("an empty plan is unchecked, not failed",
           verify_structured(target, {})["checked"] is False)
-    check("a plan with no macros is unchecked",
-          verify_structured(target, {"plan": {"day_1": [{"recipe_name": "x"}]}})["days"][0]["hit"] is False
-          or True)
+    # `or True` used to make this assertion unconditionally true - it tested
+    # nothing at all. A meal with no macros object totals zero for every
+    # macro, which is genuinely a miss against any real target, and that is
+    # what this now asserts.
+    no_macros = verify_structured(target, {"plan": {"day_1": [{"recipe_name": "x"}]}})
+    check("a plan whose meals have no macros does not pass",
+          no_macros["days"][0]["hit"] is False, no_macros["days"][0])
+    check("...and every macro reads as under target, not absent",
+          all(no_macros["days"][0]["macros"][m]["status"] == "under"
+              for m in ("calories", "protein", "carbs", "fat")),
+          no_macros["days"][0]["macros"])
 
     brief = retry_brief_structured(partial, target)
     check("the retry brief names the failing day", "day_4" in brief, brief[:200])

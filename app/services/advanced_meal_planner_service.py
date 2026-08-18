@@ -1,36 +1,18 @@
 import logging
+from typing import Optional
+
 from agno.agent import Agent
 from app.models.groq_with_fallback import GroqWithFallback
 from app.config.groq_config import get_fast_model, get_reasoning_model
 from dotenv import load_dotenv
 from textwrap import dedent
 import json
-import re
+
+from app.services import dietary_rules
+from app.services import meal_plan_contract as mpc
 
 load_dotenv()
 logger = logging.getLogger(__name__)
-
-def _strip_code_fences(text: str) -> str:
-    """
-    Remove a surrounding markdown code fence, if present.
-
-    The agent is instructed to emit bare JSON but often returns it wrapped as
-    ```json … ``` regardless. That makes json.loads fail at position 0, which
-    previously fell through to brace matching - a fallback meant for genuinely
-    malformed output, not for a wrapper we can strip deterministically.
-    """
-    if not text:
-        return text
-    cleaned = text.strip()
-    if cleaned.startswith("```"):
-        # Drop the opening fence and any language tag on the same line.
-        newline = cleaned.find("\n")
-        cleaned = cleaned[newline + 1:] if newline != -1 else cleaned[3:]
-        # Drop the closing fence.
-        if cleaned.rstrip().endswith("```"):
-            cleaned = cleaned.rstrip()[:-3]
-    return cleaned.strip()
-
 
 class AdvancedMealPlannerService:
     def __init__(self):
@@ -200,6 +182,16 @@ class AdvancedMealPlannerService:
                 "in est_cost fields with realistic estimates for reference."
             )
 
+        # Dietary restrictions as an explicit hard requirement rather than one
+        # more comma-separated input line. The deterministic audit rejects the
+        # plan either way, so this is purely to make the first attempt right
+        # more often - the prompt is never what makes it safe.
+        restriction_block = dietary_rules.restriction_brief(
+            payload.get("dietary_restrictions"))
+        if restriction_block:
+            restriction_block = "\n            " + restriction_block.replace(
+                "\n", "\n            ") + "\n"
+
         # Goes after the inputs and immediately before the instruction to
         # generate - the last thing read, which is where a hard requirement
         # has to sit.
@@ -231,226 +223,410 @@ class AdvancedMealPlannerService:
             - time_per_meal_min: {payload.get('time_per_meal_min', 30)}
             - region_or_cuisine: {region}
             - user_notes: {payload.get('user_notes', '')}
-            {goal_block}{macro_block}
+            {goal_block}{restriction_block}{macro_block}
             Please generate the 7-day plan now.
         """)
         return query
 
+
+    # ------------------------------------------------------------------
+    # the one canonical validation pipeline
+    # ------------------------------------------------------------------
+
+    def _assess(self, text: str, *, meals_per_day: int,
+                restrictions=None, target_calories=None,
+                macro_target=None) -> "mpc.PlanCandidate":
+        """
+        LLM text -> a fully assessed candidate.
+
+        Generation, the generation retry, adaptation and the adaptation retry
+        all come through here. That is the point: every earlier bug in this
+        file existed because one path checked something another did not, so
+        there is deliberately no way to obtain a candidate without running the
+        whole pipeline over it.
+        """
+        parsed, code, message = mpc.extract_json_object(text)
+        if parsed is None:
+            return mpc.PlanCandidate(plan=None, raw_text=text or "",
+                                     parse_error=message, parse_code=code)
+
+        candidate = mpc.PlanCandidate(plan=parsed, raw_text=text or "")
+        candidate.structure = mpc.validate_structure(parsed, meals_per_day)
+
+        totals = mpc.day_totals(parsed)
+        candidate.dietary = dietary_rules.audit_plan(
+            parsed, restrictions, macro_totals_by_day=totals)
+        candidate.calories = mpc.verify_calories(parsed, target_calories)
+
+        if macro_target is not None:
+            from app.services import macro_targets as mt
+            candidate.macro = mt.verify_structured(macro_target, parsed)
+        return candidate
+
+    def _run_agent(self, prompt: str) -> str:
+        response = self.advanced_meal_agent.run(prompt)
+        return response.content if hasattr(response, "content") else str(response)
+
+    def _needs_retry(self, candidate: "mpc.PlanCandidate") -> bool:
+        """
+        Worth spending the one corrective generation?
+
+        True for anything the user would consider wrong: an unusable plan, a
+        hard dietary violation, or a calorie/macro miss. All of them go into a
+        SINGLE brief - separate retry loops per validator would multiply the
+        cost of the most expensive call in the app.
+        """
+        if not candidate.usable:
+            return True
+        if candidate.calories and candidate.calories.get("checked") \
+                and not candidate.calories.get("hit"):
+            return True
+        if candidate.macro and candidate.macro.get("checked") \
+                and not candidate.macro.get("hit"):
+            return True
+        return False
+
+    def _attempt(self, prompt: str, **assess) -> "mpc.PlanCandidate":
+        """One generation plus at most one bounded corrective retry."""
+        first = self._assess(self._run_agent(prompt), **assess)
+        logger.info("meal plan attempt 1: %s", _describe_candidate(first))
+
+        if not self._needs_retry(first):
+            return first
+
+        brief = first.issues_brief()
+        if not brief:
+            return first
+
+        try:
+            retry_text = self._run_agent(
+                f"{prompt}\n\n            "
+                f"Your previous attempt was rejected. Fix ALL of the following "
+                f"and return the complete corrected 7-day plan:\n{brief}"
+            )
+            second = self._assess(retry_text, **assess)
+        except Exception as exc:
+            # A failed retry must never cost the user a plan they already have.
+            logger.warning("meal plan retry failed (%s); keeping first attempt",
+                           type(exc).__name__)
+            return first
+
+        logger.info("meal plan attempt 2: %s", _describe_candidate(second))
+        if mpc.better(second, first):
+            second.retried = True
+            return second
+        first.retried = True
+        return first
+
+    # ------------------------------------------------------------------
+    # generation
+    # ------------------------------------------------------------------
+
     def generate_meal_plan(self, payload: dict, macro_target=None) -> dict:
         """
-        Generate a 7-day meal plan using AdvancedMealPlanner agent.
+        Generate a 7-day meal plan, or fail closed.
 
-        With `macro_target`, every day is held to all four macros and the
-        result is checked by summing the plan's own per-meal figures - which is
-        stronger than reading a stated total, because it uses the numbers the
-        plan is actually made of.
+        Success now means the plan is structurally a complete week AND
+        contains no ingredient the user's restrictions forbid. Calorie and
+        macro misses are returned with honest verification metadata rather
+        than blocking, because a plan 200 kcal light is still usable and a
+        vegan plan containing milk is not.
         """
         try:
+            restrictions = payload.get("dietary_restrictions") or []
+            meals_per_day = int(payload.get("meals_per_day") or 3)
+            target_calories = payload.get("target_calories")
+
             query = self.build_query(payload, macro_target=macro_target)
-            logger.info(f"AdvancedMealPlanner query: {query}")
+            candidate = self._attempt(
+                query,
+                meals_per_day=meals_per_day,
+                restrictions=restrictions,
+                target_calories=target_calories,
+                macro_target=macro_target,
+            )
 
-            # call the agent; using run() returns a RunOutput object
-            response = self.advanced_meal_agent.run(query)
-            logger.info(f"AdvancedMealPlanner raw response: {response}")
+            if not candidate.usable:
+                logger.warning("meal plan rejected: %s",
+                               _describe_candidate(candidate))
+                return {
+                    "success": False,
+                    "error": candidate.failure_reason(),
+                    "verification": candidate.verification_dict(),
+                }
 
-            # Extract content from RunOutput
-            agent_text = response.content if hasattr(response, 'content') else str(response)
-            logger.info(f"AdvancedMealPlanner extracted text: {agent_text}")
-
-            # The agent is told to return pure JSON but frequently wraps it in
-            # a ```json fence anyway. Strip that before parsing rather than
-            # relying on the brace-matching fallback below, which is a last
-            # resort and cannot cope with truncation.
-            agent_text = _strip_code_fences(agent_text)
-
-            try:
-                parsed = json.loads(agent_text)
-            except json.JSONDecodeError:
-                # attempt to recover: extract first complete JSON object occurrence
-                # Use a more precise approach to find the JSON boundaries
-                json_start = agent_text.find('{')
-                if json_start == -1:
-                    return {
-                        "success": False,
-                        "error": "Agent did not return valid JSON."
-                    }
-                
-                # Find the matching closing brace by counting braces
-                brace_count = 0
-                json_end = -1
-                for i in range(json_start, len(agent_text)):
-                    if agent_text[i] == '{':
-                        brace_count += 1
-                    elif agent_text[i] == '}':
-                        brace_count -= 1
-                        if brace_count == 0:
-                            json_end = i + 1
-                            break
-                
-                if json_end == -1:
-                    # The object opened but never closed: the model stopped
-                    # mid-generation. Say so plainly, with the one action that
-                    # reliably helps.
-                    logger.error(
-                        "Truncated plan: %d chars, unbalanced braces", len(agent_text)
-                    )
-                    return {
-                        "success": False,
-                        "error": (
-                            "The plan was cut off before it finished. This happens when the "
-                            "week is too large to generate in one go - try fewer meals per day, "
-                            "then add snacks separately."
-                        )
-                    }
-                
-                json_text = agent_text[json_start:json_end]
-                try:
-                    parsed = json.loads(json_text)
-                except json.JSONDecodeError as e:
-                    return {
-                        "success": False,
-                        "error": f"Failed parsing JSON from agent output: {str(e)}"
-                    }
-
-            verification = None
-            if macro_target is not None:
-                from app.services import macro_targets as mt
-
-                verification = mt.verify_structured(macro_target, parsed)
-
-                # One retry, naming the days that missed and by how much.
-                # A 7-day plan is expensive to generate, so this is bounded at
-                # a single attempt and only kept if it is genuinely better.
-                if verification.get("checked") and not verification.get("hit"):
-                    logger.warning("Meal plan missed macros: %s", verification["summary"])
-                    try:
-                        retry_query = (
-                            f"{query}\n\n            "
-                            f"{mt.retry_brief_structured(verification, macro_target)}"
-                        )
-                        again = self.advanced_meal_agent.run(retry_query)
-                        again_text = _strip_code_fences(
-                            again.content if hasattr(again, "content") else str(again)
-                        )
-                        second = json.loads(again_text)
-                        recheck = mt.verify_structured(macro_target, second)
-                        if recheck.get("checked") and (
-                            recheck.get("days_on_target", 0)
-                            > verification.get("days_on_target", 0)
-                        ):
-                            parsed, agent_text = second, again_text
-                            verification = recheck
-                            verification["retried"] = True
-                    except Exception as e:
-                        # A failed retry must never cost the user the plan they
-                        # already have.
-                        logger.warning("Meal plan retry failed, keeping first: %s", e)
+            # Stamp the AUTHORITATIVE inputs onto the returned plan, replacing
+            # whatever the model claimed in meta.
+            #
+            # The model writes meta.dietary_restrictions itself, and it
+            # routinely writes [] even when generating against a real
+            # restriction. Adaptation later reconstructs restrictions from
+            # this metadata, so an omitted or falsified value silently
+            # dropped the restriction on the next hop: generate vegan ->
+            # model reports none -> adapt -> milk accepted. These fields are
+            # the request's, not the model's, so the request wins.
+            meta = candidate.plan.setdefault("meta", {})
+            if isinstance(meta, dict):
+                meta["dietary_restrictions"] = dietary_rules.canonical_set(restrictions)
+                meta["meals_per_day"] = meals_per_day
+                if target_calories:
+                    meta["requested_daily_calories"] = target_calories
 
             return {
                 "success": True,
-                "meal_plan": parsed,
-                "verification": verification,
-                "raw_response": agent_text
+                "meal_plan": candidate.plan,
+                "verification": candidate.verification_dict(),
+                # Kept for the existing response contract. Bounded so a caller
+                # logging the result cannot dump the whole week.
+                "raw_response": candidate.raw_text[:2000],
             }
 
-        except Exception as e:
-            error_msg = str(e)
-            if "rate_limit_exceeded" in error_msg or "Rate limit reached" in error_msg:
-                logger.error(f"Groq API rate limit exceeded: {e}")
-                return {
-                    "success": False, 
-                    "error": "AI service is temporarily unavailable due to high usage. Please try again in a few minutes.",
-                    "error_type": "rate_limit"
-                }
-            else:
-                logger.error(f"Error generating meal plan with AdvancedMealPlanner: {e}")
-                return {"success": False, "error": str(e)}
+        except Exception as exc:
+            return _service_error(exc, "generating")
 
-    def adapt_meal_plan(self, current_plan: dict, feedback: str, new_requirements: dict = None) -> dict:
-        """Adapt an existing meal plan based on user feedback"""
+    # ------------------------------------------------------------------
+    # adaptation
+    # ------------------------------------------------------------------
+
+    def adapt_meal_plan(self, current_plan: dict, feedback: str,
+                        new_requirements: dict = None, *,
+                        meals_per_day: int = None,
+                        restrictions=None,
+                        target_calories=None,
+                        macro_target=None) -> dict:
+        """
+        Adapt an existing plan, through the identical validation pipeline.
+
+        Adaptation used to be the unguarded twin of generation: no auth, no
+        structural check on the plan going in OR coming out, no dietary audit,
+        no macro recheck. "Make it tastier" could return a plan that dropped
+        the user's vegan restriction and it was reported as success.
+
+        `restrictions` is authoritative and comes from the caller (the router,
+        from the authenticated user's saved plan), NOT from the free-text
+        feedback - so "add some cheese" cannot quietly delete a dairy-free
+        requirement. new_requirements may ADD restrictions; it can never
+        remove one.
+        """
         try:
-            # Build adaptation prompt
-            adaptation_prompt = f"""
-            Please adapt the following 7-day meal plan based on user feedback and new requirements.
+            # Two DIFFERENT meal counts, and conflating them made changing
+            # meals-per-day impossible: the incoming plan was validated
+            # against the NEW requirement, so asking to go from 3 meals to 4
+            # rejected the existing plan for having 3 - before the agent was
+            # ever called.
+            existing_meals = _infer_meals_per_day(current_plan) or 3
+            wanted_meals = int(meals_per_day or existing_meals)
 
-            Current Plan:
-            {json.dumps(current_plan, indent=2)}
+            # The plan going IN must already be valid ON ITS OWN TERMS.
+            # Sending a broken plan to the model wastes the call and makes the
+            # output impossible to attribute - was it bad because the model
+            # failed, or because the input was already nonsense?
+            incoming = mpc.validate_structure(current_plan, existing_meals)
+            if not incoming.ok:
+                head = "; ".join(incoming.errors[:4])
+                return {
+                    "success": False,
+                    "error": f"The plan you asked to adapt is not a valid 7-day "
+                             f"plan — {head}",
+                    "verification": {"structure": incoming.as_dict()},
+                }
 
-            User Feedback:
-            {feedback}
+            # Restrictions are the union of what the plan was built with and
+            # anything newly requested. Never a subtraction.
+            existing = ((current_plan.get("meta") or {}).get("dietary_restrictions")
+                        if isinstance(current_plan.get("meta"), dict) else None)
+            merged = dietary_rules.canonical_set(
+                list(restrictions or []) + list(existing or [])
+                + list((new_requirements or {}).get("dietary_restrictions") or [])
+            )
 
-            New Requirements:
-            {json.dumps(new_requirements or {}, indent=2)}
+            # Calorie authority, in order: a NEW target the caller explicitly
+            # requested for this adaptation, then the authoritative target
+            # recorded when the plan was generated. The model's own
+            # meta.total_daily_calories is never a candidate - see
+            # _infer_target_calories.
+            if target_calories is None:
+                target_calories = _infer_target_calories(current_plan)
 
-            Please provide an updated 7-day meal plan that addresses the feedback while maintaining
-            the same JSON structure and improving the plan based on the new requirements.
-            """
+            prompt = self._build_adaptation_prompt(
+                current_plan, feedback, new_requirements, merged, macro_target,
+                meals_per_day=wanted_meals)
 
-            logger.info(f"AdvancedMealPlanner adaptation prompt: {adaptation_prompt}")
-            response = self.advanced_meal_agent.run(adaptation_prompt)
-            logger.info(f"AdvancedMealPlanner adaptation response: {response}")
+            candidate = self._attempt(
+                prompt,
+                meals_per_day=wanted_meals,
+                restrictions=merged,
+                target_calories=target_calories,
+                macro_target=macro_target,
+            )
 
-            # Extract content from RunOutput
-            agent_text = response.content if hasattr(response, 'content') else str(response)
-            logger.info(f"AdvancedMealPlanner adaptation text: {agent_text}")
+            if not candidate.usable:
+                logger.warning("adapted plan rejected: %s",
+                               _describe_candidate(candidate))
+                return {
+                    "success": False,
+                    "error": candidate.failure_reason(),
+                    "verification": candidate.verification_dict(),
+                }
 
-            # Parse the adapted plan
-            try:
-                parsed = json.loads(agent_text)
-            except json.JSONDecodeError:
-                # Use the same improved JSON extraction logic
-                json_start = agent_text.find('{')
-                if json_start == -1:
-                    return {
-                        "success": False,
-                        "error": "Agent did not return valid JSON for adaptation."
-                    }
-                
-                # Find the matching closing brace by counting braces
-                brace_count = 0
-                json_end = -1
-                for i in range(json_start, len(agent_text)):
-                    if agent_text[i] == '{':
-                        brace_count += 1
-                    elif agent_text[i] == '}':
-                        brace_count -= 1
-                        if brace_count == 0:
-                            json_end = i + 1
-                            break
-                
-                if json_end == -1:
-                    return {
-                        "success": False,
-                        "error": "Agent did not return complete JSON for adaptation."
-                    }
-                
-                json_text = agent_text[json_start:json_end]
-                try:
-                    parsed = json.loads(json_text)
-                except json.JSONDecodeError as e:
-                    return {
-                        "success": False,
-                        "error": f"Failed parsing adapted JSON: {str(e)}"
-                    }
+            meta = candidate.plan.setdefault("meta", {})
+            if isinstance(meta, dict):
+                # Same reasoning as generation: these are the caller's
+                # values, so they survive whatever the model wrote.
+                meta["dietary_restrictions"] = list(merged)
+                meta["meals_per_day"] = wanted_meals
+                if target_calories:
+                    # Carried forward, so a second and third adaptation still
+                    # know what the user actually asked for.
+                    meta["requested_daily_calories"] = target_calories
 
             return {
                 "success": True,
-                "adapted_plan": parsed,
+                "adapted_plan": candidate.plan,
                 "feedback": feedback,
-                "new_requirements": new_requirements
+                "new_requirements": new_requirements,
+                "verification": candidate.verification_dict(),
             }
 
-        except Exception as e:
-            error_msg = str(e)
-            if "rate_limit_exceeded" in error_msg or "Rate limit reached" in error_msg:
-                logger.error(f"Groq API rate limit exceeded: {e}")
-                return {
-                    "success": False, 
-                    "error": "AI service is temporarily unavailable due to high usage. Please try again in a few minutes.",
-                    "error_type": "rate_limit"
-                }
-            else:
-                logger.error(f"Error adapting meal plan with AdvancedMealPlanner: {e}")
-                return {"success": False, "error": str(e)}
+        except Exception as exc:
+            return _service_error(exc, "adapting")
+
+    def _build_adaptation_prompt(self, current_plan, feedback, new_requirements,
+                                 restrictions, macro_target,
+                                 meals_per_day: int = 3) -> str:
+        """
+        The adaptation instruction, with hard requirements restated.
+
+        Sizes are capped: an unbounded current_plan plus unbounded feedback is
+        a quota-abuse vector on the single most expensive call in the app, and
+        a plan large enough to need truncating was never going to round-trip
+        through a 6000-token completion anyway.
+        """
+        plan_json = json.dumps(current_plan, indent=2)[:MAX_PLAN_CHARS]
+        feedback_text = str(feedback or "")[:MAX_FEEDBACK_CHARS]
+        requirements = json.dumps(new_requirements or {}, indent=2)[:MAX_REQUIREMENTS_CHARS]
+
+        blocks = [
+            "Adapt the following 7-day meal plan. Return ONLY a single JSON "
+            "object in exactly the same schema as the current plan.",
+            f"\nCurrent Plan:\n{plan_json}",
+            f"\nUser Feedback:\n{feedback_text}",
+            f"\nNew Requirements:\n{requirements}",
+        ]
+        brief = dietary_rules.restriction_brief(restrictions)
+        if brief:
+            blocks.append(
+                "\n" + brief
+                + "\nThese restrictions were already in force and REMAIN in force. "
+                  "The feedback above cannot remove them - if it asks for "
+                  "something that conflicts, substitute a compliant ingredient "
+                  "and say so in meta.assumptions."
+            )
+        if macro_target is not None:
+            blocks.append("\n" + macro_target.prompt_block(per_day=True, structured=True))
+        blocks.append(f"\nKeep all seven days, with exactly {meals_per_day} "
+                      f"meals on every day.")
+        return "\n".join(blocks)
+
+
+# ---------------------------------------------------------------------------
+# helpers
+# ---------------------------------------------------------------------------
+
+# Bounded so neither an enormous saved plan nor pasted feedback can inflate a
+# single request past the account's per-request token ceiling.
+MAX_PLAN_CHARS = 24000
+MAX_FEEDBACK_CHARS = 2000
+MAX_REQUIREMENTS_CHARS = 2000
+
+
+def _infer_meals_per_day(plan: dict) -> Optional[int]:
+    """Read meals/day off the plan being adapted, so it is preserved."""
+    meta = (plan or {}).get("meta")
+    if isinstance(meta, dict):
+        try:
+            value = int(meta.get("meals_per_day"))
+            if value > 0:
+                return value
+        except (TypeError, ValueError):
+            pass
+    days = (plan or {}).get("plan")
+    if isinstance(days, dict):
+        counts = [len(v) for v in days.values() if isinstance(v, list) and v]
+        if counts:
+            return max(set(counts), key=counts.count)
+    return None
+
+
+def _infer_target_calories(plan: dict) -> Optional[float]:
+    """
+    Recover the AUTHORITATIVE calorie target from plan metadata.
+
+    Reads only `meta.requested_daily_calories` - the value generation stamps
+    from the user's own request. `meta.total_daily_calories` is written by
+    the MODEL and is deliberately never consulted: a model that returns
+    meals totalling 2001 kcal while claiming 500 would otherwise turn its
+    own false claim into the goalposts, and the adapted plan would be
+    verified against - and rebuilt toward - 500 kcal/day.
+
+    Returns None when no authoritative target is recorded (a plan generated
+    before this field existed). `verify_calories` then reports checked=False
+    with a reason, which is honest; inventing a target from an untrusted
+    number would not be.
+    """
+    meta = (plan or {}).get("meta")
+    if isinstance(meta, dict):
+        try:
+            value = float(meta.get("requested_daily_calories"))
+            if value > 0:
+                return value
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
+def _describe_candidate(candidate: "mpc.PlanCandidate") -> str:
+    """
+    Bounded metadata for the log - never the plan, the prompt or the notes.
+
+    Full prompts and complete generated plans used to be logged at INFO,
+    which put the user's health context, dietary restrictions and free-text
+    notes into the application log on every request.
+    """
+    if candidate.parse_error:
+        return f"parse={candidate.parse_code}"
+    structure = candidate.structure
+    dietary = candidate.dietary
+    parts = [
+        f"chars={len(candidate.raw_text)}",
+        f"structure={'ok' if candidate.structurally_complete else 'invalid'}",
+        f"days={structure.days if structure else 0}",
+        f"structural_errors={len(structure.errors) if structure else 0}",
+        f"dietary={dietary.status if dietary else 'n/a'}",
+        f"violations={len(dietary.violations) if dietary else 0}",
+    ]
+    if candidate.calories and candidate.calories.get("checked"):
+        parts.append(f"calorie_days_on_target={candidate.calories.get('days_on_target')}"
+                     f"/{candidate.calories.get('days_total')}")
+    if candidate.macro and candidate.macro.get("checked"):
+        parts.append(f"macro_days_on_target={candidate.macro.get('days_on_target')}"
+                     f"/{candidate.macro.get('days_total')}")
+    return " ".join(parts)
+
+
+def _service_error(exc: Exception, doing: str) -> dict:
+    message = str(exc)
+    if "rate_limit_exceeded" in message or "Rate limit reached" in message:
+        logger.error("Groq rate limit while %s a meal plan", doing)
+        return {
+            "success": False,
+            "error": "AI service is temporarily unavailable due to high usage. "
+                     "Please try again in a few minutes.",
+            "error_type": "rate_limit",
+        }
+    logger.error("Error %s meal plan: %s", doing, type(exc).__name__, exc_info=True)
+    return {"success": False, "error": f"{type(exc).__name__}: {exc}" if message
+            else type(exc).__name__}
+
 
 advanced_meal_planner_service = AdvancedMealPlannerService()

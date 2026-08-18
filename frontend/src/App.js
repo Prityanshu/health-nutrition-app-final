@@ -299,8 +299,11 @@ function App() {
     region_or_cuisine: '',
     user_notes: ''
   });
+  // current_plan is NOT held here: it used to be an empty string that was
+  // never populated after generation, so every adaptation POST was rejected
+  // by Pydantic (current_plan must be an object) before reaching the
+  // service. The live plan in `advancedMealPlan` is the only source of truth.
   const [advancedPlanAdaptationForm, setAdvancedPlanAdaptationForm] = useState({
-    current_plan: '',
     feedback: '',
     new_requirements: {}
   });
@@ -1596,6 +1599,10 @@ function App() {
       setError('Please provide feedback on the current plan');
       return;
     }
+    if (!advancedMealPlan) {
+      setError('Generate a meal plan first, then describe what to change');
+      return;
+    }
 
     setIsGeneratingAdvancedPlan(true);
     setError('');
@@ -1612,7 +1619,11 @@ function App() {
           'Content-Type': 'application/json',
           ...headers
         },
-        body: JSON.stringify(advancedPlanAdaptationForm)
+        body: JSON.stringify({
+          current_plan: advancedMealPlan,
+          feedback: advancedPlanAdaptationForm.feedback,
+          new_requirements: advancedPlanAdaptationForm.new_requirements
+        })
       });
 
       if (response.ok) {
@@ -1620,7 +1631,6 @@ function App() {
         if (data.success && data.data) {
           setAdvancedMealPlan(data.data);
           setAdvancedPlanAdaptationForm({
-            current_plan: '',
             feedback: '',
             new_requirements: {}
           });
@@ -4496,7 +4506,15 @@ function App() {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                   <div className="text-center">
                     <div className="text-2xl font-bold text-blue-600">
-                      {advancedMealPlan.meta?.total_daily_calories || 'N/A'}
+                      {/* The AUTHORITATIVE target: what the user asked for,
+                          stamped by the backend. meta.total_daily_calories is
+                          written by the model and can contradict the plan it
+                          returned (observed: 500 claimed, ~2000 actual), so it
+                          is only a last-resort fallback for legacy plans. */}
+                      {advancedMealPlan.meta?.requested_daily_calories
+                        ?? advancedMealPlan.verification?.calories?.target
+                        ?? advancedMealPlan.meta?.total_daily_calories
+                        ?? 'N/A'}
                     </div>
                     <div className="text-sm text-gray-600">Daily Calories</div>
                   </div>
@@ -4520,6 +4538,61 @@ function App() {
                     <p className="text-yellow-700 text-sm">{advancedMealPlan.meta.assumptions}</p>
                   </div>
                 )}
+
+                {/* What was actually verified. The backend checks calories,
+                    dietary restrictions and macros on every plan; without
+                    this block none of it reached the user, and the summary
+                    above showed the model's own claimed calorie figure. */}
+                {advancedMealPlan.verification?.calories?.checked &&
+                 !advancedMealPlan.verification.calories.hit && (
+                  <div className="bg-orange-50 border border-orange-200 rounded p-3 mb-4">
+                    <h4 className="font-semibold text-orange-800 mb-1">Calories are off target</h4>
+                    <p className="text-orange-700 text-sm">
+                      {advancedMealPlan.verification.calories.summary}
+                    </p>
+                  </div>
+                )}
+
+                {advancedMealPlan.verification?.dietary?.violations?.length > 0 && (
+                  <div className="bg-red-50 border border-red-200 rounded p-3 mb-4">
+                    <h4 className="font-semibold text-red-800 mb-1">Dietary conflict</h4>
+                    <p className="text-red-700 text-sm">
+                      {advancedMealPlan.verification.dietary.summary}
+                    </p>
+                  </div>
+                )}
+
+                {advancedMealPlan.verification?.dietary?.advisories?.length > 0 && (
+                  <div className="bg-amber-50 border border-amber-200 rounded p-3 mb-4">
+                    <h4 className="font-semibold text-amber-800 mb-2">Worth checking</h4>
+                    <ul className="text-amber-700 text-sm list-disc list-inside space-y-1">
+                      {advancedMealPlan.verification.dietary.advisories.map((note, i) => (
+                        <li key={i}>{note}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {advancedMealPlan.verification?.macros?.checked &&
+                 !advancedMealPlan.verification.macros.hit && (
+                  <div className="bg-orange-50 border border-orange-200 rounded p-3 mb-4">
+                    <h4 className="font-semibold text-orange-800 mb-1">Macros are off target</h4>
+                    <p className="text-orange-700 text-sm">
+                      {advancedMealPlan.verification.macros.summary}
+                    </p>
+                  </div>
+                )}
+
+                {advancedMealPlan.verification?.dietary?.checked?.length > 0 &&
+                 advancedMealPlan.verification.dietary.violations?.length === 0 && (
+                  <div className="bg-green-50 border border-green-200 rounded p-3 mb-4">
+                    <p className="text-green-700 text-sm">
+                      Checked against: {advancedMealPlan.verification.dietary.checked
+                        .map((r) => r.replace(/_/g, ' ')).join(', ')} — no forbidden
+                      ingredients found.
+                    </p>
+                  </div>
+                )}
               </div>
               
               {/* Weekly Plan */}
@@ -4537,7 +4610,7 @@ function App() {
                           
                           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-3">
                             <div className="text-center">
-                              <div className="font-bold text-blue-600">{meal.target_calories}</div>
+                              <div className="font-bold text-blue-600">{meal.macros?.calories ?? meal.target_calories ?? '—'}</div>
                               <div className="text-xs text-gray-600">Calories</div>
                             </div>
                             <div className="text-center">

@@ -32,10 +32,37 @@ class MealPlanRequest(BaseModel):
     # was the only macro instruction the planner had.
     match_macros: bool = Field(default=False, description="Hold every day to the user's macro targets")
 
+class AdaptationRequirements(BaseModel):
+    """
+    What an adaptation is allowed to change.
+
+    Typed and bounded rather than an open dictionary. The old
+    `Dict[str, Any]` accepted anything at all and forwarded it verbatim into
+    the prompt, which is both a quota-abuse vector and a way to smuggle
+    instructions past the restriction handling below.
+
+    Note what is NOT here: any way to REMOVE a dietary restriction. Additional
+    restrictions may be added; the ones the plan was built with are preserved
+    by the service regardless of what arrives here or in the free-text
+    feedback.
+    """
+    target_calories: Optional[int] = Field(None, gt=0, le=10000)
+    meals_per_day: Optional[int] = Field(None, ge=1, le=6)
+    dietary_restrictions: Optional[List[str]] = Field(
+        None, max_length=20, description="Additional restrictions to ADD")
+    food_preferences: Optional[List[str]] = Field(None, max_length=30)
+    budget_per_day: Optional[float] = Field(None, ge=0)
+    region_or_cuisine: Optional[str] = Field(None, max_length=80)
+
+
 class MealPlanAdaptationRequest(BaseModel):
     current_plan: Dict[str, Any] = Field(..., description="Current meal plan to adapt")
-    feedback: str = Field(..., description="User feedback on the current plan")
-    new_requirements: Optional[Dict[str, Any]] = Field(None, description="New requirements or preferences")
+    feedback: str = Field(..., min_length=1, max_length=2000,
+                          description="User feedback on the current plan")
+    new_requirements: Optional[AdaptationRequirements] = Field(
+        None, description="New requirements or preferences")
+    match_macros: bool = Field(
+        default=False, description="Hold every adapted day to the user's macro targets")
 
 @router.post("/advanced-meal-planner/generate", status_code=201)
 async def generate_advanced_meal_plan(
@@ -76,6 +103,39 @@ async def generate_advanced_meal_plan(
                     status_code=400,
                     detail="Set a nutrition goal first and the plan can be built around your macros.",
                 )
+            if not target.complete:
+                # Strict mode against a goal with no protein/carb/fat numbers
+                # cannot produce a meaningful verdict - zero targets are
+                # trivially "missed" by everything and trivially "hit" by a
+                # plan totalling zero. Say what is missing instead of
+                # reporting a verification nobody can act on.
+                raise HTTPException(
+                    status_code=400,
+                    detail=("Your nutrition goal is missing "
+                            + ", ".join(target.missing_fields())
+                            + ". Set all four numbers to match macros, or turn "
+                              "off macro matching for a calorie-only plan."),
+                )
+
+            # ONE authoritative calorie target. The form's target_calories and
+            # the goal's calorie figure are two different numbers that both
+            # used to reach the prompt, so the model was told to hit 1800 and
+            # 2400 simultaneously and the verification then judged it against
+            # the goal it never prioritised.
+            requested = float(request.target_calories)
+            resolved = float(target.calories)
+            drift = abs(requested - resolved) / resolved if resolved else 0.0
+            if drift > macro_targets.CALORIE_TOLERANCE:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(f"Macro matching uses your goal's {resolved:.0f} kcal, "
+                            f"but this form asked for {requested:.0f} kcal. Set the "
+                            f"form to {resolved:.0f}, or turn off macro matching to "
+                            f"plan at {requested:.0f} kcal."),
+                )
+            # Within tolerance: align the payload to the resolved target so the
+            # prompt and the verification agree on one number.
+            payload["target_calories"] = int(round(resolved))
 
         result = advanced_meal_planner_service.generate_meal_plan(payload, macro_target=target)
 
@@ -84,9 +144,16 @@ async def generate_advanced_meal_plan(
             # Attached to the plan itself so it survives being saved and
             # restored - a verification that vanishes on reload is not much of
             # a record.
+            #
+            # ALWAYS attached, not only in macro mode. Gating it on `target`
+            # meant a standard-mode plan carried no verification at all, so a
+            # 500 kcal/day week was returned while the UI showed the model's
+            # own meta.total_daily_calories - and every dietary advisory,
+            # "may contain" warning and unverifiable-restriction notice was
+            # dropped at this boundary. The checks ran; nobody saw them.
+            plan["verification"] = result.get("verification")
             if target:
                 plan["macro_target"] = target.as_dict()
-                plan["verification"] = result.get("verification")
             return {
                 "success": True,
                 "message": "Advanced meal plan generated successfully",
@@ -111,29 +178,80 @@ async def generate_advanced_meal_plan(
         raise HTTPException(status_code=500, detail=f"Meal planner error — {detail}")
 
 @router.post("/advanced-meal-planner/adapt", status_code=200)
-async def adapt_advanced_meal_plan(request: MealPlanAdaptationRequest):
+async def adapt_advanced_meal_plan(
+    request: MealPlanAdaptationRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
     """
-    Adapt an existing meal plan based on user feedback using AdvancedMealPlanner AI agent.
+    Adapt an existing meal plan based on user feedback.
+
+    Authenticated, like generation. It was not: anyone could POST an arbitrary
+    dictionary and spend a reasoning-tier generation on it, and there was no
+    authenticated user to recover the macro targets or restrictions from -
+    which is why adaptation could silently drop them.
     """
     try:
+        requirements = (request.new_requirements.dict(exclude_none=True)
+                        if request.new_requirements else {})
+
+        target = None
+        if request.match_macros:
+            target = macro_targets.resolve(db, current_user,
+                                           meal_type="full_day", basis="daily")
+            if target is None or not target.complete:
+                missing = (", ".join(target.missing_fields()) if target
+                           else "a nutrition goal")
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Cannot match macros while adapting: {missing} not set.",
+                )
+
+        # Restrictions come from the authenticated user's own plan metadata and
+        # the typed requirements - never parsed out of the free-text feedback,
+        # which is exactly how "make it creamier" used to be able to remove a
+        # dairy-free requirement.
+        target_calories = requirements.get("target_calories")
+        if target is not None:
+            target_calories = int(round(target.calories))
+
         result = advanced_meal_planner_service.adapt_meal_plan(
             current_plan=request.current_plan,
             feedback=request.feedback,
-            new_requirements=request.new_requirements
+            new_requirements=requirements or None,
+            meals_per_day=requirements.get("meals_per_day"),
+            restrictions=requirements.get("dietary_restrictions"),
+            target_calories=target_calories,
+            macro_target=target,
         )
-        
+
         if result["success"]:
+            plan = result["adapted_plan"]
+            if target:
+                plan["macro_target"] = target.as_dict()
+            plan["verification"] = result.get("verification")
             return {
                 "success": True,
                 "message": "Meal plan adapted successfully",
-                "data": result["adapted_plan"]
+                "data": plan,
             }
-        else:
-            raise HTTPException(status_code=500, detail=result.get("error", "Failed to adapt meal plan"))
-            
+
+        # A rejected adaptation is the caller's input being unusable, not a
+        # server fault - 422 so the frontend can show the reason rather than a
+        # generic 500.
+        raise HTTPException(
+            status_code=422,
+            detail=result.get("error", "Failed to adapt meal plan"),
+        )
+
+    except HTTPException:
+        # Re-raise untouched. Wrapping it in another 500 below lost the
+        # specific reason the service reported.
+        raise
     except Exception as e:
-        logger.error(f"Error in adapt_advanced_meal_plan endpoint: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to adapt meal plan: {str(e)}")
+        detail = f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
+        logger.error("adapt_advanced_meal_plan failed: %s", detail, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Meal planner error — {detail}")
 
 @router.get("/advanced-meal-planner/equipment-options")
 async def get_equipment_options():

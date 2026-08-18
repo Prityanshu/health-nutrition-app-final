@@ -78,6 +78,28 @@ class MacroTarget:
         """Below this there is nothing sensible to cook toward."""
         return self.calories >= 120
 
+    @property
+    def complete(self) -> bool:
+        """
+        Are all four numbers actually usable for STRICT matching?
+
+        A goal row with target_calories set but protein/carbs/fat left NULL
+        resolves to zeros here. Zero is not a target - `bounds()` turns it
+        into the range 0-0, every plan misses it, and (worse) a plan totalling
+        exactly zero of that macro would "hit" it. Strict mode must refuse to
+        run against numbers like that rather than reporting a meaningless
+        verdict.
+        """
+        return (self.calories >= 120 and self.protein > 0
+                and self.carbs > 0 and self.fat > 0)
+
+    def missing_fields(self) -> List[str]:
+        """Which macro targets are unusable, for a precise error message."""
+        out = [m for m in ("protein", "carbs", "fat") if getattr(self, m) <= 0]
+        if self.calories < 120:
+            out.insert(0, "calories")
+        return out
+
     def describe(self) -> str:
         """One line for the UI."""
         return (f"{self.calories:.0f} kcal · {self.protein:.0f}g protein · "
@@ -460,6 +482,19 @@ def verify_structured(target: "MacroTarget", plan: Dict[str, Any]) -> Dict[str, 
     if not isinstance(days, dict) or not days:
         return {"checked": False, "reason": "No days found in the plan.", "days": []}
 
+    # Strict matching against a target that is not fully populated cannot
+    # produce a meaningful verdict - see MacroTarget.complete. Refuse rather
+    # than reporting "hit" because a zero target was trivially satisfied.
+    if not target.complete:
+        return {
+            "checked": False,
+            "reason": ("The macro goal is incomplete: "
+                       + ", ".join(target.missing_fields())
+                       + " not set. Set them on your nutrition goal to match macros."),
+            "days": [],
+            "incomplete_target": True,
+        }
+
     bounds = target.bounds()
     per_day: List[Dict[str, Any]] = []
 
@@ -494,6 +529,7 @@ def verify_structured(target: "MacroTarget", plan: Dict[str, Any]) -> Dict[str, 
         result["missed"] = [m for m, r in result["macros"].items()
                             if r["status"] != "on_target"]
         result["hit"] = not result["missed"]
+        result["energy"] = _energy_consistency(totals)
         per_day.append(result)
 
     if not per_day:
@@ -507,20 +543,103 @@ def verify_structured(target: "MacroTarget", plan: Dict[str, Any]) -> Dict[str, 
             tally[macro] = tally.get(macro, 0) + 1
     worst = sorted(tally.items(), key=lambda kv: -kv[1])
 
+    inconsistent = [d["day"] for d in per_day if not d["energy"]["consistent"]]
+
+    # "All N days inside every range" was the old summary regardless of N, so
+    # a ONE-day plan reported "All 1 days inside every range" and read as a
+    # pass. Completeness is enforced structurally now, but the summary should
+    # not be able to imply a full week either.
+    complete_week = len(per_day) >= 7
+    if len(hits) == len(per_day) and complete_week:
+        summary = f"All {len(per_day)} days inside every range."
+    elif len(hits) == len(per_day):
+        summary = (f"All {len(per_day)} of the days present are inside every "
+                   f"range, but only {len(per_day)} day(s) were found.")
+    else:
+        summary = (f"{len(hits)} of {len(per_day)} days hit every macro"
+                   + (f"; {worst[0][0]} was off on {worst[0][1]}." if worst else "."))
+    if inconsistent:
+        summary += (f" Reported calories do not match protein/carbs/fat on: "
+                    f"{', '.join(inconsistent)}.")
+
     return {
         "checked": True,
-        "hit": len(hits) == len(per_day),
+        "hit": len(hits) == len(per_day) and complete_week and not inconsistent,
         "days_on_target": len(hits),
         "days_total": len(per_day),
         "days": per_day,
         "weakest": [{"macro": m, "days": n} for m, n in worst],
-        "summary": (
-            f"All {len(per_day)} days inside every range."
-            if len(hits) == len(per_day)
-            else f"{len(hits)} of {len(per_day)} days hit every macro"
-                 + (f"; {worst[0][0]} was off on {worst[0][1]}." if worst else ".")
-        ),
+        "energy_inconsistent_days": inconsistent,
+        "summary": summary,
     }
+
+
+# 4 kcal/g for protein and carbohydrate, 9 kcal/g for fat - the Atwater
+# factors every nutrition label is built on.
+_ATWATER = {"protein": 4.0, "carbs": 4.0, "fat": 9.0}
+# Generous on purpose. Fibre, sugar alcohols, rounding on every individual
+# ingredient and the Atwater factors themselves being approximations all move
+# this a few percent; only a MATERIAL gap means the numbers were invented.
+ENERGY_TOLERANCE = 0.15
+
+
+def _energy_consistency(totals: Dict[str, float]) -> Dict[str, Any]:
+    """
+    Do the stated calories actually match the stated macros?
+
+    Catches a plan whose meals claim 2000 kcal while their protein, carbs and
+    fat add up to 1200 - the macros and the calories cannot both be right, and
+    without this check the day passes whichever one the verifier happened to
+    look at.
+    """
+    derived = sum(_ATWATER[m] * float(totals.get(m) or 0.0) for m in _ATWATER)
+    stated = float(totals.get("calories") or 0.0)
+    if stated <= 0:
+        return {"consistent": derived <= 0, "stated": round(stated),
+                "derived": round(derived), "gap": round(derived - stated)}
+    gap = abs(derived - stated) / stated
+    return {
+        "consistent": gap <= ENERGY_TOLERANCE,
+        "stated": round(stated),
+        "derived": round(derived),
+        "gap": round(derived - stated),
+        "gap_fraction": round(gap, 3),
+    }
+
+
+def macro_distance(verification: Optional[Dict[str, Any]]) -> float:
+    """
+    How far off target a plan is, as one comparable number. Lower is better.
+
+    The mean relative miss across every macro of every day, counting only the
+    part that falls OUTSIDE the acceptable range. Replaces comparing
+    `days_on_target` directly, which is not a distance at all: a one-day plan
+    with one good day scored 1 and a seven-day plan with six good days scored
+    6, so on the old comparison a single correct day could never win - but a
+    one-day plan whose day was perfect scored the same as a seven-day plan
+    with one perfect day, and the tie went to whichever was checked last.
+    Averaging per day makes plans of different lengths comparable, and the
+    structural gate above means an incomplete week never reaches this
+    comparison in the first place.
+    """
+    if not verification or not verification.get("checked"):
+        # Unverified is not "perfect". Rank it worse than any measured plan so
+        # a candidate we could not check never wins on a score of zero.
+        return float("inf")
+    days = verification.get("days") or []
+    if not days:
+        return float("inf")
+
+    total = 0.0
+    count = 0
+    for day in days:
+        for macro, result in (day.get("macros") or {}).items():
+            target = result.get("target") or 0
+            if not target:
+                continue
+            total += abs(result.get("delta") or 0) / target
+            count += 1
+    return (total / count) if count else float("inf")
 
 
 def _num(value) -> float:
@@ -530,8 +649,14 @@ def _num(value) -> float:
         return 0.0
 
 
-def retry_brief_structured(verification: Dict[str, Any], target: "MacroTarget") -> str:
-    """What to fix on a second attempt at a 7-day plan."""
+def retry_brief_structured(verification: Dict[str, Any],
+                           target: Optional["MacroTarget"] = None) -> str:
+    """What to fix on a second attempt at a 7-day plan.
+
+    `target` is unused - every number needed is already in `verification` -
+    and optional so the combined retry brief in meal_plan_contract can call
+    this without threading the target object through.
+    """
     lines = ["Several days did not meet the nutritional target. Fix these days only, "
              "and leave the days that were already correct exactly as they are:"]
     for day in verification.get("days", []):
