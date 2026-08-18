@@ -435,10 +435,23 @@ _PRESCRIBES_WORK = re.compile(
 )
 
 
+# Breathing and relaxation cues, which are the cooldown's own commentary -
+# "Breathing/relaxation", "Relax your shoulders". Guarded by the SAME
+# dosage test as every other instruction rule, which is what keeps a
+# genuinely prescribed breathing drill a prescription: "Breathing drill: 3
+# sets of 5 breaths" and "Diaphragmatic breathing: 2 minutes" both carry
+# real dosage and are exercises, so neither reaches this rule. Anchored at
+# the start of the line, so "Focus on slow breathing" is handled by the
+# ordinary FOCUS instruction rule rather than by anything about breathing.
+_RECOVERY_CUE = re.compile(r"^(?:relax|relaxation|breathing|breathe)\b", re.I)
+
+
 def _is_general_instruction(body: str) -> bool:
     """A whole instructional sentence about HOW to train, not what to do."""
     if _PRESCRIBES_WORK.search(body):
         return False
+    if _RECOVERY_CUE.match(body):
+        return True
     return bool(_GENERAL_INSTRUCTION.match(body))
 
 # A line made ENTIRELY of numbers and dosage vocabulary - "3 sets", "3 sets

@@ -185,12 +185,16 @@ _RULES: List[tuple] = [
      {"hip_extension"}),
 
     # --- upper body pushing and pulling ------------------------------------
-    (r"overhead press|shoulder press|military press|push press|jerk|"
+    (r"overhead\s+(?:(?:band|resistance[\s-]?band|dumbbell|db|barbell|bb|"
+     r"cable|kettlebell|kb|machine)\s+)?press|"
+     r"shoulder press|military press|push press|jerk|"
      r"handstand|pike push|behind[\s-]?the[\s-]?neck|arnold press|"
      r"landmine press|z press",
      {"vertical_push", "overhead"}),
     (r"bench press|chest press|push[\s-]?up|floor press|dip\b|dips\b|"
-     r"chest (?:fly|flye)|pec deck|cable crossover|incline press|decline press",
+     r"chest (?:fly|flye)|pec deck|cable crossover|"
+     r"(?:in|de)cline\s+(?:(?:dumbbell|db|barbell|bb|machine|smith|cable|"
+     r"kettlebell|kb)\s+)?press",
      {"horizontal_push"}),
     (r"pull[\s-]?up|chin[\s-]?up|lat pulldown|pulldown|"
      r"straight[\s-]?arm pulldown",
@@ -201,7 +205,7 @@ _RULES: List[tuple] = [
     (r"lateral raise|side raise|front raise|rear delt|reverse fly",
      {"shoulder_rotation"}),
     (r"external rotation|internal rotation|cuban press|rotator cuff|"
-     r"band pull[\s-]?apart",
+     r"pull[\s-]?apart",
      {"shoulder_rotation"}),
     (r"upright row",
      {"vertical_pull", "shoulder_rotation"}),
@@ -219,7 +223,8 @@ _RULES: List[tuple] = [
      r"hollow|jackknife",
      {"spinal_flexion"}),
     (r"russian twist|woodchop|wood chop|cable rotation|twist|"
-     r"landmine rotation|medicine ball throw|med ball throw",
+     r"landmine rotation|medicine ball throw|med ball throw|"
+     r"thoracic\s+(?:spine\s+)?rotation",
      {"spinal_rotation"}),
     (r"plank|dead[\s-]?bug|bird[\s-]?dog|pallof|anti[\s-]?rotation|"
      r"suitcase|side plank",
@@ -299,7 +304,7 @@ _RULES: List[tuple] = [
     (r"isometric|hold\b|holds\b|wall sit|static hold|iso ",
      {"isometric"}),
     (r"stretch|mobility|yoga|forward fold|toe touch|downward dog|"
-     r"pigeon|butterfly|splits|pnf|hamstring stretch",
+     r"pigeon|butterfly|splits|pnf|hamstring stretch|cat[\s-]?cow",
      {"end_range_stretch"}),
     (r"cycle|cycling|bike|elliptical|rowing machine|erg\b|ergometer|"
      r"ski erg|air bike|assault bike|swim|swimming|pool|aqua|stationary|"

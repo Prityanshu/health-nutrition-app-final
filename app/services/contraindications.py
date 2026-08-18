@@ -594,16 +594,32 @@ def classify_line(line: str, profiles: list) -> dict:
         }
 
     # A prescription candidate the ontology could not read. Cautious by
-    # design when an injury is active - not gated on whether the line also
-    # happens to mention a set/rep/round, which is the bug this replaced.
-    if profiles:
+    # design whenever any active profile actually restricts something - not
+    # gated on whether the line also happens to mention a set/rep/round,
+    # which is the bug this replaced.
+    #
+    # The gate is "does any profile restrict ANY pattern", deliberately NOT
+    # "does any profile restrict a STRUCTURAL pattern". The narrower version
+    # was proposed and rejected: it would keep an unknown name whenever the
+    # only restrictions were velocity/impact, and the names most likely to
+    # be missing from the ontology are exactly the plyometric ones -
+    # "Ankle pogo" and "A-skips" are unrecognised today and may well be
+    # jumping. Under a velocity-exempt gate, "no jumping" plus "Ankle pogo"
+    # would pass, which is the precise bypass this verdict exists to stop.
+    #
+    # What DOES change: a profile whose restricted set is genuinely empty -
+    # a 0/10 or 1/10 injury at the `return` stage, which restricts nothing
+    # at all - no longer makes every unclassifiable line conditional. There
+    # is nothing to be cautious about, so caution costs training for no
+    # safety gain.
+    if any(profile.restricted_patterns() for profile in profiles):
         return {
             "line": text,
             "verdict": VERDICT_CONDITIONAL,
             "patterns": [],
             "clash": [],
-            "reasons": ["could not be classified while an injury is active - "
-                        "treated cautiously rather than assumed safe"],
+            "reasons": ["could not be classified while a movement restriction "
+                        "is active - treated cautiously rather than assumed safe"],
         }
     return {"line": text, "verdict": VERDICT_UNKNOWN, "patterns": [],
             "clash": [], "reasons": []}
