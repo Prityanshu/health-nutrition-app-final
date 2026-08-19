@@ -472,16 +472,29 @@ def repaired_plan_audit_clean_matches_reality():
 
 
 def adjustment_note_is_not_a_prescription():
-    """PROBLEM 3 - test 11: adjustment-note bullets are structurally
-    non-exercise, not prescription candidates."""
+    """PROBLEM 3 - test 11: the repair log stays OUT of the workout.
+
+    This used to assert that the appended "Adjustment Notes" block parsed as
+    non-exercise. The block is no longer appended at all - it buried the
+    session under internal bookkeeping, and every swap is already in
+    RepairResult.as_dict(). What matters now is that the returned Markdown is
+    only the workout, and that the note builder (still used by callers that
+    want the prose) remains structurally non-exercise."""
     from app.services import plan_repair
     from app.services import plan_structure as ps
-    print(f"\n{BOLD}P3.11 — the adjustment note is not a prescription{RESET}")
+    print(f"\n{BOLD}P3.11 — the adjustment note stays out of the workout{RESET}")
 
     hamstring = ["hamstring strain (severity 6/10)"]
     r = plan_repair.repair("- Romanian deadlift: 3x8\n- Bench press: 4x6", hamstring)
-    check("a note was actually appended", "\n\n---" in r.plan, f"{r.plan!r}")
-    note_only = r.plan.split("\n\n---", 1)[1]
+    check("no note is appended to the returned plan",
+          "\n\n---" not in r.plan and "Adjustment Notes" not in r.plan,
+          f"{r.plan!r}")
+    check("the swap is still reported in the structured result",
+          bool(r.as_dict()["replacements"]), r.as_dict())
+
+    # The builder itself must stay safe for any caller that renders it.
+    note = plan_repair._append_note(r)
+    note_only = note.split("\n\n---", 1)[1]
     items = ps.parse(note_only)
     check("every structural item inside the note is NON_EXERCISE",
           bool(items) and all(i.role == ps.NON_EXERCISE for i in items), f"{items}")
@@ -2027,13 +2040,22 @@ def decoration_is_not_dosage():
               plan_repair._dosage_suffix(line) == expected,
               plan_repair._dosage_suffix(line))
 
+    # "Power Pull" is a genuine unknown prescription. Under an active injury
+    # it is now REMOVED fail-closed rather than swapped for a guess, and its
+    # owned block - the nested dosage - goes with it. The emoji-as-dosage
+    # assertions above already prove the parsing point directly.
     r = plan_repair.repair("- **Power Pull (2 min)** – 🏋️‍♂️\n  - 3 sets x 8 reps",
                            ["lower back pain, severity 6/10"])
     live = r.plan.split("\n\n---")[0]
-    check("the repaired line carries no emoji-as-dosage",
-          "🏋" not in live.splitlines()[0], f"{live!r}")
-    check("the genuine nested dosage is still preserved",
-          live.splitlines()[1] == "  - 3 sets x 8 reps", f"{live!r}")
+    check("the unknown prescription does not survive an active injury",
+          "Power Pull" not in live, f"{live!r}")
+    check("its owned dosage line is removed with it",
+          "3 sets x 8 reps" not in live, f"{live!r}")
+    check("no emoji is carried into whatever remains", "🏋" not in live, f"{live!r}")
+    check("nothing was invented in its place",
+          not any(w in live.lower() for w in
+                  ("stationary bike", "elliptical", "brisk walk", "rowing machine")),
+          f"{live!r}")
 
 
 def mutation_check_instruction_wrapper_recovery():

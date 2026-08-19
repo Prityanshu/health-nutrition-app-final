@@ -25,7 +25,17 @@ class FitMentorService:
             # afterward regardless of source - the model's job is plan
             # quality within already-enforced bounds, not the safety
             # decision itself.
-            model=GroqWithFallback(id=get_reasoning_model(), fallback_id=get_fast_model()),
+            # max_retries bounds the GROQ SDK's own retrying, which defaults
+            # to 2 - three HTTP attempts per logical Agent.run(), each with
+            # exponential backoff. On a 429 that backoff is wasted here: rate
+            # limits are handled by rotating API keys, and GroqWithFallback
+            # cannot rotate until the SDK stops sleeping, which is why one
+            # call was observed waiting 32s then 21s on an exhausted key. One
+            # retry keeps resilience to a transient network blip; key
+            # rotation handles the rest. Set per-agent, so the four other
+            # services sharing GroqWithFallback are unaffected.
+            model=GroqWithFallback(id=get_reasoning_model(),
+                                   fallback_id=get_fast_model(), max_retries=1),
             description=dedent("""\
                 You are FitMentor, a knowledgeable and motivating personal fitness coach. 🏋️‍♂️
                 
@@ -220,7 +230,7 @@ class FitMentorService:
             # own copy of the severity regex; two parsers for one field is how
             # they drift apart, and this one decides whether we refuse.
             from app.services import injury_taxonomy as taxonomy
-            profiles = taxonomy.parse_all(constraints)
+            profiles = taxonomy.profiles_for(constraints)
 
             # Above roughly 7/10 a modified plan is the wrong output entirely.
             # Handing someone a "hamstring friendly" week when they have rated
@@ -321,12 +331,12 @@ class FitMentorService:
             try:
                 from app.services import plan_repair
 
-                def _regenerate(brief: str) -> str:
-                    """Ask the model again, told what to fix."""
-                    retry = f"{prompt}\n\n{brief}"
-                    again = self.fitness_agent.run(retry)
-                    return again.content if hasattr(again, "content") else str(again)
-
+                # No `regenerate` callback. Quality evaluation stays, as
+                # advisory metadata on the result, but it no longer buys
+                # another model call: MAX_REGENERATIONS=2 meant one request
+                # could make three full generations, and under Groq rate
+                # limiting each of those carried its own backoff. Generation
+                # is one call.
                 result = plan_repair.repair(
                     workout_plan,
                     constraints,
@@ -335,7 +345,6 @@ class FitMentorService:
                     goal=fitness_goal,
                     sport=sport,
                     level=activity_level,
-                    regenerate=_regenerate,
                 )
                 workout_plan = result.plan
                 repair_meta = result.as_dict()
@@ -586,16 +595,12 @@ class FitMentorService:
                 try:
                     from app.services import plan_repair
 
-                    def _regenerate(brief: str) -> str:
-                        retry = f"{prompt}\n\n{brief}"
-                        again = self.fitness_agent.run(retry)
-                        return again.content if hasattr(again, "content") else str(again)
-
+                    # Adaptation is one model call too - no quality-driven
+                    # regeneration. See generate_workout_plan.
                     result = plan_repair.repair(
                         adapted_plan, constraints, equipment=equipment,
                         requested_minutes=time_per_day, goal=fitness_goal,
                         sport=sport, level=activity_level,
-                        regenerate=_regenerate,
                     )
                     adapted_plan = result.plan
                     repair_meta = result.as_dict()

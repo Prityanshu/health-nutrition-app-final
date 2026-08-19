@@ -604,6 +604,39 @@ def phase21_properties():
         finding("LOW", 21, f"{unknown_count} corpus items unclassified")
 
 
+# What area each generated constraint MUST resolve to. A generic complaint is
+# allowed to land on a region rather than a named diagnosis - "knee pain" must
+# not invent an ACL tear - but it may never land somewhere unrelated.
+_EXPECTED_REGION = {
+    "ankle": {"ankle"},
+    "asthma": {"respiratory"},
+    "elbow": {"elbow"},
+    "hamstring": {"thigh"},
+    "hernia": {"abdomen"},
+    "hip": {"hip_groin"},
+    "it_band": {"knee", "thigh"},
+    "knee": {"knee"},
+    "lower_back": {"lumbar"},
+    "neck": {"neck"},
+    "plantar_fasciitis": {"foot"},
+    "sciatica": {"lumbar"},
+    "shin_splints": {"lower_leg"},
+    "shoulder": {"shoulder"},
+    "wrist": {"wrist"},
+}
+
+# Constraint + exercise pairs that reached the user with audit_clean=True.
+_LEAK_PROBES = [
+    ("shoulder pain (severity 5/10)", "Cable chest fly: 3x12"),
+    ("hip pain (severity 6/10)", "Romanian deadlift: 3x8"),
+    ("sciatica (severity 6/10)", "Russian twist: 3x12"),
+    ("sore elbow (severity 6/10)", "Cable triceps pushdown: 3x12"),
+    ("thoracic pain (severity 6/10)", "Thoracic rotation: 3x10 each side"),
+    ("thoracic pain (severity 6/10)", "Barbell back squat: 3x5"),
+    ("shoulder impingement and knee pain (severity 6/10)", "Leg press: 3x10"),
+]
+
+
 def phase2_live_path():
     """
     The join that matters: constraints are BUILT by one system and PARSED by
@@ -611,6 +644,7 @@ def phase2_live_path():
     """
     from app.services import contraindications as c
     from app.services import injury_taxonomy as it
+    from app.services import plan_repair, plan_structure
     header("2b", "live path - do built constraints survive re-parsing?")
 
     # Reproduce what injury_service.as_constraints() emits, without a database.
@@ -620,17 +654,68 @@ def phase2_live_path():
         constraint = (f"{label} (severity 5/10, {stage['label']}). {stage['guidance']}"
                       f" Avoid: {', '.join(entry.all_excluded()[:16])}.")
         parsed = it.parse(constraint)
+        expected = _EXPECTED_REGION.get(key)
         if not parsed:
             finding("CRITICAL", "2b", f"{key!r} constraint does not parse at all",
                     f"{constraint[:100]}...\nNo restrictions would be applied.")
         elif not parsed.condition and not parsed.region:
             finding("HIGH", "2b", f"{key!r} parses with no condition and no region",
                     "Falls back to speed-only restrictions.")
+        elif expected and parsed.region not in expected:
+            # THE check this phase exists for. Accepting any non-null
+            # condition is what let "shoulder -> cervical", "sciatica ->
+            # hamstring" and "elbow -> wrist" print as successes while the
+            # wrong restriction set was being applied to the real plan.
+            finding("HIGH", "2b",
+                    f"{key!r} resolves to the WRONG area: "
+                    f"{getattr(parsed.condition, 'key', None)}/{parsed.region}",
+                    f"Expected one of {sorted(expected)}. The generated "
+                    f"Avoid/Use-instead text is being read as the diagnosis.")
         elif not parsed.condition:
-            finding("MEDIUM", "2b", f"{key!r} resolves only to region {parsed.region!r}",
-                    "Region fallback is coarser than the condition rules.")
+            # A region without a named diagnosis is legitimate: generic
+            # "knee pain" must not invent an ACL tear. Only note it.
+            ok(f"{key} -> {parsed.region} region")
         else:
-            ok(f"{key} -> {parsed.condition.key}")
+            ok(f"{key} -> {parsed.condition.key}/{parsed.region}")
+
+    # The enriched constraint must not diagnose differently from the bare
+    # description it was built from - that difference IS the corruption.
+    for key in c.CONTRAINDICATIONS:
+        label = key.replace("_", " ")
+        stage = c.stage_for(6)
+        entry = c.CONTRAINDICATIONS[key]
+        enriched = (f"{label} (severity 6/10, {stage['label']}). {stage['guidance']}"
+                    f" Avoid: {', '.join(entry.all_excluded()[:16])}."
+                    f" Use instead: {', '.join(list(getattr(entry, 'substitutions', []) or [])[:4])}.")
+        bare, rich = it.parse(label, 6), it.parse(enriched)
+        if not bare or not rich:
+            continue
+        if (getattr(bare.condition, "key", None), bare.region) != \
+           (getattr(rich.condition, "key", None), rich.region):
+            finding("HIGH", "2b",
+                    f"{key!r} diagnoses differently once guidance is appended",
+                    f"bare={getattr(bare.condition,'key',None)}/{bare.region} "
+                    f"enriched={getattr(rich.condition,'key',None)}/{rich.region}")
+    ok("enriched constraints diagnose identically to their source description")
+
+    # End to end, not just the parser: the exact returned plan must be clean.
+    for constraint, exercise in _LEAK_PROBES:
+        plan = f"## Day 1\n- {exercise}\n- Seated calf raise: 3x15\n"
+        result = plan_repair.repair(plan, [constraint])
+        body = result.plan.split("**Adjustment Notes**")[0]
+        prescribed = "\n".join(
+            i.body for i in plan_structure.quality_subjects(plan_structure.parse(body)))
+        name = exercise.split(":")[0]
+        residual = c.audit_plan(result.plan, [constraint])
+        if name.lower() in prescribed.lower():
+            finding("HIGH", "2b", f"{name!r} survives repair under {constraint[:40]!r}",
+                    "The final plan still prescribes a contraindicated movement.")
+        elif residual:
+            finding("HIGH", "2b", f"re-auditing the returned plan is dirty ({name})",
+                    f"{len(residual)} finding(s) remain in the exact text returned.")
+        elif not result.audit_clean:
+            finding("MEDIUM", "2b", f"audit_clean is False despite a clean re-audit ({name})")
+    ok(f"{len(_LEAK_PROBES)} end-to-end leak probes return a clean final plan")
 
 
 PHASES = {

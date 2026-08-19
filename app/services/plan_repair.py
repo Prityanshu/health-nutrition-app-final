@@ -256,6 +256,101 @@ def _dosage_suffix(original_line: str) -> str:
     return dosage
 
 
+# ---------------------------------------------------------------------------
+# dosage modality - a prescription only transfers to a replacement that is
+# measured the same way
+# ---------------------------------------------------------------------------
+#
+# The dosage used to be copied across verbatim, which produced prescriptions
+# that cannot be performed:
+#
+#     "Box jumps - 3 x 5"          ->  "Brisk walk: 3 x 5"
+#     "Sprint intervals - 6 x 20m" ->  "Brisk walk: 6 x 20 m"
+#     "Cat-Cow: 2 x 10"            ->  "Stationary bike: 2 x 10"
+#
+# Sets-and-reps belong to resistance work, a duration belongs to timed work,
+# and a distance belongs to locomotion. Carrying one onto the other is not a
+# smaller safety problem, it is an unusable plan.
+
+# "m" is spelt out carefully: "min" must not read as metres.
+_DOSAGE_DISTANCE = re.compile(
+    r"\d+\s*(?:m|km|kms|metres?|meters?|miles?|yards?|yds?)(?![a-z])", re.I)
+# Sets x duration - "3 x 45 sec". Valid for anything held for time.
+_DOSAGE_SETS_TIME = re.compile(
+    r"\d+\s*[x×]\s*\d+\s*(?:s|sec|secs|second|seconds|min|mins|minute|minutes)"
+    r"(?![a-z])", re.I)
+# Sets x reps - "4 x 8". Checked after the two above, so "6 x 20 m" and
+# "3 x 45 sec" are not mistaken for repetitions.
+_DOSAGE_SETS_REPS = re.compile(r"\d+\s*[x×]\s*\d+|\b\d+\s*(?:reps?|sets?|rounds?)\b",
+                               re.I)
+_DOSAGE_TIME = re.compile(
+    r"\b\d+\s*(?:s|sec|secs|second|seconds|min|mins|minute|minutes|hrs?|hours?)"
+    r"(?![a-z])", re.I)
+
+# Catalogue purposes whose exercises are prescribed by TIME, not repetitions.
+# The ontology's `isometric` pattern is checked alongside it, because a plank
+# is held for time whatever slot it fills - its catalogue purpose is "core".
+_TIMED_PURPOSES = {"conditioning", "isometric"}
+
+
+def _dosage_modality(dosage: str) -> Optional[str]:
+    """
+    How this dosage measures work: distance, time, or repetitions.
+
+    None means it carries no measurement at all - "each side", "@ RPE 7" -
+    which is safe to keep beside anything.
+    """
+    if not dosage:
+        return None
+    if _DOSAGE_DISTANCE.search(dosage):
+        return "distance"
+    if _DOSAGE_SETS_TIME.search(dosage):
+        return "time"
+    if _DOSAGE_SETS_REPS.search(dosage):
+        return "reps"
+    if _DOSAGE_TIME.search(dosage):
+        return "time"
+    return None
+
+
+def _is_timed_exercise(exercise_name: str) -> Optional[bool]:
+    """
+    Is this replacement prescribed by time rather than repetitions?
+
+    None when the name is not in the catalogue at all - the caller then
+    refuses to transfer anything, because an unknown modality is not a
+    licence to guess.
+    """
+    from app.services import exercise_catalogue as catalogue
+    for candidate in catalogue._RAW:
+        if candidate.name == exercise_name:
+            return (candidate.purpose in _TIMED_PURPOSES
+                    or "isometric" in (candidate.patterns or set()))
+    return None
+
+
+def _dosage_transfers(dosage: str, replacement: str) -> bool:
+    """
+    May this dosage be carried onto this replacement?
+
+    Distance never transfers: nothing in the catalogue is prescribed by
+    distance, and a sprint's "6 x 20 m" is meaningless on a squat or a bike.
+    Time transfers only to work that is held or sustained; repetitions only
+    to work that is counted. When it does not transfer the dosage is dropped
+    rather than converted - inventing "10 min" for an exercise the user never
+    asked for would be fabricating a prescription.
+    """
+    modality = _dosage_modality(dosage)
+    if modality is None:
+        return True
+    if modality == "distance":
+        return False
+    timed = _is_timed_exercise(replacement)
+    if timed is None:
+        return False
+    return timed if modality == "time" else not timed
+
+
 def _apply(plan_text: str, decisions: Dict[int, Replacement]) -> str:
     """
     Rewrite the plan, keeping the original bullet formatting.
@@ -308,6 +403,8 @@ def _apply(plan_text: str, decisions: Dict[int, Replacement]) -> str:
             continue
         prefix = re.match(r"^\s*(?:[-*•+]|\d+[.)])?\s*", raw).group(0)
         dosage = _dosage_suffix(raw)
+        if dosage and not _dosage_transfers(dosage, decision.replacement):
+            dosage = ""
         line = f"{decision.replacement}: {dosage}" if dosage else decision.replacement
         out.append(f"{prefix}{line}")
     return "\n".join(out)
@@ -457,7 +554,7 @@ def repair(
         VERDICT_CONDITIONAL, assess_plan, audit_against_profiles,
     )
 
-    profiles = [p for p in (taxonomy.parse(c) for c in (constraints or [])) if p]
+    profiles = taxonomy.profiles_for(constraints)
 
     attempt = 0
     result = _repair_once(plan_text, profiles, equipment, requested_minutes, goal, sport, level)
@@ -519,18 +616,14 @@ def repair(
         result.removed += [v["line"] for v in unresolved]
 
     result.still_inadequate = not result.quality.get("adequate", True)
-    result.plan = _append_note(result)
 
-    # FINAL audit, sweep two: audit_clean is measured against the EXACT
-    # string this function is about to return - note included - not the
-    # pre-note plan. A note whose own bullets were misread as prescriptions
-    # would otherwise leave audit_clean=True while the actual returned text
-    # still carried an unresolved candidate; `_append_note` structures the
-    # note under a recognised plan_structure non-exercise heading precisely
-    # so that does not happen, and this is what actually verifies it rather
-    # than assuming it. Read-only on purpose - nothing strips further from
-    # an already-assembled note; a finding here is a bug to fix in how the
-    # note is built, not something to silently repair away.
+    # The repair log is NOT appended to the workout any more. Every swap and
+    # removal is already in RepairResult.as_dict(), and duplicating it inside
+    # the Markdown buried the actual session under a wall of internal
+    # bookkeeping. The caller decides what, if anything, to show.
+
+    # FINAL audit: audit_clean is measured against the EXACT string this
+    # function is about to return.
     result.audit_clean = (
         not audit_against_profiles(result.plan, profiles)
         and not any(v["verdict"] == VERDICT_CONDITIONAL
@@ -567,26 +660,26 @@ def _repair_once(plan_text, profiles, equipment, requested_minutes, goal, sport,
     for verdict in conditional:
         if verdict["line_no"] in decisions:
             continue
-        decision = _find_replacement(verdict["line"], profiles, equipment, used)
-        # FAIL CLOSED: whether or not a substitute was found, this line
-        # always gets a decision recorded now. The previous version only
-        # recorded one when `decision.replacement` was truthy - if nothing
-        # safe could be proposed, the line was never added to `decisions` at
-        # all, so _apply() left it in the plan completely unchanged. An
-        # unclassifiable movement during an active injury with no validated
-        # safe substitute must be REMOVED, not kept on the assumption that
-        # "could not classify" means "probably fine".
-        if decision.replacement:
-            decision.reason = ("could not be classified while an injury is active, "
-                               "so it was replaced with something known to be safe")
-            used.add(decision.replacement)
-        else:
-            decision.reason = ("could not be classified while an injury is active, "
-                               "and no validated safe substitute exists - removed "
-                               "rather than kept unverified")
-            logger.warning("Unclassifiable line removed (no safe substitute): %r",
-                           verdict["line"][:60])
-        decisions[verdict["line_no"]] = decision
+        # FAIL CLOSED BY REMOVAL, never by substitution.
+        #
+        # A CONDITIONAL line is one the ontology could not read. Its movement
+        # PURPOSE is therefore unknown, and _find_replacement() has nothing to
+        # preserve - it fell through to its generic conditioning fallback and
+        # invented an exercise out of nothing. That is how "Warm-up - 10 min"
+        # became "Stationary bike, steady pace: 10 min" and a whole session
+        # turned into four different cardio machines.
+        #
+        # Removing the line is the honest fail-closed action: it does not
+        # pretend to know what the user was meant to be doing. Recognised
+        # unsafe exercises are still substituted above, because there the
+        # purpose IS known.
+        decisions[verdict["line_no"]] = Replacement(
+            original=verdict["line"], replacement=None,
+            reason=("could not be classified while an injury is active - "
+                    "removed rather than kept unverified"),
+        )
+        logger.info("Unclassifiable line removed under active constraint: %r",
+                    verdict["line"][:60])
 
     repaired = _apply(plan_text, decisions)
     replacements = [d for d in decisions.values() if d.substituted]

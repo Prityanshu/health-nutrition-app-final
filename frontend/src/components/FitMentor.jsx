@@ -293,6 +293,11 @@ export default function FitMentor({ apiBase }) {
   const isRestored = !adapted && !result && Boolean(saved);
   const detected = adapted?.contraindications;
   const stages = result?.injury_stages;
+  // The plan Markdown no longer carries an "Adjustment Notes" block - the
+  // detail lives in the structured repair metadata. Summarise it in one line
+  // rather than reprinting every internal swap on top of the workout.
+  const repair = adapted?.repair || result?.repair;
+  const changedCount = (repair?.replacements?.length || 0) + (repair?.removed?.length || 0);
 
   // Injuries already being tracked on the dashboard, minus any the user has
   // added here - offering a duplicate import is just noise.
@@ -642,6 +647,22 @@ export default function FitMentor({ apiBase }) {
                   getting looked at before you train that area at all.
                 </div>
               )}
+            </div>
+          )}
+
+          {changedCount > 0 && (
+            <div style={{
+              fontSize: '0.8125rem', color: 'var(--text-muted)',
+              display: 'flex', alignItems: 'center', gap: '0.5rem',
+              padding: '0.625rem 0.875rem', borderRadius: '0.625rem',
+              background: 'rgba(var(--warning-rgb),0.07)',
+              border: '1px solid rgba(var(--warning-rgb),0.2)',
+            }}>
+              <ShieldAlert size={15} color="var(--warning)" style={{ flexShrink: 0 }} />
+              <span>
+                Adjusted for your injury restrictions: {changedCount}{' '}
+                {changedCount === 1 ? 'exercise was' : 'exercises were'} changed.
+              </span>
             </div>
           )}
 

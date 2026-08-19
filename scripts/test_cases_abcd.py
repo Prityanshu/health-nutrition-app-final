@@ -234,13 +234,24 @@ def unknown_handling():
         check(f"instruction not treated as an exercise: {line.strip('* ')[:26]}",
               c.classify_line(line, injured)["verdict"] == c.VERDICT_UNKNOWN)
 
-    # And a conditional line is replaced rather than trusted.
+    # And a conditional line is REMOVED rather than trusted.
+    #
+    # It used to be swapped for "something known", but nothing is known about
+    # it: an unclassifiable line has no movement purpose to preserve, so the
+    # substitute was drawn from a generic conditioning list. That is how
+    # "Main lifts - 55 min" came back as "Elliptical, steady pace: 55 min".
+    # Removing it fails closed without inventing a prescription.
     from app.services import plan_repair
     r = plan_repair.repair(invented + "\n* Bench press: 4x6",
                            ["hamstring strain (severity 6/10)"])
-    check("conditional line is swapped for something known",
-          any(x.original.strip() == invented.strip() for x in r.replacements),
+    check("conditional line does not survive an active injury",
+          invented.strip("* ").strip() not in r.plan, r.plan)
+    check("conditional line is removed, not swapped for a guess",
+          not any(x.original.strip() == invented.strip() for x in r.replacements),
           f"replacements={[(x.original, x.replacement) for x in r.replacements]}")
+    check("...and the removal is recorded",
+          any(invented.strip("* ").strip() in x for x in r.removed), r.removed)
+    check("...while known-safe work is kept", "Bench press" in r.plan, r.plan)
 
 
 def healthy_controls():

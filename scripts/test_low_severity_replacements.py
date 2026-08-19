@@ -280,10 +280,18 @@ def end_to_end():
                   "- Bench press: 4x6")
     blocked = plan_repair.repair(block_plan, [constraint])
     block_live = blocked.plan.split("\n\n---")[0].splitlines()
-    check("a replaced/removed conditional block keeps its dosage with it",
-          "  - 3 sets x 8 reps" in block_live and "- Bench press: 4x6" in block_live
-          and not any(l.strip() == "- Blurgle flurbing" for l in block_live),
+    # An unclassifiable prescription is now REMOVED rather than swapped for a
+    # generic conditioning exercise, so its owned block goes with it - a
+    # dosage line left behind would be orphaned under whatever followed.
+    check("a removed conditional block takes its owned dosage with it",
+          not any(l.strip() == "- Blurgle flurbing" for l in block_live)
+          and "  - 3 sets x 8 reps" not in block_live
+          and "- Bench press: 4x6" in block_live,
           block_live)
+    check("...and nothing was invented in its place",
+          not any(word in blocked.plan.lower() for word in
+                  ("stationary bike", "elliptical", "brisk walk", "rowing machine")),
+          blocked.plan)
 
     # Regeneration bounds untouched.
     check("MAX_REGENERATIONS is still 2", plan_repair.MAX_REGENERATIONS == 2)

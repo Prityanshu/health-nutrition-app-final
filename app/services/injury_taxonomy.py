@@ -448,6 +448,16 @@ _REGION_HINTS = {
     "lower_leg": ["shin", "calf", "achilles", "tibia"],
     "foot": ["foot", "heel", "toe", "arch", "plantar"],
     "ankle": ["ankle"],
+    # Thoracic must be tested BEFORE lumbar: "thoracic spine" and "upper back"
+    # both contain a lumbar hint ("spine", "back"), so a later entry would
+    # never win. "lower back" contains neither thoracic hint, so it still
+    # resolves to lumbar.
+    # Unambiguous thoracic wording only. "rib" and "scapula" were tempting but
+    # belong to other complaints as often as this one, and these hints now
+    # pre-empt the CONDITIONS scan (see parse), so a loose entry here would
+    # suppress a real diagnosis elsewhere.
+    "thoracic": ["thoracic", "t-spine", "t spine", "mid back", "mid-back",
+                 "midback", "upper back", "upper-back"],
     "lumbar": ["back", "lumbar", "spine", "disc"],
     "hip_groin": ["hip", "groin", "adductor", "pelvis"],
     "elbow": ["elbow"],
@@ -467,8 +477,17 @@ _REGION_FALLBACK = {
     "lower_leg": {"running", "jumping", "impact", "calf_raise", "high_speed"},
     "foot": {"running", "jumping", "impact", "calf_raise"},
     "ankle": {"running", "jumping", "cutting", "impact", "unilateral"},
+    # No diagnosis is claimed from the word "thoracic" - this is the same
+    # cautious region fallback every other region gets, built from existing
+    # movement-pattern identifiers. Rotation and axial load are what a painful
+    # mid-back actually objects to; overhead work drives it into extension.
+    "thoracic": {"spinal_rotation", "axial_load", "overhead", "vertical_push"},
     "lumbar": {"hip_hinge", "spinal_flexion", "axial_load", "spinal_rotation"},
-    "hip_groin": {"squat", "lunge", "hip_adduction", "hip_abduction", "cutting"},
+    # hip_hinge belongs here: a Romanian deadlift is a maximal loaded hip
+    # hinge and was leaking past a correctly-identified hip injury because
+    # only squat/lunge patterns were listed.
+    "hip_groin": {"squat", "lunge", "hip_adduction", "hip_abduction", "cutting",
+                  "hip_hinge"},
     "elbow": {"gripping", "elbow_flexion", "elbow_extension"},
     "wrist": {"gripping", "horizontal_push"},
     "neck": {"axial_load", "overhead", "vertical_push"},
@@ -736,6 +755,94 @@ def _detect_severity(text: str, default: Optional[int] = None) -> Optional[int]:
     return default
 
 
+# injury_service.as_constraints() appends machine-generated prose after the
+# injury itself: the stage guidance, an "Avoid: ..." exclusion list and a
+# "Use instead: ..." substitution list, all looked up from CONTRAINDICATIONS
+# by body part. That prose is full of anatomy words, and diagnosing from it
+# read the wrong injury entirely:
+#
+#   "shoulder pain"  + "Avoid: ... behind-the-neck work"     -> cervical/neck
+#   "sore elbow"     + "Avoid: ... wrist curls"              -> wrist/wrist
+#   "sciatica"       + "Avoid: ... seated hamstring stretch" -> hamstring/thigh
+#   "hip pain"       + "Avoid: ... groin ..."                -> adductor
+#
+# Every one of those then applied the wrong restriction set and the final
+# audit reported clean. The diagnosis must come from what the USER said, so
+# the generated tail is cut before any condition or region matching. The full
+# text is still kept as `raw`, and severity is still read from the generated
+# severity clause because that value is factual rather than inferred.
+# as_constraints() always writes "(severity N/10, <stage label>)" - the stage
+# label after the comma is what marks the clause as machine-written, and
+# everything from there on is generated. A severity a USER typed has no stage
+# label, so only the clause itself is dropped and the rest of their sentence
+# survives: "knee pain (severity 5/10) and shoulder pain" must keep the
+# shoulder.
+# The marker must be the EXACT grammar as_constraints() writes - a severity
+# followed by one of the real stage labels - and nothing looser. Accepting any
+# text after the comma treated "knee pain (severity 5/10, improving) and
+# shoulder pain" as machine-generated and silently deleted the shoulder.
+# Built from STAGES so a renamed stage cannot quietly stop matching.
+_GENERATED_CLAUSE_RE: Optional[re.Pattern] = None
+
+
+def _stage_labels() -> set:
+    """
+    Every stage label the app can write into a constraint.
+
+    There are two stage vocabularies: injury_taxonomy.STAGES drives the
+    profile, while injury_service.as_constraints() writes the label from
+    contraindications.stage_for(). Both are enumerated from their own
+    definitions, so renaming a stage cannot silently stop the marker matching.
+    """
+    labels = {s.label for s in STAGES}
+    try:  # lazy: contraindications imports this module inside its functions
+        from app.services.contraindications import stage_for
+        labels |= {stage_for(s)["label"] for s in range(0, 11)}
+    except Exception:  # pragma: no cover - import guard
+        pass
+    return {label for label in labels if label}
+
+
+def _generated_clause() -> re.Pattern:
+    global _GENERATED_CLAUSE_RE
+    if _GENERATED_CLAUSE_RE is None:
+        alternatives = "|".join(
+            re.escape(label) for label in sorted(_stage_labels(), key=len, reverse=True))
+        _GENERATED_CLAUSE_RE = re.compile(
+            r"\s*\(\s*severity\s*\d+\s*/\s*10\s*,\s*(?:" + alternatives
+            + r")\s*\).*$", re.I | re.S)
+    return _GENERATED_CLAUSE_RE
+
+# A severity a user typed, with no stage label. Only the clause is removed;
+# whatever they wrote around it survives.
+_PLAIN_SEVERITY = re.compile(r"\s*\(\s*severity\s*\d+\s*/\s*10\s*\)", re.I)
+
+_GENERATED_TAIL = re.compile(
+    r"\s(?:Avoid:|Use instead:|This is the (?:left|right) side only\b)", re.I)
+
+
+def diagnostic_subject(text: str, keep_severity: bool = False) -> str:
+    """
+    The part of a constraint that describes the INJURY, with any machine
+    generated guidance removed.
+
+    Text a user typed themselves is left intact apart from a bare severity
+    clause, so "wrist pain; avoid jumping" keeps both halves.
+
+    `keep_severity` leaves user-typed severity clauses in place, which
+    parse_many() needs: "wrist pain (severity 2/10) and knee pain (severity
+    7/10)" has a different severity per injury, and stripping them first threw
+    that away.
+    """
+    if not text:
+        return ""
+    subject = _generated_clause().sub("", text)
+    if not keep_severity:
+        subject = _PLAIN_SEVERITY.sub(" ", subject)
+    subject = _GENERATED_TAIL.split(subject, maxsplit=1)[0]
+    return subject.strip() or text.strip()
+
+
 def parse(text: str, severity: Optional[int] = None) -> Optional[InjuryProfile]:
     """
     Turn a free-text injury description into structure.
@@ -743,18 +850,33 @@ def parse(text: str, severity: Optional[int] = None) -> Optional[InjuryProfile]:
     Returns None only when the text says nothing injury-like at all. An
     unrecognised condition still returns a profile with a region, because
     "some shoulder thing I can't name" must not be treated as no injury.
+
+    Condition and region come from `diagnostic_subject(text)`, never from the
+    generated guidance that may follow it - see the comment above.
     """
     if not text or not text.strip():
         return None
 
-    lowered = text.lower()
+    subject = diagnostic_subject(text)
+    lowered = subject.lower()
     resolved_severity = _detect_severity(text, severity)
 
+    # An explicit thoracic phrase wins over the CONDITIONS scan. "upper back
+    # pain" and "mid back pain" contain the lumbar trigger "back pain", so the
+    # condition scan claimed them first and applied lumbar rules - which at
+    # the controlled stage restrict neither spinal_rotation nor overhead,
+    # while the thoracic fallback restricts both. A mid-back complaint was
+    # therefore handed thoracic rotation with audit_clean=True. No diagnosis
+    # is claimed here; the region fallback is the whole point.
+    thoracic = any(re.search(rf"(?<!\w){re.escape(h)}", lowered)
+                   for h in _REGION_HINTS.get("thoracic", ()))
+
     condition = None
-    for candidate in CONDITIONS:
-        if any(t in lowered for t in candidate.triggers):
-            condition = candidate
-            break
+    if not thoracic:
+        for candidate in CONDITIONS:
+            if any(t in lowered for t in candidate.triggers):
+                condition = candidate
+                break
 
     region = condition.region if condition else None
     if not region:
@@ -793,7 +915,7 @@ def parse(text: str, severity: Optional[int] = None) -> Optional[InjuryProfile]:
         condition=condition,
         region=region,
         severity=resolved,
-        side=_detect_side(text),
+        side=_detect_side(subject),
         stage=stage_for_severity(resolved),
         red_flags=flags,
     )
@@ -855,11 +977,169 @@ def brief(profiles: List[InjuryProfile]) -> str:
     return "\n            ".join(lines)
 
 
+# One constraint string can name more than one injury. parse() returns the
+# FIRST match, so "shoulder impingement and knee pain" became a shoulder
+# problem and the knee was silently lost - a leg press then sailed through
+# with audit_clean=True. Splitting the diagnostic subject into clauses and
+# parsing each keeps both.
+_CLAUSE_SPLIT = re.compile(
+    r"\s*(?:[;,]|\band\b|\bbut\b|\bwith\b|\bplus\b|\balso\b|\bas well as\b)\s+", re.I)
+
+# A clause that says an injury is ABSENT must not create one.
+_NEGATED_CLAUSE = re.compile(r"^\s*(?:no|not|without|never|nothing)\b", re.I)
+
+# Circumstance, not injury: in "knee pain after a shoulder workout" the
+# shoulder is where they were training, not what hurts. Everything from the
+# context word on is dropped before matching, so the anatomy that owns the
+# complaint is the one that wins.
+_CONTEXT_CLAUSE = re.compile(
+    r"\b(?:after|following|during|since|from|because\s+of|due\s+to|while)\b", re.I)
+
+
+def _split_clauses(subject: str) -> List[str]:
+    """
+    Split on separators that sit OUTSIDE parentheses.
+
+    Severity clauses are carried through the split so each injury keeps its
+    own rating, and "(severity 5/10, improving)" contains a comma that must
+    not become a clause boundary.
+    """
+    def scan(respect_parens: bool):
+        parts: List[str] = []
+        depth = start = index = 0
+        while index < len(subject):
+            char = subject[index]
+            if respect_parens and char == "(":
+                depth += 1
+            elif respect_parens and char == ")":
+                depth = max(0, depth - 1)
+            elif depth == 0:
+                match = _CLAUSE_SPLIT.match(subject, index)
+                if match and match.end() > match.start():
+                    parts.append(subject[start:index])
+                    start = index = match.end()
+                    continue
+            index += 1
+        parts.append(subject[start:])
+        return [p for p in parts if p.strip()], depth
+
+    parts, depth = scan(True)
+    if depth:
+        # An unclosed parenthesis would swallow every later separator, and
+        # "knee pain (severity 5/10 and shoulder pain" then resolved to the
+        # shoulder alone - the knee vanished. Malformed input must not cost an
+        # injury, so rescan without paren tracking.
+        parts, _ = scan(False)
+    return parts
+
+
+def parse_many(text: str, severity: Optional[int] = None) -> List[InjuryProfile]:
+    """
+    Every injury named in one constraint string, not just the first.
+
+    Falls back to the single-profile parse when clause splitting finds
+    nothing, so a description that does not decompose behaves exactly as it
+    did before.
+    """
+    if not text or not str(text).strip():
+        return []
+
+    text = str(text)
+    # Severity clauses are kept while splitting, because each injury may carry
+    # its own: "wrist pain (severity 2/10) and knee pain (severity 7/10)" gave
+    # the knee the wrist's 2/10, and at 2/10 a knee has speed restrictions
+    # only - a leg press walked straight through.
+    subject = diagnostic_subject(text, keep_severity=True)
+    fallback_severity = _detect_severity(text, severity)
+    overall_side = _detect_side(subject)
+
+    profiles: List[InjuryProfile] = []
+    seen = set()
+    negated_only = False
+    for clause in _split_clauses(subject):
+        clause = clause.strip()
+        if not clause:
+            continue
+        if _NEGATED_CLAUSE.match(clause):
+            negated_only = True
+            continue
+        core = _CONTEXT_CLAUSE.split(clause, maxsplit=1)[0].strip() or clause
+        # This clause's own severity wins; the string-level or supplied value
+        # is only a fallback for a clause that states none.
+        clause_severity = _detect_severity(core, None)
+        profile = parse(core, clause_severity if clause_severity is not None
+                        else fallback_severity)
+        if profile is None:
+            continue
+        # A fragment must actually resolve to something. "left and right knee
+        # pain" splits into "left" and "right knee pain"; the bare side word
+        # inherits the severity and would otherwise become a second, empty
+        # injury. An unrecognised whole description ("costochondritis 6/10")
+        # is still kept, by the single-parse fallback below.
+        if not (profile.condition or profile.region or profile.red_flags
+                or getattr(profile, "explicit_patterns", None)):
+            continue
+        key = (getattr(profile.condition, "key", None), profile.region,
+               tuple(sorted(getattr(profile, "explicit_patterns", ()) or ())))
+        if key in seen:
+            continue
+        seen.add(key)
+        profiles.append(profile)
+
+    if not profiles:
+        if negated_only:
+            # Every clause said an injury was ABSENT. Falling through to the
+            # single parse ignored the negation and invented the very injury
+            # the user had just ruled out ("no knee pain" -> a knee injury).
+            # An explicit restriction stated alongside it still counts.
+            explicit_only = parse_explicit_restriction(text)
+            return [explicit_only] if explicit_only else []
+        single = parse(text, severity)
+        return [single] if single else []
+
+    # "left and right knee pain" splits into "left" and "right knee pain": the
+    # bare side word resolves to nothing, so only the whole subject knows both
+    # sides are involved. Promote to bilateral ONLY when every profile is the
+    # same region - in "left wrist pain and right knee pain" the two sides
+    # belong to different injuries, and marking both bilateral would restrict
+    # two healthy limbs for no reason.
+    regions = {profile.region for profile in profiles}
+    if overall_side == "bilateral" and len(regions) == 1:
+        for profile in profiles:
+            profile.side = "bilateral"
+    elif overall_side and len(profiles) == 1 and not profiles[0].side:
+        profiles[0].side = overall_side
+
+    # An explicit restriction stated alongside an injury ("wrist pain; avoid
+    # jumping") is carried by parse() as extra_restricted on every profile
+    # built from the full text. Re-apply it here, because the clause-level
+    # parses only ever saw their own fragment.
+    explicit = parse_explicit_restriction(text)
+    if explicit:
+        for profile in profiles:
+            if not isinstance(profile, ExplicitRestriction):
+                profile.extra_restricted = (
+                    set(profile.extra_restricted or set())
+                    | set(explicit.explicit_patterns))
+
+    return profiles
+
+
 def parse_all(constraints) -> List[InjuryProfile]:
     """Parse a list of constraint strings, dropping anything unrecognisable."""
-    out = []
+    out: List[InjuryProfile] = []
     for c in constraints or []:
-        p = parse(str(c))
-        if p:
-            out.append(p)
+        out.extend(parse_many(str(c)))
     return out
+
+
+def profiles_for(constraints) -> List[InjuryProfile]:
+    """
+    THE way to turn constraint strings into injury profiles.
+
+    fitmentor_service, contraindications and plan_repair each used to build
+    this list themselves - two of them with a bare `parse()` comprehension,
+    which is how the multi-injury and generated-guidance bugs reached some
+    paths but not others. One helper means one behaviour everywhere.
+    """
+    return parse_all(constraints)

@@ -498,7 +498,7 @@ def audit_plan(plan_text: str, constraints: List[str]) -> List[dict]:
         print(f"Pattern engine unavailable ({e}); falling back to name matching.")
         return _audit_by_name(plan_text, constraints)
 
-    profiles = [p for p in (taxonomy.parse(c) for c in constraints) if p]
+    profiles = taxonomy.profiles_for(constraints)
     if not profiles:
         return []
 

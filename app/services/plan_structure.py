@@ -232,13 +232,37 @@ _COOL_DOWN_HEADING = re.compile(r"cool[\s-]?down|stretch", re.I)
 # optional generic suffix, an optional short identifier) - never by asking
 # what the words mean.
 # ---------------------------------------------------------------------------
-_GROUP_LABEL = re.compile(
-    r"^(?:warm[\s-]?up|cool[\s-]?down|main|mobility|activation|strength|"
+_SECTION_WORD = (
+    r"warm[\s-]?up|cool[\s-]?down|main|mobility|activation|strength|"
     r"conditioning|finisher|circuit|block|superset|recovery|cardio|core|"
-    r"accessory|primer|workout|session)"
+    r"accessory|primer|workout|session"
+)
+
+# A section label may carry a TIME ALLOCATION - "Warm-up - 10 min", "Main
+# lifts - 55 min". Without this the trailing duration read as dosage, the
+# label became a prescription candidate, and (with an injury active) repair
+# swapped it for a conditioning exercise: "Main lifts - 55 min" came back as
+# "Elliptical, steady pace: 55 min". Only a BARE duration qualifies - a line
+# with sets, reps, "x" or an RPE is prescribing something and is left alone.
+# Minutes and hours only. A section allocation is measured in minutes;
+# SECONDS are a rest interval, and allowing them turned the instruction
+# "Recovery: 60 seconds" into a structural container.
+_ALLOCATION = (
+    r"(?:\s*[-–—:]?\s*(?:\(\s*)?\d+\s*(?:-\s*\d+\s*)?"
+    r"(?:min(?:ute)?s?|hrs?|hours?)\b\s*\)?)?"
+)
+
+_GROUP_LABEL = re.compile(
+    r"^(?:" + _SECTION_WORD + r")"
+    # "Accessory & Core", "Strength + Conditioning", "Mobility Circuit"
+    r"(?:\s*(?:&|\+|and|\s)\s*(?:" + _SECTION_WORD + r"))*"
     r"(?:\s+(?:workout|block|session|sequence|phase|segment|part|section|"
-    r"routine))?"
-    r"(?:\s+[a-z0-9]{1,3})?"
+    r"routine|lifts|lift|work|exercises|drills))?"
+    # A short block identifier - "Block A", "Circuit 1". Capped at two
+    # characters: at three it began eating real words, so "Recovery run:
+    # 20 minutes" parsed as the section "Recovery" with identifier "run".
+    r"(?:\s+[a-z0-9]{1,2})?"
+    + _ALLOCATION +
     r"\s*:?\s*$",
     re.I,
 )
@@ -347,6 +371,24 @@ _INSTRUCTION_LINE = re.compile(
     r"|cue\s*:"
     r"|breathe\b"
     r"|hydrat"
+    r")",
+    re.I,
+)
+
+# A line that OPENS by naming what is being left out is stating an exclusion,
+# not prescribing it: "Removed: any jogging or dynamic leg swings" was read as
+# a prescription of jogging.
+#
+# This is applied ONLY to lines that carry no dosage (see _role_for_body),
+# the same guard every other whole-sentence instruction rule uses. Without it
+# the rule swallowed real exercises whose names simply begin with one of these
+# words - "Skip drills: 3x20", "No hands burpees: 3x10" - and they left the
+# safety pipeline entirely. Anchored at the start on purpose: "Romanian
+# deadlift, no jumping" still prescribes the deadlift.
+_AVOIDANCE_LINE = re.compile(
+    r"^(?:"
+    r"(?:removed|excluded|omitted|dropped|skipped|swapped\s+out)\b"
+    r"|(?:avoid(?:ing)?|omit|exclude|skip|no|not)\s+(?:any\s+|all\s+)?[a-z]"
     r")",
     re.I,
 )
@@ -510,6 +552,9 @@ def _clean_body(raw: str) -> str:
 
 def _role_for_body(body: str) -> str:
     if _INSTRUCTION_LINE.match(body):
+        return INSTRUCTION
+    # Exclusion prose, but only when it prescribes no work of its own.
+    if _AVOIDANCE_LINE.match(body) and not _PRESCRIBES_WORK.search(body):
         return INSTRUCTION
     if _REST_DAY.search(body) or _SAFETY_CUE.search(body) or _COACHING_CUE.search(body):
         return INSTRUCTION
